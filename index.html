@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>신앙일지 | Faith Log</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+</head>
+<body>
+    <div class="layout" id="main-layout">
+        <header class="brunch-header">
+            <div class="header-left">
+                <h1>Faith Log</h1>
+                <span class="sub-logo">기록이 믿음이 되는 순간</span>
+            </div>
+            <div class="header-right">
+                <div class="search-container">
+                    <i class="ph ph-magnifying-glass"></i>
+                    <input type="text" id="search-input" placeholder="검색">
+                </div>
+                <div class="auth-area">
+                    <span id="user-email-display" class="user-display hidden"></span>
+                    <button id="login-trigger-btn" class="login-btn-header">로그인</button>
+                    <button id="logout-btn" class="login-btn-header hidden">로그아웃</button>
+                </div>
+            </div>
+        </header>
+
+        <div class="nav-row">
+            <nav class="tabs" id="tab-container"></nav>
+            <div class="nav-actions">
+                <div class="sort-control">
+                    <select id="sort-criteria" class="sort-select">
+                        <option value="created">날짜순</option>
+                        <option value="modified">수정순</option>
+                        <option value="title">제목순</option>
+                    </select>
+                    <button id="sort-order-btn" class="icon-nav-btn">
+                        <i id="sort-icon" class="ph ph-sort-descending"></i>
+                    </button>
+                </div>
+                <div class="divider-vertical"></div>
+                <button id="trash-btn" class="icon-nav-btn trash" title="휴지통">
+                    <i class="ph ph-trash"></i>
+                </button>
+            </div>
+        </div>
+
+        <main id="entry-list" class="entry-stream"></main>
+
+        <button id="write-btn" class="floating-pen">
+            <i class="ph ph-pencil-simple"></i>
+        </button>
+    </div>
+
+    <div id="login-modal" class="full-screen-modal hidden">
+        <div class="login-wrapper">
+            <div class="login-content">
+                <div class="login-logo"><h2>Faith Log</h2><p>로그인하여 소중한 기록을 보관하세요.</p></div>
+                <form id="login-form">
+                    <div class="input-field"><input type="email" id="login-email" placeholder="이메일 주소" required></div>
+                    <div class="input-field"><input type="password" id="login-pw" placeholder="비밀번호" required></div>
+                    <div class="login-actions">
+                        <label class="check-container"><input type="checkbox" id="auto-login-check" checked><span class="checkmark"></span>자동 로그인</label>
+                        <label class="check-container"><input type="checkbox" id="save-id-check"><span class="checkmark"></span>아이디 저장</label>
+                    </div>
+                    <button type="submit" class="btn-login-submit">로그인</button>
+                </form>
+                <div class="login-footer"><button id="signup-btn">회원가입</button><span class="separator">·</span><button id="forgot-pw-btn">비밀번호 찾기</button></div>
+                <button id="close-login-btn" class="btn-close-modal"><i class="ph ph-x"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <div id="reset-pw-modal" class="modal-overlay hidden">
+        <div class="simple-modal">
+            <h3>비밀번호 재설정</h3>
+            <p>가입한 이메일로 링크를 보내드립니다.<br><span style="color:#EF4444; font-size:12px;">(스팸함을 꼭 확인해주세요!)</span></p>
+            <input type="email" id="reset-email" placeholder="이메일 주소">
+            <div class="modal-btns"><button id="send-reset-btn" class="primary-btn">전송</button><button id="close-reset-btn" class="cancel-btn">취소</button></div>
+        </div>
+    </div>
+
+    <div id="write-modal" class="full-screen-modal hidden">
+        <div class="write-header">
+            <button id="close-write-btn" class="text-btn">취소</button>
+            <span class="write-category" id="display-category">설교</span>
+            <button id="publish-btn" class="publish-btn">발행</button>
+        </div>
+        <div class="editor-container">
+            <input type="text" id="edit-title" class="editor-title" placeholder="제목" autocomplete="off">
+            <input type="text" id="edit-subtitle" class="editor-subtitle" placeholder="소제목" autocomplete="off">
+            <div class="divider"></div>
+            <div id="editor-body" class="editor-body" contenteditable="true" placeholder="이곳에 은혜를 기록하세요..."></div>
+        </div>
+        <div class="editor-toolbar">
+            <div class="tool-group">
+                <select id="font-selector" class="font-select"><option value="Pretendard">고딕</option><option value="Noto Serif KR">명조</option><option value="Nanum Pen Script">손글씨</option></select>
+                <div class="font-size-controls"><button class="tool-btn small" onclick="changeFontSize(-2)">가-</button><button class="tool-btn small" onclick="changeFontSize(2)">가+</button></div>
+            </div>
+            <div class="toolbar-divider"></div>
+            <div class="tool-group"><button class="tool-btn" id="btn-bold"><i class="ph ph-text-b"></i></button><button class="tool-btn" id="btn-italic"><i class="ph ph-text-italic"></i></button></div>
+            <div class="toolbar-divider"></div>
+            <div class="tool-group"><button class="tool-btn" id="sticker-btn"><i class="ph ph-smiley"></i></button></div>
+        </div>
+        <div id="sticker-palette" class="sticker-palette hidden"><div id="sticker-grid" class="sticker-grid"></div></div>
+    </div>
+
+    <div id="read-modal" class="full-screen-modal hidden">
+        <div class="read-header">
+            <button id="close-read-btn" class="back-btn"><i class="ph ph-caret-left"></i> 목록</button>
+            <div class="read-actions">
+                <button id="share-read-btn" class="text-btn share" title="공유하기">
+                    <i class="ph ph-share-network"></i>
+                </button>
+                <button id="edit-read-btn" class="text-btn primary">수정</button>
+                <button id="delete-read-btn" class="text-btn danger">삭제</button>
+            </div>
+        </div>
+        <div class="read-content-area">
+            <div class="read-meta">
+                <span id="read-category" class="meta-category"></span>
+                <span id="read-date" class="meta-date"></span>
+            </div>
+            <h1 id="read-title"></h1>
+            <h3 id="read-subtitle"></h3>
+            <div class="divider"></div>
+            <div id="read-body" class="article-body"></div>
+        </div>
+    </div>
+
+    <div id="trash-modal" class="full-screen-modal hidden">
+        <div class="read-header">
+            <button id="close-trash-btn" class="back-btn"><i class="ph ph-x"></i> 닫기</button>
+            <span>휴지통</span><div style="width: 50px;"></div>
+        </div>
+        <div class="trash-container"><div id="trash-list" class="entry-stream"></div></div>
+    </div>
+
+    <script type="module" src="script.js"></script>
+</body>
+</html>
