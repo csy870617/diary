@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>신앙일지 | Faith Log</title>
     <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
@@ -56,6 +56,40 @@
         </button>
     </div>
 
+    <div id="category-context-menu" class="context-menu hidden">
+        <button class="ctx-item" id="ctx-cat-rename"><i class="ph ph-pencil-simple"></i> 이름 변경</button>
+        <div class="float-divider" style="width: 100%; height: 1px; background: #eee; margin: 4px 0;"></div>
+        <button class="ctx-item danger" id="ctx-cat-delete"><i class="ph ph-trash"></i> 삭제</button>
+    </div>
+
+    <div id="context-menu" class="context-menu hidden">
+        <button class="ctx-item" id="ctx-move"><i class="ph ph-folder-notch"></i> 주제 이동</button>
+        <button class="ctx-item" id="ctx-lock"><i class="ph ph-lock"></i> 잠그기</button>
+        <button class="ctx-item" id="ctx-copy"><i class="ph ph-copy"></i> 복사본 만들기</button>
+        <div class="float-divider" style="width: 100%; height: 1px; background: #eee; margin: 4px 0;"></div>
+        <button class="ctx-item danger" id="ctx-delete"><i class="ph ph-trash"></i> 삭제</button>
+    </div>
+
+    <div id="move-modal" class="modal-overlay hidden">
+        <div class="simple-modal">
+            <h3>주제 이동</h3>
+            <div id="move-category-list" class="category-select-list"></div>
+            <div class="modal-btns"><button id="close-move-btn" class="cancel-btn">취소</button></div>
+        </div>
+    </div>
+
+    <div id="lock-modal" class="modal-overlay hidden">
+        <div class="simple-modal">
+            <h3 id="lock-modal-title">비밀번호 설정</h3>
+            <p id="lock-modal-desc" style="font-size: 13px; color: #666; margin-bottom: 10px;">이 글을 열 때 사용할 비밀번호를 입력하세요.</p>
+            <input type="password" id="lock-pw-input" placeholder="비밀번호 (4자리 이상)" maxlength="20">
+            <div class="modal-btns">
+                <button id="confirm-lock-btn" class="primary-btn">확인</button>
+                <button id="close-lock-btn" class="cancel-btn">취소</button>
+            </div>
+        </div>
+    </div>
+
     <div id="login-modal" class="full-screen-modal hidden">
         <div class="login-wrapper">
             <div class="login-content">
@@ -74,11 +108,11 @@
             </div>
         </div>
     </div>
-
+    
     <div id="reset-pw-modal" class="modal-overlay hidden">
         <div class="simple-modal">
             <h3>비밀번호 재설정</h3>
-            <p>가입한 이메일로 링크를 보내드립니다.<br><span style="color:#EF4444; font-size:12px;">(스팸함을 꼭 확인해주세요!)</span></p>
+            <p>가입한 이메일로 링크를 보내드립니다.</p>
             <input type="email" id="reset-email" placeholder="이메일 주소">
             <div class="modal-btns"><button id="send-reset-btn" class="primary-btn">전송</button><button id="close-reset-btn" class="cancel-btn">취소</button></div>
         </div>
@@ -90,53 +124,86 @@
             <span class="write-category" id="display-category">설교</span>
             <button id="publish-btn" class="publish-btn">발행</button>
         </div>
+        <div class="editor-toolbar">
+            <div class="tool-group">
+                <select id="font-selector" class="font-select"><option value="Pretendard">고딕</option><option value="Noto Serif KR">명조</option><option value="Nanum Pen Script">손글씨</option></select>
+                <div class="font-size-controls"><button class="tool-btn small" onclick="changeGlobalFontSize(-2)">가-</button><button class="tool-btn small" onclick="changeGlobalFontSize(2)">가+</button></div>
+            </div>
+            <div class="toolbar-divider"></div>
+            <div class="tool-group"><button class="tool-btn" id="sticker-btn"><i class="ph ph-smiley"></i></button></div>
+        </div>
+        <div id="color-palette-popup" class="color-palette-popup hidden">
+            <div class="color-grid">
+                <button class="color-dot" style="background-color: #000000;" data-color="#000000"></button>
+                <button class="color-dot" style="background-color: #EF4444;" data-color="#EF4444"></button>
+                <button class="color-dot" style="background-color: #F59E0B;" data-color="#F59E0B"></button>
+                <button class="color-dot" style="background-color: #10B981;" data-color="#10B981"></button>
+                <button class="color-dot" style="background-color: #3B82F6;" data-color="#3B82F6"></button>
+                <button class="color-dot" style="background-color: #8B5CF6;" data-color="#8B5CF6"></button>
+                <button class="color-dot picker-trigger" id="custom-color-btn"><i class="ph ph-paint-bucket"></i></button>
+            </div>
+        </div>
+        <input type="color" id="color-picker" style="display:none;">
+        <div id="sticker-palette" class="sticker-palette hidden"><div id="sticker-grid" class="sticker-grid"></div></div>
+        <div id="floating-menu" class="floating-menu hidden">
+            <button class="float-btn" data-cmd="bold"><i class="ph ph-text-b"></i></button>
+            <button class="float-btn" data-cmd="italic"><i class="ph ph-text-italic"></i></button>
+            <div class="float-divider"></div>
+            <button class="float-btn" data-cmd="justifyLeft"><i class="ph ph-text-align-left"></i></button>
+            <button class="float-btn" data-cmd="justifyCenter"><i class="ph ph-text-align-center"></i></button>
+            <button class="float-btn" data-cmd="justifyRight"><i class="ph ph-text-align-right"></i></button>
+            <div class="float-divider"></div>
+            <button class="float-btn" id="float-color-btn"><i class="ph ph-palette" style="color:#FFD700;"></i></button>
+            <div class="float-divider"></div>
+            <button class="float-btn small" id="btn-sel-size-down">가-</button>
+            <button class="float-btn small" id="btn-sel-size-up">가+</button>
+        </div>
         <div class="editor-container">
             <input type="text" id="edit-title" class="editor-title" placeholder="제목" autocomplete="off">
             <input type="text" id="edit-subtitle" class="editor-subtitle" placeholder="소제목" autocomplete="off">
             <div class="divider"></div>
             <div id="editor-body" class="editor-body" contenteditable="true" placeholder="이곳에 은혜를 기록하세요..."></div>
         </div>
-        <div class="editor-toolbar">
-            <div class="tool-group">
-                <select id="font-selector" class="font-select"><option value="Pretendard">고딕</option><option value="Noto Serif KR">명조</option><option value="Nanum Pen Script">손글씨</option></select>
-                <div class="font-size-controls"><button class="tool-btn small" onclick="changeFontSize(-2)">가-</button><button class="tool-btn small" onclick="changeFontSize(2)">가+</button></div>
-            </div>
-            <div class="toolbar-divider"></div>
-            <div class="tool-group"><button class="tool-btn" id="btn-bold"><i class="ph ph-text-b"></i></button><button class="tool-btn" id="btn-italic"><i class="ph ph-text-italic"></i></button></div>
-            <div class="toolbar-divider"></div>
-            <div class="tool-group"><button class="tool-btn" id="sticker-btn"><i class="ph ph-smiley"></i></button></div>
-        </div>
-        <div id="sticker-palette" class="sticker-palette hidden"><div id="sticker-grid" class="sticker-grid"></div></div>
     </div>
 
     <div id="read-modal" class="full-screen-modal hidden">
-        <div class="read-header">
+        <div class="read-header" id="read-header">
             <button id="close-read-btn" class="back-btn"><i class="ph ph-caret-left"></i> 목록</button>
+            
             <div class="read-actions">
-                <button id="share-read-btn" class="text-btn share" title="공유하기">
-                    <i class="ph ph-share-network"></i>
-                </button>
+                <div class="view-mode-group">
+                    <button id="mode-btn-default" class="text-btn icon-only active" title="기본 보기"><i class="ph ph-scroll"></i></button>
+                    <button id="mode-btn-focus" class="text-btn icon-only" title="읽기 모드"><i class="ph ph-arrows-out-simple"></i></button>
+                    <button id="mode-btn-book" class="text-btn icon-only" title="페이지 보기"><i class="ph ph-book-open"></i></button>
+                </div>
+                
+                <div class="divider-vertical" style="height: 16px; margin: 0 10px;"></div>
+                
+                <button id="share-read-btn" class="text-btn share" title="공유하기"><i class="ph ph-share-network"></i></button>
                 <button id="edit-read-btn" class="text-btn primary">수정</button>
                 <button id="delete-read-btn" class="text-btn danger">삭제</button>
             </div>
         </div>
-        <div class="read-content-area">
-            <div class="read-meta">
+
+        <div id="book-nav-left" class="book-nav prev hidden" title="이전 페이지"><i class="ph ph-caret-left"></i></div>
+        <div id="book-nav-right" class="book-nav next hidden" title="다음 페이지"><i class="ph ph-caret-right"></i></div>
+        <button id="exit-focus-btn" class="exit-focus-btn hidden" title="기본 모드로 복귀"><i class="ph ph-x"></i></button>
+
+        <div class="read-content-area" id="read-content-area">
+            <div class="read-meta" id="read-meta">
                 <span id="read-category" class="meta-category"></span>
                 <span id="read-date" class="meta-date"></span>
             </div>
             <h1 id="read-title"></h1>
             <h3 id="read-subtitle"></h3>
-            <div class="divider"></div>
+            <div class="divider" id="read-divider"></div>
             <div id="read-body" class="article-body"></div>
+            <div id="page-indicator" class="page-indicator hidden">1 / 5</div>
         </div>
     </div>
 
     <div id="trash-modal" class="full-screen-modal hidden">
-        <div class="read-header">
-            <button id="close-trash-btn" class="back-btn"><i class="ph ph-x"></i> 닫기</button>
-            <span>휴지통</span><div style="width: 50px;"></div>
-        </div>
+        <div class="read-header"><button id="close-trash-btn" class="back-btn"><i class="ph ph-x"></i> 닫기</button><span>휴지통</span><div style="width: 50px;"></div></div>
         <div class="trash-container"><div id="trash-list" class="entry-stream"></div></div>
     </div>
 

@@ -15,7 +15,7 @@
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { background-color: var(--bg-color); color: var(--gray-900); font-family: var(--text-serif); display: flex; justify-content: center; }
+body { background-color: var(--bg-color); color: var(--gray-900); font-family: var(--text-serif); display: flex; justify-content: center; overscroll-behavior-y: none; }
 .layout { width: 100%; max-width: 600px; padding: 0 24px 100px; min-height: 100vh; position: relative; }
 
 /* 헤더 */
@@ -23,13 +23,11 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .header-left { display: flex; flex-direction: column; }
 .logo-area h1 { font-size: 26px; font-weight: 700; letter-spacing: -1px; line-height: 1.2; }
 .sub-logo { font-family: var(--text-sans); font-size: 11px; color: var(--accent); letter-spacing: 0.5px; }
-
 .header-right { display: flex; align-items: center; gap: 12px; }
 .search-container { background-color: var(--gray-100); border-radius: 20px; padding: 6px 12px; display: flex; align-items: center; gap: 5px; width: 120px; transition: all 0.3s; }
 .search-container:focus-within { background-color: white; border: 1px solid var(--gray-900); width: 160px; }
 .search-container i { color: var(--gray-500); font-size: 14px; }
 .search-container input { border: none; background: transparent; outline: none; font-family: var(--text-sans); font-size: 13px; width: 100%; }
-
 .auth-area { display: flex; align-items: center; gap: 8px; }
 .user-display { font-family: var(--text-sans); font-size: 12px; color: var(--gray-500); display: none; }
 .login-btn-header { background: none; border: 1px solid var(--gray-200); color: var(--gray-500); padding: 6px 14px; border-radius: 20px; font-size: 12px; cursor: pointer; font-family: var(--text-sans); font-weight: 500; }
@@ -37,9 +35,9 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 
 /* 탭 + 액션 */
 .nav-row { display: flex; align-items: center; border-bottom: 1px solid var(--gray-100); margin-bottom: 20px; padding-bottom: 0; gap: 15px; }
-.tabs { display: flex; gap: 10px; overflow-x: auto; flex-grow: 1; align-items: center; scrollbar-width: none; padding-bottom: 1px; }
+.tabs { display: flex; gap: 10px; overflow-x: auto; flex-grow: 1; align-items: center; padding-bottom: 1px; white-space: nowrap; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none; }
 .tabs::-webkit-scrollbar { display: none; }
-.tab-btn { background: none; border: none; padding: 10px 4px; font-family: var(--text-sans); color: var(--gray-500); cursor: pointer; font-size: 15px; display: flex; align-items: center; gap: 4px; white-space: nowrap; user-select: none; }
+.tab-btn { background: none; border: none; padding: 10px 4px; font-family: var(--text-sans); color: var(--gray-500); cursor: pointer; font-size: 15px; display: flex; align-items: center; gap: 4px; white-space: nowrap; user-select: none; flex-shrink: 0; }
 .tab-btn.active { color: var(--gray-900); font-weight: 700; border-bottom: 2px solid var(--gray-900); margin-bottom: -1px; }
 .sortable-ghost { opacity: 0.4; background: var(--gray-100); border-radius: 8px; }
 .sortable-drag { cursor: grabbing; }
@@ -51,13 +49,12 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .icon-nav-btn:hover { color: var(--gray-900); }
 .icon-nav-btn.trash:hover { color: var(--danger); }
 .divider-vertical { width: 1px; height: 12px; background: var(--gray-200); margin: 0 4px; }
-
 .add-cat-btn { background: var(--gray-100); border: none; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--gray-500); cursor: pointer; font-size: 14px; margin-left: 5px; flex-shrink: 0; }
 .del-cat-btn { width: 16px; height: 16px; border: none; background: transparent; color: var(--gray-200); font-size: 12px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
 .del-cat-btn:hover { color: var(--danger); background: rgba(239, 68, 68, 0.1); border-radius: 50%; }
 
 /* 툴바 */
-.editor-toolbar { position: fixed; bottom: 0; left: 0; width: 100%; background: white; border-top: 1px solid var(--gray-200); padding: 10px 15px; display: flex; justify-content: center; align-items: center; gap: 15px; box-shadow: 0 -2px 10px rgba(0,0,0,0.03); z-index: 1002; flex-wrap: wrap; }
+.editor-toolbar { position: sticky; top: 0; left: 0; width: 100%; background: white; border-bottom: 1px solid var(--gray-200); padding: 10px 15px; display: flex; justify-content: center; align-items: center; gap: 15px; z-index: 1002; flex-wrap: wrap; }
 .tool-group { display: flex; align-items: center; gap: 8px; }
 .toolbar-divider { width: 1px; height: 20px; background: var(--gray-200); }
 .tool-btn { background: none; border: none; font-size: 22px; color: var(--gray-500); cursor: pointer; border-radius: 6px; padding: 4px; }
@@ -65,6 +62,20 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .tool-btn.active { background-color: var(--active-bg); color: var(--active-text); }
 .font-select { border: 1px solid var(--gray-200); border-radius: 6px; padding: 6px; font-size: 13px; outline: none; background: white; width: 70px; }
 .font-size-controls { display: flex; gap: 4px; }
+
+/* 플로팅 메뉴 & 팔레트 */
+.floating-menu { position: absolute; background: #1F2937; border-radius: 8px; padding: 6px 10px; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.25); z-index: 2000; transform: translateX(-50%); white-space: nowrap; }
+.floating-menu.hidden { display: none !important; }
+.floating-menu::after { content: ''; position: absolute; bottom: -6px; left: 50%; margin-left: -6px; border-width: 6px; border-style: solid; border-color: #1F2937 transparent transparent transparent; }
+.float-btn { background: none; border: none; color: white; font-size: 18px; cursor: pointer; padding: 4px; display: flex; align-items: center; justify-content: center; }
+.float-btn:hover { color: var(--gray-200); }
+.float-btn.small { font-size: 12px; font-weight: 600; width: 24px; }
+.float-divider { width: 1px; height: 16px; background: rgba(255,255,255,0.2); }
+.color-palette-popup { position: absolute; background: white; border: 1px solid var(--gray-200); padding: 12px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); z-index: 2001; top: 0; left: 0; width: 220px; }
+.color-grid { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.color-dot { width: 28px; height: 28px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.1); cursor: pointer; padding: 0; transition: transform 0.2s; display: flex; align-items: center; justify-content: center; }
+.color-dot:hover { transform: scale(1.1); border-color: var(--gray-400); }
+.picker-trigger { background: linear-gradient(135deg, #FF9A9E 0%, #FECFEF 99%, #FECFEF 100%); border: none; font-size: 14px; color: var(--gray-900); }
 
 /* 로그인 화면 */
 .login-wrapper { display: flex; justify-content: center; align-items: center; height: 100%; width: 100%; background: white; }
@@ -99,13 +110,13 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .floating-pen { position: fixed; bottom: 30px; right: calc(50% - 260px); width: 56px; height: 56px; border-radius: 50%; background: var(--gray-900); color: white; box-shadow: 0 4px 12px rgba(0,0,0,0.3); cursor: pointer; display: flex; justify-content: center; align-items: center; font-size: 24px; z-index: 100; transition: transform 0.2s; }
 .floating-pen:hover { transform: scale(1.1); }
 @media (max-width: 650px) { .floating-pen { right: 24px; } }
-.editor-container, .read-content-area, .trash-container { max-width: 600px; margin: 0 auto; padding: 40px 24px 120px; width: 100%; }
+.editor-container, .read-content-area, .trash-container { max-width: 600px; margin: 0 auto; padding: 20px 24px 120px; width: 100%; } 
 .editor-title { width: 100%; font-size: 26px; border: none; outline: none; font-family: var(--text-serif); font-weight: 600; margin-bottom: 10px; }
 .editor-subtitle { width: 100%; font-size: 16px; border: none; outline: none; color: var(--gray-500); font-family: var(--text-serif); margin-bottom: 20px; }
 .divider { width: 30px; height: 1px; background: var(--gray-200); margin-bottom: 30px; }
 .editor-body, .article-body { line-height: 1.8; outline: none; min-height: 300px; white-space: pre-wrap; font-family: var(--text-serif); font-size: 16px; }
 .editor-body:empty:before { content: attr(placeholder); color: var(--gray-500); display: block; }
-.sticker-palette { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: white; border: 1px solid var(--gray-200); padding: 15px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 90%; max-width: 360px; z-index: 1003; max-height: 300px; overflow-y: auto; }
+.sticker-palette { position: fixed; top: 120px; left: 50%; transform: translateX(-50%); background: white; border: 1px solid var(--gray-200); padding: 15px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 90%; max-width: 360px; z-index: 1003; max-height: 300px; overflow-y: auto; }
 .sticker-palette.hidden { display: none; }
 .sticker-grid { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-start; }
 .sticker-item { font-size: 26px; cursor: pointer; padding: 4px; transition: transform 0.2s; }
@@ -116,13 +127,191 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .modal-btns { display: flex; gap: 10px; justify-content: center; }
 .primary-btn { background: var(--gray-900); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
 .cancel-btn { background: var(--gray-200); border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
-.write-header, .read-header { padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--gray-100); font-family: var(--text-sans); }
+.write-header, .read-header { padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--gray-100); font-family: var(--text-sans); background: white; transition: all 0.3s; }
 .text-btn { background: none; border: none; font-size: 16px; color: var(--gray-500); cursor: pointer; }
 .text-btn.primary { color: var(--accent); font-weight: 600; margin-right: 15px; }
 .text-btn.danger { color: var(--danger); }
-.text-btn.share { color: var(--gray-900); margin-right: 15px; font-size: 18px; } /* 공유 버튼 스타일 추가 */
+.text-btn.share { color: var(--gray-900); margin-right: 15px; font-size: 18px; }
 .back-btn { background: none; border: none; font-size: 15px; color: var(--gray-500); cursor: pointer; display: flex; align-items: center; gap: 4px; font-family: var(--text-sans); font-weight: 500; }
 .trash-actions { display: flex; gap: 10px; margin-top: 10px; }
 .restore-btn { background: var(--active-bg); color: var(--active-text); border: none; padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: var(--text-sans); }
 .perm-del-btn { background: #FEE2E2; color: var(--danger); border: none; padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: var(--text-sans); }
 .publish-btn { background: var(--gray-900); color: white; border: none; padding: 8px 20px; border-radius: 20px; font-size: 14px; cursor: pointer; }
+
+/* 보기 모드 메뉴 스타일 */
+.view-mode-wrapper { position: relative; }
+.view-mode-menu { position: absolute; top: 100%; right: 0; background: white; border: 1px solid var(--gray-200); border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: flex; flex-direction: column; width: 160px; overflow: hidden; z-index: 10; margin-top: 8px; }
+.mode-item { background: none; border: none; text-align: left; padding: 10px 15px; font-size: 13px; font-family: var(--text-sans); color: var(--gray-900); cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.mode-item:hover { background: var(--gray-100); }
+.mode-item.active { background: var(--active-bg); color: var(--active-text); font-weight: 600; }
+
+/* 1. 읽기 모드 (Focus Mode) */
+#read-modal.mode-focus .read-header { display: none; } /* 헤더 숨김 */
+#read-modal.mode-focus .read-content-area { max-width: 800px; padding-top: 60px; } /* 폭 넓히고 상단 여백 */
+.exit-focus-btn { position: fixed; top: 20px; right: 20px; background: rgba(0,0,0,0.1); border: none; border-radius: 50%; width: 40px; height: 40px; display: flex; justify-content: center; align-items: center; font-size: 20px; cursor: pointer; color: var(--gray-500); transition: background 0.2s; z-index: 1100; }
+.exit-focus-btn:hover { background: rgba(0,0,0,0.2); color: var(--gray-900); }
+
+/* 2. 북 모드 (Paged View) */
+#read-modal.mode-book { overflow: hidden; } /* 모달 자체 스크롤 제거 */
+#read-modal.mode-book .read-header { position: absolute; top: 0; left: 0; width: 100%; z-index: 10; background: rgba(255,255,255,0.9); }
+#read-modal.mode-book .read-content-area {
+    margin: 0;
+    max-width: none;
+    width: 100vw;
+    height: 100vh;
+    padding: 80px 40px 40px; /* 헤더 공간 확보 */
+    /* 멀티 컬럼 레이아웃 적용 */
+    column-width: 100vw; /* 화면 너비만큼을 1페이지로 */
+    column-gap: 80px; /* 페이지 간 간격 (실제로는 패딩 포함해서 화면 밖으로 밀어냄) */
+    column-fill: auto;
+    overflow-x: hidden; /* 스크롤바 숨김 (JS로 이동) */
+    overflow-y: hidden;
+}
+/* 북 모드에서 요소들이 쪼개지지 않도록 */
+#read-modal.mode-book h1, #read-modal.mode-book h3, #read-modal.mode-book .read-meta, #read-modal.mode-book .divider { break-inside: avoid; }
+#read-modal.mode-book .article-body { text-align: justify; }
+
+/* 북 모드 네비게이션 버튼 */
+.book-nav { position: fixed; top: 50%; transform: translateY(-50%); width: 60px; height: 100px; display: flex; justify-content: center; align-items: center; font-size: 32px; color: var(--gray-400); cursor: pointer; z-index: 1050; opacity: 0; transition: opacity 0.3s; }
+.book-nav:hover { opacity: 1; background: rgba(0,0,0,0.05); }
+.book-nav.prev { left: 0; }
+.book-nav.next { right: 0; }
+.page-indicator { position: fixed; bottom: 15px; left: 50%; transform: translateX(-50%); font-family: var(--text-sans); font-size: 12px; color: var(--gray-400); z-index: 1050; background: rgba(255,255,255,0.8); padding: 4px 10px; border-radius: 10px; }
+
+/* style.css 기존 내용 유지... */
+
+/* [수정] 1. 읽기 모드 (Focus Mode) */
+#read-modal.mode-focus .read-header { display: none; } 
+#read-modal.mode-focus .read-content-area { max-width: 800px; padding-top: 60px; }
+.exit-focus-btn { position: fixed; top: 20px; right: 20px; background: rgba(0,0,0,0.1); border: none; border-radius: 50%; width: 40px; height: 40px; display: flex; justify-content: center; align-items: center; font-size: 20px; cursor: pointer; color: var(--gray-500); transition: background 0.2s; z-index: 1100; }
+.exit-focus-btn:hover { background: rgba(0,0,0,0.2); color: var(--gray-900); }
+
+/* [수정] 2. 북 모드 (Paged View) - 전체화면 적용 */
+#read-modal.mode-book { overflow: hidden; }
+#read-modal.mode-book .read-header { display: none; } /* 헤더 숨김 */
+#read-modal.mode-book .read-content-area {
+    margin: 0;
+    max-width: none;
+    width: 100vw;
+    height: 100vh;
+    padding: 60px 30px 40px; /* 상단 패딩 확보 (나가기 버튼 공간) */
+    
+    /* 멀티 컬럼 레이아웃 */
+    column-width: 100vw;
+    column-gap: 60px; /* 페이지 간격 */
+    column-fill: auto;
+    
+    overflow-x: hidden;
+    overflow-y: hidden;
+}
+
+/* 북 모드에서 요소 끊김 방지 */
+#read-modal.mode-book h1, #read-modal.mode-book h3, #read-modal.mode-book .read-meta, #read-modal.mode-book .divider { break-inside: avoid; }
+#read-modal.mode-book .article-body { text-align: justify; }
+
+/* 네비게이션 버튼 등 기존 스타일 유지 */
+.book-nav { position: fixed; top: 50%; transform: translateY(-50%); width: 60px; height: 100px; display: flex; justify-content: center; align-items: center; font-size: 32px; color: var(--gray-400); cursor: pointer; z-index: 1050; opacity: 0; transition: opacity 0.3s; }
+.book-nav:hover { opacity: 1; background: rgba(0,0,0,0.05); }
+.book-nav.prev { left: 0; }
+.book-nav.next { right: 0; }
+.page-indicator { position: fixed; bottom: 15px; left: 50%; transform: translateX(-50%); font-family: var(--text-sans); font-size: 12px; color: var(--gray-400); z-index: 1050; background: rgba(255,255,255,0.8); padding: 4px 10px; border-radius: 10px; }
+
+/* style.css 상단 내용은 유지... */
+
+/* ... (기존 스타일) ... */
+
+/* [수정] 보기 모드 버튼 그룹 */
+.view-mode-group { display: flex; gap: 2px; }
+.text-btn.icon-only { font-size: 20px; padding: 6px; color: var(--gray-400); display: flex; align-items: center; justify-content: center; border-radius: 6px; }
+.text-btn.icon-only:hover { background-color: var(--gray-100); color: var(--gray-900); }
+.text-btn.icon-only.active { background-color: var(--gray-900); color: white; }
+
+/* [수정] 읽기 모드 (Focus Mode) */
+#read-modal.mode-focus .read-header { display: none; } 
+#read-modal.mode-focus .read-content-area { max-width: 800px; padding-top: 60px; }
+.exit-focus-btn { position: fixed; top: 20px; right: 20px; background: rgba(0,0,0,0.1); border: none; border-radius: 50%; width: 40px; height: 40px; display: flex; justify-content: center; align-items: center; font-size: 20px; cursor: pointer; color: var(--gray-500); transition: background 0.2s; z-index: 1100; }
+.exit-focus-btn:hover { background: rgba(0,0,0,0.2); color: var(--gray-900); }
+
+/* [수정] 북 모드 (Paged View) */
+#read-modal.mode-book { overflow: hidden; }
+#read-modal.mode-book .read-header { display: none; } 
+#read-modal.mode-book .read-content-area {
+    margin: 0;
+    max-width: none;
+    width: 100vw;
+    height: 100vh;
+    padding: 60px 30px 40px;
+    column-width: 100vw;
+    column-gap: 60px;
+    column-fill: auto;
+    overflow-x: hidden;
+    overflow-y: hidden;
+}
+#read-modal.mode-book h1, #read-modal.mode-book h3, #read-modal.mode-book .read-meta, #read-modal.mode-book .divider { break-inside: avoid; }
+#read-modal.mode-book .article-body { text-align: justify; }
+
+/* 네비게이션 버튼 등 기존 스타일 유지 */
+.book-nav { position: fixed; top: 50%; transform: translateY(-50%); width: 60px; height: 100px; display: flex; justify-content: center; align-items: center; font-size: 32px; color: var(--gray-400); cursor: pointer; z-index: 1050; opacity: 0; transition: opacity 0.3s; }
+.book-nav:hover { opacity: 1; background: rgba(0,0,0,0.05); }
+.book-nav.prev { left: 0; }
+.book-nav.next { right: 0; }
+.page-indicator { position: fixed; bottom: 15px; left: 50%; transform: translateX(-50%); font-family: var(--text-sans); font-size: 12px; color: var(--gray-400); z-index: 1050; background: rgba(255,255,255,0.8); padding: 4px 10px; border-radius: 10px; }
+
+/* ... (나머지 스타일 유지) ... */
+
+/* ... (기존 스타일 상단 생략) ... */
+
+/* [수정] 보기 모드 버튼 그룹 */
+.view-mode-group { display: flex; gap: 4px; }
+.text-btn.icon-only { font-size: 20px; padding: 6px; color: var(--gray-400); display: flex; align-items: center; justify-content: center; border-radius: 6px; transition: all 0.2s; }
+.text-btn.icon-only:hover { background-color: var(--gray-100); color: var(--gray-900); }
+/* 선택된 버튼 디자인: 검정색 -> 테마 Active 색상 (하늘색 계열) */
+.text-btn.icon-only.active { background-color: var(--active-bg); color: var(--active-text); }
+
+/* [추가] 컨텍스트 메뉴 스타일 */
+.context-menu { position: fixed; background: white; border: 1px solid var(--gray-200); border-radius: 8px; padding: 6px 0; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 3000; min-width: 160px; display: flex; flex-direction: column; }
+.ctx-item { background: none; border: none; text-align: left; padding: 10px 16px; font-size: 14px; font-family: var(--text-sans); color: var(--gray-900); cursor: pointer; display: flex; align-items: center; gap: 8px; width: 100%; transition: background 0.2s; }
+.ctx-item:hover { background: var(--gray-100); }
+.ctx-item.danger { color: var(--danger); }
+.ctx-item i { font-size: 16px; color: var(--gray-500); }
+.ctx-item.danger i { color: var(--danger); }
+
+/* [추가] 주제 이동 모달 내 리스트 */
+.category-select-list { display: flex; flex-direction: column; gap: 6px; margin: 15px 0; max-height: 200px; overflow-y: auto; }
+.cat-select-item { padding: 10px; background: var(--gray-100); border-radius: 8px; cursor: pointer; font-size: 14px; transition: background 0.2s; }
+.cat-select-item:hover { background: var(--active-bg); color: var(--active-text); }
+.cat-select-item.current { opacity: 0.5; cursor: default; }
+
+/* ... (나머지 기존 스타일 유지) ... */
+
+/* style.css 상단 유지 */
+
+/* ... */
+
+/* 탭 + 액션 */
+.nav-row { display: flex; align-items: center; border-bottom: 1px solid var(--gray-100); margin-bottom: 20px; padding-bottom: 0; gap: 15px; }
+.tabs { display: flex; gap: 10px; overflow-x: auto; flex-grow: 1; align-items: center; padding-bottom: 1px; white-space: nowrap; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab-btn { background: none; border: none; padding: 10px 4px; font-family: var(--text-sans); color: var(--gray-500); cursor: pointer; font-size: 15px; display: flex; align-items: center; gap: 4px; white-space: nowrap; user-select: none; flex-shrink: 0; }
+.tab-btn.active { color: var(--gray-900); font-weight: 700; border-bottom: 2px solid var(--gray-900); margin-bottom: -1px; }
+/* [수정] del-cat-btn 삭제됨 */
+
+/* ... */
+
+/* [수정] 읽기 화면 헤더 버튼 배치 */
+.read-actions { display: flex; align-items: center; gap: 0; } /* gap을 0으로 하고 내부 요소에서 간격 조절 */
+.view-mode-group { display: flex; gap: 4px; }
+.text-btn.icon-only { font-size: 20px; padding: 6px; color: var(--gray-400); display: flex; align-items: center; justify-content: center; border-radius: 6px; transition: all 0.2s; }
+.text-btn.icon-only:hover { background-color: var(--gray-100); color: var(--gray-900); }
+.text-btn.icon-only.active { background-color: var(--active-bg); color: var(--active-text); }
+
+/* 컨텍스트 메뉴 스타일 */
+.context-menu { position: fixed; background: white; border: 1px solid var(--gray-200); border-radius: 8px; padding: 6px 0; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 3000; min-width: 160px; display: flex; flex-direction: column; }
+.context-menu.hidden { display: none; }
+.ctx-item { background: none; border: none; text-align: left; padding: 10px 16px; font-size: 14px; font-family: var(--text-sans); color: var(--gray-900); cursor: pointer; display: flex; align-items: center; gap: 8px; width: 100%; transition: background 0.2s; }
+.ctx-item:hover { background: var(--gray-100); }
+.ctx-item.danger { color: var(--danger); }
+.ctx-item i { font-size: 16px; color: var(--gray-500); }
+.ctx-item.danger i { color: var(--danger); }
+
+/* ... (나머지 스타일 유지) */
