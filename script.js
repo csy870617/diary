@@ -59,7 +59,6 @@ let contextMenu, catContextMenu, moveModal, moveCategoryList, lockModal;
 let lockPwInput, lockModalTitle, lockModalDesc;
 let readTitle, readSubtitle, readBody, readDate, readCategory;
 let shareReadBtn;
-let editorToolbar;
 
 const stickers = [ '✝️','🙏','📖','🕊️','🕯️','💒','🍞','🍷','🩸','🔥','☁️','☀️','🌙','⭐','✨','🌧️','🌈','❄️','🌿','🌷','🌻','🍂','🌱','🌲','🕊️','🦋','🐾','🧸','🎀','🎈','🎁','🔔','💡','🗝️','📝','📌','📎','✂️','🖍️','🖌️','💌','📅','☕','🍵','🥪','🍎','🤍','💛','🧡','❤️','💜','💙','💚','🤎','🖤','😊','😭','🥰','🤔','💪' ];
 
@@ -96,16 +95,8 @@ function init() {
         });
     }
 
+    // [수정] 뒤로가기 핸들러 단순화 (무조건 닫기)
     window.addEventListener('popstate', (event) => {
-        if (event.state && event.state.modal === 'read') {
-            if(event.state.mode && event.state.mode !== 'default') {
-                setReadMode(event.state.mode, false);
-            } else {
-                setReadMode('default', false);
-            }
-            if(readModal) readModal.classList.remove('hidden');
-            return;
-        }
         closeAllModals();
     });
 
@@ -128,30 +119,6 @@ function init() {
             }
         }
     });
-
-    // [추가] 모바일 키보드 대응 (Visual Viewport API)
-    if (window.visualViewport && editorToolbar) {
-        window.visualViewport.addEventListener('resize', () => {
-            // 키보드가 올라오면 height가 줄어듦
-            const viewportHeight = window.visualViewport.height;
-            const windowHeight = window.innerHeight;
-            
-            if (viewportHeight < windowHeight) {
-                // 키보드가 올라왔을 때
-                editorToolbar.style.bottom = `${windowHeight - viewportHeight - window.visualViewport.offsetTop}px`;
-            } else {
-                // 키보드가 내려갔을 때
-                editorToolbar.style.bottom = '0';
-            }
-        });
-        window.visualViewport.addEventListener('scroll', () => {
-             const viewportHeight = window.visualViewport.height;
-             const windowHeight = window.innerHeight;
-             if(viewportHeight < windowHeight) {
-                 editorToolbar.style.bottom = `${windowHeight - viewportHeight - window.visualViewport.offsetTop}px`;
-             }
-        });
-    }
 
     const savedId = localStorage.getItem('savedEmail');
     if(savedId && document.getElementById('login-email')) {
@@ -231,7 +198,6 @@ function loadDOMElements() {
     readDate = document.getElementById('read-date');
     readCategory = document.getElementById('read-category');
     shareReadBtn = document.getElementById('share-read-btn');
-    editorToolbar = document.querySelector('.editor-toolbar'); // 툴바 요소
 }
 
 function closeAllModals() {
@@ -299,8 +265,9 @@ function setupEventListeners() {
             e.preventDefault();
             if(stickerPalette) stickerPalette.classList.add('hidden');
             if(colorPalettePopup) {
-                colorPalettePopup.style.top = 'auto';
-                colorPalettePopup.style.bottom = '65px';
+                // 툴바 하단에 위치 (sticky top:0 이므로 고정 위치 사용)
+                colorPalettePopup.style.top = '110px';
+                colorPalettePopup.style.bottom = 'auto';
                 colorPalettePopup.style.left = '50%';
                 colorPalettePopup.style.transform = 'translateX(-50%)';
                 colorPalettePopup.classList.toggle('hidden');
@@ -373,6 +340,7 @@ function setupEventListeners() {
         }
     }
     
+    // [수정] 정밀 조절 함수 연결
     const btnSizeUp = document.getElementById('btn-sel-size-up');
     if(btnSizeUp) btnSizeUp.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); changeSelectionFontSize(2); });
     const btnSizeDown = document.getElementById('btn-sel-size-down');
@@ -395,11 +363,10 @@ function setupEventListeners() {
     const publishBtn = document.getElementById('publish-btn');
     if(publishBtn) publishBtn.addEventListener('click', saveEntry);
     
-    // [수정] 목록 버튼 동작: 확실하게 홈으로
     const closeReadBtn = document.getElementById('close-read-btn');
     if(closeReadBtn) closeReadBtn.addEventListener('click', () => {
         closeAllModals();
-        history.pushState(null, null, ''); // URL 정리
+        history.pushState(null, null, ''); 
     });
     
     const switchToEdit = () => {
@@ -407,7 +374,6 @@ function setupEventListeners() {
         if(entry) { history.back(); setTimeout(() => openEditor(true, entry), 50); }
     };
     
-    // [수정] 기본 보기에서 클릭 시 수정 모드로
     if(readTitle) readTitle.addEventListener('click', switchToEdit);
     if(readSubtitle) readSubtitle.addEventListener('click', switchToEdit);
     if(readBody) readBody.addEventListener('click', switchToEdit);
@@ -503,7 +469,6 @@ function handleSelection() {
     let top = rect.bottom + 10; 
     let left = rect.left + (rect.width / 2) - (menuWidth / 2);
     
-    // 화면 아래로 넘어가면 위로 표시
     if (top + menuHeight > window.innerHeight) {
         top = rect.top - menuHeight - 10;
     }
@@ -555,7 +520,6 @@ window.changeSelectionFontSize = (delta) => {
 
     const range = selection.getRangeAt(0);
     
-    // 1. 이미 span으로 감싸져 있는지 확인
     let parentElement = range.commonAncestorContainer.nodeType === 3 ? range.commonAncestorContainer.parentElement : range.commonAncestorContainer;
     
     if (parentElement.tagName === 'SPAN' && parentElement.style.fontSize) {
@@ -565,7 +529,6 @@ window.changeSelectionFontSize = (delta) => {
             if(newSize < 10) newSize = 10;
             parentElement.style.fontSize = `${newSize}px`;
             
-            // 선택 유지
             const newRange = document.createRange();
             newRange.selectNodeContents(parentElement);
             selection.removeAllRanges();
@@ -575,7 +538,6 @@ window.changeSelectionFontSize = (delta) => {
         }
     }
 
-    // 2. 새로운 span 생성 및 감싸기
     const span = document.createElement("span");
     let currentSize = 16;
     const computedStyle = window.getComputedStyle(parentElement);
@@ -874,14 +836,14 @@ async function updateEntryField(id, data) {
 }
 
 function handleSwipe() { const swipeThreshold = 50; if (touchEndX < touchStartX - swipeThreshold) turnPage(1); else if (touchEndX > touchStartX + swipeThreshold) turnPage(-1); }
-function setReadMode(mode, pushToHistory = true) { 
+
+// [수정] 모드 변경 시 히스토리 쌓지 않음
+function setReadMode(mode, pushToHistory = false) { 
     if(!readModal) return;
     currentViewMode = mode; 
     
-    if(pushToHistory) {
-        history.pushState({ modal: 'read', mode: mode }, null, '');
-    }
-
+    // pushToHistory 파라미터는 하위 호환성을 위해 남겨두되 기본 false
+    
     readModal.classList.remove('mode-focus', 'mode-book'); 
     exitFocusBtn.classList.add('hidden'); 
     bookNavLeft.classList.add('hidden'); 
@@ -906,6 +868,7 @@ function setReadMode(mode, pushToHistory = true) {
         updateBookNav(); 
     } 
 }
+
 function turnPage(direction) { if (currentViewMode !== 'book') return; const pageWidth = window.innerWidth; const currentScroll = readContentArea.scrollLeft; const newScroll = currentScroll + (direction * pageWidth); readContentArea.scrollTo({ left: newScroll, behavior: 'smooth' }); setTimeout(updateBookNav, 400); }
 function updateBookNav() { if (currentViewMode !== 'book') return; const scrollLeft = readContentArea.scrollLeft; const scrollWidth = readContentArea.scrollWidth; const clientWidth = readContentArea.clientWidth; if (scrollLeft > 10) bookNavLeft.classList.remove('hidden'); else bookNavLeft.classList.add('hidden'); if (scrollLeft + clientWidth < scrollWidth - 10) bookNavRight.classList.remove('hidden'); else bookNavRight.classList.add('hidden'); const currentPage = Math.round(scrollLeft / clientWidth) + 1; const totalPages = Math.ceil(scrollWidth / clientWidth); pageIndicator.innerText = `${currentPage} / ${totalPages}`; pageIndicator.classList.remove('hidden'); }
 
@@ -969,16 +932,11 @@ async function loadDataFromFirestore() {
     } catch (e) { console.error(e); } 
 }
 
-// [수정] 발행 후 목록이 아닌 읽기 화면으로 전환
 async function saveEntry() { const title = editTitle.value.trim(); const body = editBody.innerHTML; if(!title || !body || body === '<br>') return alert('제목과 본문을 모두 입력해주세요.'); const now = Date.now(); const entryData = { category: currentCategory, title, subtitle: editSubtitle.value.trim(), body, fontFamily: currentFontFamily, fontSize: currentFontSize, date: new Date().toLocaleDateString('ko-KR'), timestamp: now, modifiedAt: now, isDeleted: false }; try { if(currentUser) { if(isEditMode && editingId) { const docRef = doc(db, "users", currentUser.uid, "entries", editingId); const updateData = { ...entryData }; delete updateData.timestamp; await updateDoc(docRef, updateData); } else { await addDoc(collection(db, "users", currentUser.uid, "entries"), entryData); } await loadDataFromFirestore(); } else { entryData.id = isEditMode ? editingId : now; if (isEditMode) { const index = entries.findIndex(e => e.id === editingId); if (index !== -1) { entries[index] = { ...entries[index], ...entryData, timestamp: entries[index].timestamp, modifiedAt: now }; } } else { entries.unshift(entryData); } localStorage.setItem('faithLogDB', JSON.stringify(entries)); } 
+    // 저장 후 바로 읽기 모드로 보기
     closeAllModals(); 
-    renderEntries(); 
-    // 저장된/수정된 글의 ID로 읽기 모달 열기
-    // 신규 작성 시 entryData.id는 위에서 할당됨 (로컬) or DB저장후 가져와야 함. 
-    // 편의상 로컬 객체의 ID 사용 (DB 연동 시에는 다시 로드된 entries에서 찾아야 정확함)
-    // 여기서는 간단히 0.1초 뒤 실행
+    renderEntries(); // 백그라운드 갱신
     setTimeout(() => {
-        // DB 저장 후 갱신된 entries에서 최신 글(또는 수정된 글) 찾기
         const savedId = isEditMode ? editingId : (currentUser ? entries.find(e => e.title === title && e.timestamp === now)?.id : entryData.id);
         if(savedId) openReadModal(savedId);
     }, 500); 

@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>신앙일지 | Faith Log</title>
     <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
@@ -60,6 +60,35 @@
             <span class="write-category" id="display-category">기록</span>
             <button id="publish-btn" class="publish-btn">발행</button>
         </div>
+
+        <div class="editor-toolbar">
+            <div class="tool-group">
+                <select id="font-selector" class="font-select">
+                    <option value="Pretendard">고딕</option>
+                    <option value="Noto Serif KR">명조</option>
+                    <option value="Nanum Pen Script">손글씨</option>
+                </select>
+                <div class="font-size-controls">
+                    <button class="tool-btn small" id="btn-global-size-down">가-</button>
+                    <button class="tool-btn small" id="btn-global-size-up">가+</button>
+                </div>
+            </div>
+            
+            <div class="toolbar-divider"></div>
+
+            <div class="tool-group">
+                <button class="tool-btn" data-cmd="justifyLeft"><i class="ph ph-text-align-left"></i></button>
+                <button class="tool-btn" data-cmd="justifyCenter"><i class="ph ph-text-align-center"></i></button>
+                <button class="tool-btn" data-cmd="justifyRight"><i class="ph ph-text-align-right"></i></button>
+            </div>
+
+            <div class="toolbar-divider"></div>
+
+            <div class="tool-group">
+                <button class="tool-btn" id="toolbar-color-btn"><i class="ph ph-palette" style="color:#F59E0B;"></i></button>
+                <button class="tool-btn" id="sticker-btn"><i class="ph ph-smiley"></i></button>
+            </div>
+        </div>
         
         <div class="editor-container">
             <input type="text" id="edit-title" class="editor-title" placeholder="제목" autocomplete="off">
@@ -87,31 +116,6 @@
                 <button class="color-dot" style="background-color: #008000;" data-color="#008000" title="기본 녹색"></button>
                 <button class="color-dot" style="background-color: #0000FF;" data-color="#0000FF" title="기본 파랑"></button>
                 <button class="color-dot" style="background-color: #800080;" data-color="#800080" title="기본 보라"></button>
-            </div>
-        </div>
-
-        <div class="editor-toolbar" id="editor-toolbar">
-            <div class="tool-group">
-                <select id="font-selector" class="font-select">
-                    <option value="Pretendard">고딕</option>
-                    <option value="Noto Serif KR">명조</option>
-                    <option value="Nanum Pen Script">손글씨</option>
-                </select>
-                <div class="font-size-controls">
-                    <button class="tool-btn small" id="btn-global-size-down">가-</button>
-                    <button class="tool-btn small" id="btn-global-size-up">가+</button>
-                </div>
-            </div>
-            <div class="toolbar-divider"></div>
-            <div class="tool-group">
-                <button class="tool-btn" data-cmd="justifyLeft"><i class="ph ph-text-align-left"></i></button>
-                <button class="tool-btn" data-cmd="justifyCenter"><i class="ph ph-text-align-center"></i></button>
-                <button class="tool-btn" data-cmd="justifyRight"><i class="ph ph-text-align-right"></i></button>
-            </div>
-            <div class="toolbar-divider"></div>
-            <div class="tool-group">
-                <button class="tool-btn" id="toolbar-color-btn"><i class="ph ph-palette" style="color:#F59E0B;"></i></button>
-                <button class="tool-btn" id="sticker-btn"><i class="ph ph-smiley"></i></button>
             </div>
         </div>
 

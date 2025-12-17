@@ -88,15 +88,15 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .divider-vertical { width: 1px; height: 12px; background: var(--gray-200); margin: 0 4px; }
 .add-cat-btn { background: var(--gray-100); border: none; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--gray-500); cursor: pointer; font-size: 14px; margin-left: 5px; flex-shrink: 0; }
 
-/* 툴바 */
+/* 툴바 (상단 고정 - Sticky) */
 .editor-toolbar { 
-    position: fixed; 
-    bottom: 0;       
+    position: sticky; /* 스크롤 시 상단 고정 */
+    top: 0;           
     left: 0; 
     width: 100%; 
     background: white; 
-    border-top: 1px solid var(--gray-200);
-    border-bottom: none;
+    border-top: none;
+    border-bottom: 1px solid var(--gray-200); /* 하단 라인 */
     padding: 10px 15px; 
     display: flex; 
     justify-content: space-around; 
@@ -104,7 +104,6 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     gap: 10px; 
     z-index: 2002; 
     flex-wrap: nowrap;
-    padding-bottom: max(10px, env(safe-area-inset-bottom));
 }
 .tool-group { display: flex; align-items: center; gap: 8px; }
 .toolbar-divider { width: 1px; height: 20px; background: var(--gray-200); }
@@ -135,9 +134,12 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .float-btn.small { font-size: 13px; font-weight: 600; width: auto; padding: 0 4px; }
 .float-divider { width: 1px; height: 16px; background: rgba(255,255,255,0.2); }
 
-/* 팔레트 */
+/* 팔레트 (상단 툴바 아래쪽에 뜨도록 조정) */
 .sticker-palette { 
-    position: fixed; top: auto; bottom: 65px; left: 50%; transform: translateX(-50%); 
+    position: fixed; 
+    top: 110px; /* 헤더 + 툴바 높이 고려 */
+    bottom: auto; 
+    left: 50%; transform: translateX(-50%); 
     background: white; border: 1px solid var(--gray-200); padding: 15px; 
     border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); 
     width: 90%; max-width: 360px; z-index: 2003; max-height: 250px; overflow-y: auto; 
@@ -147,7 +149,10 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .sticker-item { font-size: 26px; cursor: pointer; padding: 4px; transition: transform 0.2s; }
 
 .color-palette-popup { 
-    position: fixed; top: auto !important; bottom: auto; left: 50% !important; transform: translateX(-50%);
+    position: fixed; 
+    top: 110px !important; /* 상단 고정 */
+    bottom: auto; 
+    left: 50% !important; transform: translateX(-50%);
     background: white; border: 1px solid var(--gray-200); padding: 12px; 
     border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); z-index: 2006; 
     width: 230px; 
