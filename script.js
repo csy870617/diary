@@ -59,6 +59,7 @@ let contextMenu, catContextMenu, moveModal, moveCategoryList, lockModal;
 let lockPwInput, lockModalTitle, lockModalDesc;
 let readTitle, readSubtitle, readBody, readDate, readCategory;
 let shareReadBtn;
+let editorToolbar;
 
 const stickers = [ '✝️','🙏','📖','🕊️','🕯️','💒','🍞','🍷','🩸','🔥','☁️','☀️','🌙','⭐','✨','🌧️','🌈','❄️','🌿','🌷','🌻','🍂','🌱','🌲','🕊️','🦋','🐾','🧸','🎀','🎈','🎁','🔔','💡','🗝️','📝','📌','📎','✂️','🖍️','🖌️','💌','📅','☕','🍵','🥪','🍎','🤍','💛','🧡','❤️','💜','💙','💚','🤎','🖤','😊','😭','🥰','🤔','💪' ];
 
@@ -95,25 +96,16 @@ function init() {
         });
     }
 
-    // [수정] 뒤로가기(popstate) 핸들러 개선
     window.addEventListener('popstate', (event) => {
-        // 1. 읽기 모드 내에서 뷰 모드 변경 이력이 있는 경우
-        if (event.state && event.state.modal === 'read' && event.state.mode) {
-            // 모달을 닫지 않고 뷰 모드만 변경 (히스토리 복귀)
-            setReadMode(event.state.mode, false); // false: pushState 하지 않음
-            if(readModal) readModal.classList.remove('hidden'); // 혹시 닫혔다면 다시 열기
-            return;
-        }
-
-        // 2. 읽기 모드 초기 상태(default)로 돌아왔거나, 아예 다른 상태인 경우
         if (event.state && event.state.modal === 'read') {
-            // 기본 보기 상태 유지
-            setReadMode('default', false);
+            if(event.state.mode && event.state.mode !== 'default') {
+                setReadMode(event.state.mode, false);
+            } else {
+                setReadMode('default', false);
+            }
             if(readModal) readModal.classList.remove('hidden');
             return;
         }
-
-        // 3. 그 외의 경우 (홈으로 가야 함) -> 모든 모달 닫기
         closeAllModals();
     });
 
@@ -123,7 +115,6 @@ function init() {
         
         if (floatingMenu && !floatingMenu.classList.contains('hidden')) {
              const isEditorClick = (editBody && editBody.contains(e.target));
-             // 제목/소제목은 플로팅 제외 -> 외부 클릭으로 간주하여 닫음
              if (!floatingMenu.contains(e.target) && !isEditorClick) {
                  floatingMenu.classList.add('hidden');
              }
@@ -137,6 +128,30 @@ function init() {
             }
         }
     });
+
+    // [추가] 모바일 키보드 대응 (Visual Viewport API)
+    if (window.visualViewport && editorToolbar) {
+        window.visualViewport.addEventListener('resize', () => {
+            // 키보드가 올라오면 height가 줄어듦
+            const viewportHeight = window.visualViewport.height;
+            const windowHeight = window.innerHeight;
+            
+            if (viewportHeight < windowHeight) {
+                // 키보드가 올라왔을 때
+                editorToolbar.style.bottom = `${windowHeight - viewportHeight - window.visualViewport.offsetTop}px`;
+            } else {
+                // 키보드가 내려갔을 때
+                editorToolbar.style.bottom = '0';
+            }
+        });
+        window.visualViewport.addEventListener('scroll', () => {
+             const viewportHeight = window.visualViewport.height;
+             const windowHeight = window.innerHeight;
+             if(viewportHeight < windowHeight) {
+                 editorToolbar.style.bottom = `${windowHeight - viewportHeight - window.visualViewport.offsetTop}px`;
+             }
+        });
+    }
 
     const savedId = localStorage.getItem('savedEmail');
     if(savedId && document.getElementById('login-email')) {
@@ -216,6 +231,7 @@ function loadDOMElements() {
     readDate = document.getElementById('read-date');
     readCategory = document.getElementById('read-category');
     shareReadBtn = document.getElementById('share-read-btn');
+    editorToolbar = document.querySelector('.editor-toolbar'); // 툴바 요소
 }
 
 function closeAllModals() {
@@ -235,7 +251,6 @@ function closeAllModals() {
 
 function openModal(modal) {
     if(!modal) return;
-    // 일반 모달 열 때는 기본 상태 푸시
     history.pushState({ modal: 'open' }, null, '');
     modal.classList.remove('hidden');
 }
@@ -311,16 +326,11 @@ function setupEventListeners() {
     const trackFocus = (el) => { lastFocusedEdit = el; };
     if(editTitle) {
         editTitle.addEventListener('focus', () => trackFocus(editTitle));
-        // [수정] 제목 클릭 시 전파 중단
         editTitle.addEventListener('click', (e) => { e.stopPropagation(); });
-        editTitle.addEventListener('mouseup', handleSelection);
-        editTitle.addEventListener('keyup', handleSelection);
     }
     if(editSubtitle) {
         editSubtitle.addEventListener('focus', () => trackFocus(editSubtitle));
         editSubtitle.addEventListener('click', (e) => { e.stopPropagation(); });
-        editSubtitle.addEventListener('mouseup', handleSelection);
-        editSubtitle.addEventListener('keyup', handleSelection);
     }
     if(editBody) {
         editBody.addEventListener('focus', () => trackFocus(editBody));
@@ -363,7 +373,6 @@ function setupEventListeners() {
         }
     }
     
-    // [수정] 정밀 조절 함수 연결
     const btnSizeUp = document.getElementById('btn-sel-size-up');
     if(btnSizeUp) btnSizeUp.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); changeSelectionFontSize(2); });
     const btnSizeDown = document.getElementById('btn-sel-size-down');
@@ -386,13 +395,11 @@ function setupEventListeners() {
     const publishBtn = document.getElementById('publish-btn');
     if(publishBtn) publishBtn.addEventListener('click', saveEntry);
     
+    // [수정] 목록 버튼 동작: 확실하게 홈으로
     const closeReadBtn = document.getElementById('close-read-btn');
     if(closeReadBtn) closeReadBtn.addEventListener('click', () => {
-        // 읽기 모달 닫기
-        // history.back() 대신 직접 닫기 (이전 상태로 돌아가기 위함)
-        // 만약 현재 읽기 모드라면 닫고, 아니라면 back
-        // 하지만 여기선 확실하게 목록으로 나가길 원함
         closeAllModals();
+        history.pushState(null, null, ''); // URL 정리
     });
     
     const switchToEdit = () => {
@@ -400,6 +407,7 @@ function setupEventListeners() {
         if(entry) { history.back(); setTimeout(() => openEditor(true, entry), 50); }
     };
     
+    // [수정] 기본 보기에서 클릭 시 수정 모드로
     if(readTitle) readTitle.addEventListener('click', switchToEdit);
     if(readSubtitle) readSubtitle.addEventListener('click', switchToEdit);
     if(readBody) readBody.addEventListener('click', switchToEdit);
@@ -471,7 +479,6 @@ function handleSelection() {
 
     if (!targetEl) return;
 
-    // [수정] 제목/소제목은 플로팅 메뉴 확실히 닫기 (숨김)
     if(targetEl.tagName === 'INPUT') {
         floatingMenu.classList.add('hidden');
         return;
@@ -491,11 +498,18 @@ function handleSelection() {
     floatingMenu.classList.remove('hidden');
     const menuHeight = floatingMenu.offsetHeight || 50; 
     const menuWidth = floatingMenu.offsetWidth || 200;
-    let top = rect.top - menuHeight - 10;
+    
+    // [수정] 플로팅 메뉴 위치: 글자 아래쪽으로
+    let top = rect.bottom + 10; 
     let left = rect.left + (rect.width / 2) - (menuWidth / 2);
-    if (top < 10) top = rect.bottom + 10;
+    
+    // 화면 아래로 넘어가면 위로 표시
+    if (top + menuHeight > window.innerHeight) {
+        top = rect.top - menuHeight - 10;
+    }
     if (left < 10) left = 10;
     if (left + menuWidth > window.innerWidth - 10) left = window.innerWidth - menuWidth - 10;
+    
     floatingMenu.style.top = `${top}px`;
     floatingMenu.style.left = `${left}px`;
     floatingMenu.style.transform = 'none';
@@ -509,7 +523,6 @@ window.formatDoc = (cmd, value = null) => {
     setTimeout(handleSelection, 0);
 };
 
-// [수정] 툴바용: 현재 에디터 글자 크기에 더해서 변경 (모든 자식 span도 같이 비율 조정)
 window.changeGlobalFontSize = (delta) => { 
     if(!editBody) return;
     
@@ -536,7 +549,6 @@ window.changeGlobalFontSize = (delta) => {
     });
 };
 
-// [수정] 플로팅용: 선택 영역만 확실하게 변경 (물리적 태그 분리)
 window.changeSelectionFontSize = (delta) => {
     const selection = window.getSelection();
     if (!selection.rangeCount || selection.isCollapsed) return;
@@ -546,7 +558,6 @@ window.changeSelectionFontSize = (delta) => {
     // 1. 이미 span으로 감싸져 있는지 확인
     let parentElement = range.commonAncestorContainer.nodeType === 3 ? range.commonAncestorContainer.parentElement : range.commonAncestorContainer;
     
-    // 만약 선택된 영역이 span 하나에 정확히 일치하거나 포함되어 있다면
     if (parentElement.tagName === 'SPAN' && parentElement.style.fontSize) {
         let currentSize = parseFloat(parentElement.style.fontSize);
         if(!isNaN(currentSize)) {
@@ -566,8 +577,6 @@ window.changeSelectionFontSize = (delta) => {
 
     // 2. 새로운 span 생성 및 감싸기
     const span = document.createElement("span");
-    
-    // 현재 기본 폰트 사이즈 가져오기
     let currentSize = 16;
     const computedStyle = window.getComputedStyle(parentElement);
     if(computedStyle.fontSize) currentSize = parseFloat(computedStyle.fontSize);
@@ -578,12 +587,10 @@ window.changeSelectionFontSize = (delta) => {
     span.style.fontSize = `${newSize}px`;
 
     try {
-        // 선택된 내용을 추출하여 span에 넣고 삽입
         const extractedContents = range.extractContents();
         span.appendChild(extractedContents);
         range.insertNode(span);
         
-        // 중요: 삽입된 span을 다시 선택해야 플로팅 메뉴가 유지됨
         selection.removeAllRanges();
         const newRange = document.createRange();
         newRange.selectNodeContents(span);
@@ -625,7 +632,6 @@ function applyFontStyle(f, s) {
     if(fontSelector) fontSelector.value = f; 
 }
 
-// [수정] 상단 주제 표시 & 히스토리 추가
 function openEditor(m, d) { 
     isEditMode = m; 
     openModal(writeModal); 
@@ -868,13 +874,10 @@ async function updateEntryField(id, data) {
 }
 
 function handleSwipe() { const swipeThreshold = 50; if (touchEndX < touchStartX - swipeThreshold) turnPage(1); else if (touchEndX > touchStartX + swipeThreshold) turnPage(-1); }
-
-// [수정] 뷰 모드 변경 함수 (히스토리 관리)
 function setReadMode(mode, pushToHistory = true) { 
     if(!readModal) return;
     currentViewMode = mode; 
     
-    // 히스토리 추가 (뒤로가기 시 이 상태로 돌아오기 위해)
     if(pushToHistory) {
         history.pushState({ modal: 'read', mode: mode }, null, '');
     }
@@ -903,7 +906,6 @@ function setReadMode(mode, pushToHistory = true) {
         updateBookNav(); 
     } 
 }
-
 function turnPage(direction) { if (currentViewMode !== 'book') return; const pageWidth = window.innerWidth; const currentScroll = readContentArea.scrollLeft; const newScroll = currentScroll + (direction * pageWidth); readContentArea.scrollTo({ left: newScroll, behavior: 'smooth' }); setTimeout(updateBookNav, 400); }
 function updateBookNav() { if (currentViewMode !== 'book') return; const scrollLeft = readContentArea.scrollLeft; const scrollWidth = readContentArea.scrollWidth; const clientWidth = readContentArea.clientWidth; if (scrollLeft > 10) bookNavLeft.classList.remove('hidden'); else bookNavLeft.classList.add('hidden'); if (scrollLeft + clientWidth < scrollWidth - 10) bookNavRight.classList.remove('hidden'); else bookNavRight.classList.add('hidden'); const currentPage = Math.round(scrollLeft / clientWidth) + 1; const totalPages = Math.ceil(scrollWidth / clientWidth); pageIndicator.innerText = `${currentPage} / ${totalPages}`; pageIndicator.classList.remove('hidden'); }
 
@@ -937,7 +939,6 @@ function openReadModal(id) {
     const e = entries.find(x => x.id === id); if(!e) return; 
     editingId = id; 
     
-    // [수정] 모달 열 때 기본 상태 푸시
     openModal(readModal);
     history.pushState({ modal: 'read', mode: 'default' }, null, '');
 
@@ -952,7 +953,7 @@ function openReadModal(id) {
     }
     if(readCategory) readCategory.innerText = allCategories.find(c=>c.id===e.category)?.name || '기록'; 
     
-    setReadMode('default', false); // 초기 진입이므로 pushState 안함
+    setReadMode('default', false); 
 }
 
 function loadDataFromLocal() { entries = JSON.parse(localStorage.getItem('faithLogDB')) || []; }
@@ -968,11 +969,19 @@ async function loadDataFromFirestore() {
     } catch (e) { console.error(e); } 
 }
 
+// [수정] 발행 후 목록이 아닌 읽기 화면으로 전환
 async function saveEntry() { const title = editTitle.value.trim(); const body = editBody.innerHTML; if(!title || !body || body === '<br>') return alert('제목과 본문을 모두 입력해주세요.'); const now = Date.now(); const entryData = { category: currentCategory, title, subtitle: editSubtitle.value.trim(), body, fontFamily: currentFontFamily, fontSize: currentFontSize, date: new Date().toLocaleDateString('ko-KR'), timestamp: now, modifiedAt: now, isDeleted: false }; try { if(currentUser) { if(isEditMode && editingId) { const docRef = doc(db, "users", currentUser.uid, "entries", editingId); const updateData = { ...entryData }; delete updateData.timestamp; await updateDoc(docRef, updateData); } else { await addDoc(collection(db, "users", currentUser.uid, "entries"), entryData); } await loadDataFromFirestore(); } else { entryData.id = isEditMode ? editingId : now; if (isEditMode) { const index = entries.findIndex(e => e.id === editingId); if (index !== -1) { entries[index] = { ...entries[index], ...entryData, timestamp: entries[index].timestamp, modifiedAt: now }; } } else { entries.unshift(entryData); } localStorage.setItem('faithLogDB', JSON.stringify(entries)); } 
-    // 저장 후 바로 읽기 모드로 보기
     closeAllModals(); 
-    renderEntries(); // 백그라운드 갱신
-    openReadModal(entryData.id); 
+    renderEntries(); 
+    // 저장된/수정된 글의 ID로 읽기 모달 열기
+    // 신규 작성 시 entryData.id는 위에서 할당됨 (로컬) or DB저장후 가져와야 함. 
+    // 편의상 로컬 객체의 ID 사용 (DB 연동 시에는 다시 로드된 entries에서 찾아야 정확함)
+    // 여기서는 간단히 0.1초 뒤 실행
+    setTimeout(() => {
+        // DB 저장 후 갱신된 entries에서 최신 글(또는 수정된 글) 찾기
+        const savedId = isEditMode ? editingId : (currentUser ? entries.find(e => e.title === title && e.timestamp === now)?.id : entryData.id);
+        if(savedId) openReadModal(savedId);
+    }, 500); 
 } catch(e) { console.error("Save Error:", e); alert("저장에 실패했습니다. 잠시 후 다시 시도해주세요."); } }
 async function moveToTrash(id) { if(!confirm('휴지통으로 이동하시겠습니까?')) return; if(currentUser){ const docRef = doc(db, "users", currentUser.uid, "entries", id); await updateDoc(docRef, { isDeleted: true }); await loadDataFromFirestore(); } else { const index = entries.findIndex(e => e.id === id); if(index !== -1) entries[index].isDeleted = true; localStorage.setItem('faithLogDB', JSON.stringify(entries)); } history.back(); renderEntries(); } 
 window.permanentDelete = async (id) => { 
