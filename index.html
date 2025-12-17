@@ -22,6 +22,7 @@
                     <input type="text" id="search-input" placeholder="검색어를 입력하세요">
                 </div>
                 <div class="auth-area">
+                    <span class="login-msg hidden" id="login-msg-area">로그인으로 기록을 간직하세요</span>
                     <button id="login-trigger-btn" class="login-btn-header">로그인</button>
                     <button id="logout-btn" class="login-btn-header hidden">로그아웃</button>
                 </div>
@@ -57,114 +58,106 @@
 
     <div id="write-modal" class="full-screen-modal hidden">
         <div class="write-header">
-            <button id="close-write-btn" class="text-btn">취소</button>
-            <span class="write-category" id="display-category">기록</span>
-            <button id="publish-btn" class="publish-btn">발행</button>
+            <button id="close-write-btn" class="text-btn nav-back-btn">
+                <i class="ph ph-caret-left"></i> <span id="back-btn-text">목록</span>
+            </button>
+            
+            <div class="header-actions">
+                <button id="btn-readonly" class="icon-action-btn" title="읽기 전용"><i class="ph ph-eye"></i></button>
+                <button id="btn-bookmode" class="icon-action-btn" title="책 모드"><i class="ph ph-book-open"></i></button>
+                <button id="btn-copy-text" class="icon-action-btn" title="내용 복사"><i class="ph ph-copy"></i></button>
+            </div>
         </div>
 
-        <div class="editor-toolbar">
-            <div class="tool-group">
-                <select id="font-selector" class="font-select">
-                    <option value="Pretendard">고딕</option>
-                    <option value="Noto Serif KR">명조</option>
-                    <option value="Nanum Pen Script">손글씨</option>
-                </select>
-                <div class="font-size-controls">
-                    <button class="tool-btn small" id="btn-global-size-down">가-</button>
-                    <button class="tool-btn small" id="btn-global-size-up">가+</button>
+        <div class="editor-toolbar" id="editor-toolbar">
+            <div class="toolbar-content">
+                <div class="tool-group">
+                    <select id="font-selector" class="font-select">
+                        <option value="Pretendard">고딕</option>
+                        <option value="Noto Serif KR">명조</option>
+                        <option value="Nanum Pen Script">손글씨</option>
+                    </select>
+                    <div class="font-size-controls">
+                        <button class="tool-btn small" id="btn-global-size-down">가-</button>
+                        <button class="tool-btn small" id="btn-global-size-up">가+</button>
+                    </div>
+                </div>
+                
+                <div class="toolbar-divider"></div>
+
+                <div class="tool-group">
+                    <button class="tool-btn" data-cmd="undo" title="되돌리기"><i class="ph ph-arrow-u-up-left"></i></button>
+                    <button class="tool-btn" data-cmd="redo" title="다시하기"><i class="ph ph-arrow-u-up-right"></i></button>
+                </div>
+
+                <div class="toolbar-divider"></div>
+                
+                <div class="tool-group">
+                    <button class="tool-btn" data-cmd="justifyLeft"><i class="ph ph-text-align-left"></i></button>
+                    <button class="tool-btn" data-cmd="justifyCenter"><i class="ph ph-text-align-center"></i></button>
+                    <button class="tool-btn" data-cmd="justifyRight"><i class="ph ph-text-align-right"></i></button>
+                </div>
+
+                <div class="toolbar-divider"></div>
+
+                <div class="tool-group">
+                    <button class="tool-btn" id="sticker-btn" title="스티커"><i class="ph ph-smiley"></i></button>
                 </div>
             </div>
             
-            <div class="toolbar-divider"></div>
-
-            <div class="tool-group">
-                <button class="tool-btn" data-cmd="undo" title="되돌리기"><i class="ph ph-arrow-u-up-left"></i></button>
-                <button class="tool-btn" data-cmd="redo" title="다시하기"><i class="ph ph-arrow-u-up-right"></i></button>
-            </div>
-
-            <div class="toolbar-divider"></div>
-            
-            <div class="tool-group">
-                <button class="tool-btn" data-cmd="justifyLeft"><i class="ph ph-text-align-left"></i></button>
-                <button class="tool-btn" data-cmd="justifyCenter"><i class="ph ph-text-align-center"></i></button>
-                <button class="tool-btn" data-cmd="justifyRight"><i class="ph ph-text-align-right"></i></button>
-            </div>
-
-            <div class="toolbar-divider"></div>
-
-            <div class="tool-group">
-                <button class="tool-btn" id="toolbar-color-btn"><i class="ph ph-palette" style="color:#F59E0B;"></i></button>
-                <button class="tool-btn" id="sticker-btn"><i class="ph ph-smiley"></i></button>
-            </div>
+            <button id="toolbar-toggle-btn" class="toolbar-toggle-btn" title="툴바 접기/펴기">
+                <i class="ph ph-caret-up"></i>
+            </button>
         </div>
         
-        <div class="editor-container">
+        <div class="editor-container" id="editor-container">
+            <div class="meta-info-row" id="meta-info-row">
+                <span id="display-category" class="write-category"></span>
+                <span id="display-date" class="write-date"></span>
+            </div>
             <input type="text" id="edit-title" class="editor-title" placeholder="제목" autocomplete="off">
             <input type="text" id="edit-subtitle" class="editor-subtitle" placeholder="소제목" autocomplete="off">
             <div class="divider"></div>
             <div id="editor-body" class="editor-body" contenteditable="true" placeholder="이곳에 은혜를 기록하세요..."></div>
         </div>
 
+        <div id="book-nav-left" class="book-nav prev hidden"><i class="ph ph-caret-left"></i></div>
+        <div id="book-nav-right" class="book-nav next hidden"><i class="ph ph-caret-right"></i></div>
+        <div id="page-indicator" class="page-indicator hidden"></div>
+
         <div id="sticker-palette" class="sticker-palette hidden">
             <div id="sticker-grid" class="sticker-grid"></div>
         </div>
 
         <div id="color-palette-popup" class="color-palette-popup hidden">
+            <div class="palette-header">
+                <button class="color-remove-btn" id="btn-remove-color">
+                    <i class="ph ph-prohibit"></i> 색상 없음
+                </button>
+            </div>
             <div class="color-grid">
-                <button class="color-dot" style="background-color: #000000;" data-color="#000000" title="검정"></button>
-                <button class="color-dot" style="background-color: #EF4444;" data-color="#EF4444" title="빨강"></button>
-                <button class="color-dot" style="background-color: #F59E0B;" data-color="#F59E0B" title="주황"></button>
-                <button class="color-dot" style="background-color: #10B981;" data-color="#10B981" title="초록"></button>
-                <button class="color-dot" style="background-color: #3B82F6;" data-color="#3B82F6" title="파랑"></button>
-                <button class="color-dot" style="background-color: #8B5CF6;" data-color="#8B5CF6" title="보라"></button>
+                <button class="color-dot" style="background-color: #111827;" data-color="#111827" title="Black"></button>
+                <button class="color-dot" style="background-color: #EF4444;" data-color="#EF4444" title="Red"></button>
+                <button class="color-dot" style="background-color: #F97316;" data-color="#F97316" title="Orange"></button>
+                <button class="color-dot" style="background-color: #F59E0B;" data-color="#F59E0B" title="Amber"></button>
+                <button class="color-dot" style="background-color: #10B981;" data-color="#10B981" title="Green"></button>
                 
-                <button class="color-dot" style="background-color: #808080;" data-color="#808080" title="기본 회색"></button>
-                <button class="color-dot" style="background-color: #FF0000;" data-color="#FF0000" title="기본 빨강"></button>
-                <button class="color-dot" style="background-color: #FFA500;" data-color="#FFA500" title="기본 주황"></button>
-                <button class="color-dot" style="background-color: #008000;" data-color="#008000" title="기본 녹색"></button>
-                <button class="color-dot" style="background-color: #0000FF;" data-color="#0000FF" title="기본 파랑"></button>
-                <button class="color-dot" style="background-color: #800080;" data-color="#800080" title="기본 보라"></button>
+                <button class="color-dot" style="background-color: #3B82F6;" data-color="#3B82F6" title="Blue"></button>
+                <button class="color-dot" style="background-color: #6366F1;" data-color="#6366F1" title="Indigo"></button>
+                <button class="color-dot" style="background-color: #8B5CF6;" data-color="#8B5CF6" title="Violet"></button>
+                <button class="color-dot" style="background-color: #EC4899;" data-color="#EC4899" title="Pink"></button>
+                <button class="color-dot" style="background-color: #6B7280;" data-color="#6B7280" title="Gray"></button>
             </div>
         </div>
 
         <div id="floating-menu" class="floating-menu hidden">
             <button class="float-btn" id="btn-float-color"><i class="ph ph-palette" style="color:#FCD34D;"></i></button>
-            <button class="float-btn" id="btn-float-hilite"><i class="ph ph-highlighter" style="color:#FDE047;"></i></button> <div class="float-divider"></div>
+            <button class="float-btn" id="btn-float-bg-color" title="배경색"><i class="ph ph-paint-bucket" style="color:#FDE047;"></i></button>
+            <div class="float-divider"></div>
             <button class="float-btn" data-cmd="bold"><i class="ph ph-text-b"></i></button>
             <button class="float-btn" data-cmd="italic"><i class="ph ph-text-italic"></i></button>
-            <button class="float-btn" data-cmd="underline"><i class="ph ph-text-underline"></i></button> <button class="float-btn" data-cmd="strikeThrough"><i class="ph ph-text-strikethrough"></i></button> </div>
-    </div>
-
-    <div id="read-modal" class="full-screen-modal hidden">
-        <div class="read-header">
-            <button id="close-read-btn" class="back-btn"><i class="ph ph-arrow-left"></i> 목록</button>
-            <div class="read-actions">
-                <div class="view-mode-group">
-                    <button id="mode-btn-default" class="text-btn icon-only active" title="기본 보기"><i class="ph ph-scroll"></i></button>
-                    <button id="mode-btn-focus" class="text-btn icon-only" title="읽기 전용"><i class="ph ph-eye"></i></button>
-                    <button id="mode-btn-book" class="text-btn icon-only" title="책 모드"><i class="ph ph-book-open"></i></button>
-                </div>
-                <button id="share-read-btn" class="text-btn icon-only" title="공유하기" style="margin-left: 8px;"><i class="ph ph-share-network"></i></button>
-            </div>
-        </div>
-
-        <div id="book-nav-left" class="book-nav prev hidden"><i class="ph ph-caret-left"></i></div>
-        <div id="book-nav-right" class="book-nav next hidden"><i class="ph ph-caret-right"></i></div>
-        <button id="exit-focus-btn" class="exit-focus-btn hidden"><i class="ph ph-x"></i></button>
-
-        <div class="read-content-area" id="read-content-area">
-            <h1 id="read-title"></h1>
-            <div class="read-sub-row">
-                <h3 id="read-subtitle"></h3>
-                <div class="read-meta">
-                    <span id="read-category" class="meta-category"></span>
-                    <span class="meta-divider">|</span>
-                    <span id="read-date" class="meta-date"></span>
-                </div>
-            </div>
-            <div class="divider"></div>
-            <div id="read-body" class="article-body"></div>
-            <div id="page-indicator" class="page-indicator hidden"></div>
+            <button class="float-btn" data-cmd="underline"><i class="ph ph-text-underline"></i></button>
+            <button class="float-btn" data-cmd="strikeThrough"><i class="ph ph-text-strikethrough"></i></button>
         </div>
     </div>
 
@@ -186,24 +179,25 @@
                     <div class="login-actions">
                         <label class="check-container">
                             <input type="checkbox" id="save-id-check">
-                            <span class="checkmark"></span> 아이디 저장
+                            <span class="checkmark"></span> 자동 로그인
                         </label>
-                        <button id="forgot-pw-btn">비밀번호 찾기</button>
                     </div>
                     <button type="submit" class="btn-login-submit">로그인</button>
                 </form>
                 <div class="login-footer">
                     <button id="signup-btn">회원가입</button>
+                    <span class="separator">|</span>
+                    <button id="forgot-pw-btn">비밀번호 찾기</button>
                 </div>
             </div>
         </div>
     </div>
 
     <div id="trash-modal" class="full-screen-modal hidden">
-        <div class="read-header">
-            <button id="close-trash-btn" class="back-btn"><i class="ph ph-arrow-left"></i> 뒤로</button>
-            <h3>휴지통</h3>
-            <div style="width: 40px;"></div>
+        <div class="write-header">
+            <button id="close-trash-btn" class="text-btn nav-back-btn"><i class="ph ph-arrow-left"></i> 뒤로</button>
+            <span style="font-weight:600; font-size:16px;">휴지통</span>
+            <div style="width: 60px;"></div>
         </div>
         <div class="trash-container" id="trash-list"></div>
     </div>
@@ -227,12 +221,10 @@
         <div style="height:1px; background:#eee; margin:4px 0;"></div>
         <button id="ctx-delete" class="ctx-item danger"><i class="ph ph-trash"></i> 삭제</button>
     </div>
-
     <div id="category-context-menu" class="context-menu hidden">
         <button id="ctx-cat-rename" class="ctx-item"><i class="ph ph-pencil"></i> 이름 변경</button>
         <button id="ctx-cat-delete" class="ctx-item danger"><i class="ph ph-trash"></i> 주제 삭제</button>
     </div>
-
     <div id="move-modal" class="modal-overlay hidden">
         <div class="simple-modal" style="width: 280px;">
             <h3>주제 이동</h3>
@@ -240,7 +232,6 @@
             <button id="close-move-btn" class="cancel-btn" style="width:100%;">취소</button>
         </div>
     </div>
-
     <div id="lock-modal" class="modal-overlay hidden">
         <div class="simple-modal">
             <h3 id="lock-modal-title">비밀번호 설정</h3>

@@ -45,26 +45,25 @@ let contextTargetId = null;
 let contextCatId = null;    
 let longPressTimer = null;
 let lastFocusedEdit = null;
+let activeColorMode = 'foreColor';
+let autoSaveTimer = null;
 
 // --- DOM 요소 변수 ---
 let loginModal, loginTriggerBtn, logoutBtn, resetPwModal;
-let entryList, writeModal, readModal, trashModal, trashList, tabContainer;
+let entryList, writeModal, trashModal, trashList, tabContainer;
 let editBody, editTitle, editSubtitle;
 let fontSelector, stickerPalette, stickerGrid; 
 let floatingMenu, floatColorBtn, colorPalettePopup, colorPicker; 
-let modeBtnDefault, modeBtnFocus, modeBtnBook;
-let exitFocusBtn, readContentArea, bookNavLeft, bookNavRight, pageIndicator;
+let exitFocusBtn, bookNavLeft, bookNavRight, pageIndicator;
 let sortCriteria, sortOrderBtn, sortIcon;
 let contextMenu, catContextMenu, moveModal, moveCategoryList, lockModal;
 let lockPwInput, lockModalTitle, lockModalDesc;
-let readTitle, readSubtitle, readBody, readDate, readCategory;
-let shareReadBtn;
+let editorToolbar, toolbarToggleBtn;
 
 const stickers = [ '✝️','🙏','📖','🕊️','🕯️','💒','🍞','🍷','🩸','🔥','☁️','☀️','🌙','⭐','✨','🌧️','🌈','❄️','🌿','🌷','🌻','🍂','🌱','🌲','🕊️','🦋','🐾','🧸','🎀','🎈','🎁','🔔','💡','🗝️','📝','📌','📎','✂️','🖍️','🖌️','💌','📅','☕','🍵','🥪','🍎','🤍','💛','🧡','❤️','💜','💙','💚','🤎','🖤','😊','😭','🥰','🤔','💪' ];
 
 function init() {
     loadDOMElements();
-
     if(categoryOrder.length === 0) categoryOrder = allCategories.map(c => c.id);
 
     if (typeof Sortable !== 'undefined' && tabContainer) {
@@ -74,8 +73,7 @@ function init() {
             dragClass: 'sortable-drag',
             direction: 'horizontal',
             filter: '.add-cat-btn',
-            delay: 200, 
-            delayOnTouchOnly: true,
+            delay: 200, delayOnTouchOnly: true,
             onMove: function(evt) { return evt.related.className.indexOf('add-cat-btn') === -1; },
             onEnd: function (evt) {
                 const newOrder = [];
@@ -95,9 +93,12 @@ function init() {
         });
     }
 
-    // [수정] 뒤로가기 시 모달 닫기
     window.addEventListener('popstate', (event) => {
-        closeAllModals();
+        if (event.state && event.state.modal === 'open' && event.state.mode) {
+            toggleViewMode('default', false);
+            return;
+        }
+        closeAllModals(false);
     });
 
     document.addEventListener('click', (e) => {
@@ -112,11 +113,18 @@ function init() {
         }
         if(colorPalettePopup && !colorPalettePopup.classList.contains('hidden')) {
             const isClickInside = colorPalettePopup.contains(e.target);
-            const isToolbarBtn = document.getElementById('toolbar-color-btn') && document.getElementById('toolbar-color-btn').contains(e.target);
-            const isFloatBtn = document.getElementById('btn-float-color') && document.getElementById('btn-float-color').contains(e.target);
-            if (!isClickInside && !isToolbarBtn && !isFloatBtn) {
+            const isFloatColor = document.getElementById('btn-float-color') && document.getElementById('btn-float-color').contains(e.target);
+            const isFloatBg = document.getElementById('btn-float-bg-color') && document.getElementById('btn-float-bg-color').contains(e.target);
+            if (!isClickInside && !isFloatColor && !isFloatBg) {
                 colorPalettePopup.classList.add('hidden');
             }
+        }
+        if(stickerPalette && !stickerPalette.classList.contains('hidden')) {
+             const isClickInside = stickerPalette.contains(e.target);
+             const isStickerBtn = document.getElementById('sticker-btn') && document.getElementById('sticker-btn').contains(e.target);
+             if(!isClickInside && !isStickerBtn) {
+                 stickerPalette.classList.add('hidden');
+             }
         }
     });
 
@@ -130,16 +138,19 @@ function init() {
         isLoading = true; 
         renderEntries();
         
+        const loginMsg = document.getElementById('login-msg-area');
         if (user) {
             currentUser = user;
             if(logoutBtn) logoutBtn.classList.remove('hidden');
             if(loginTriggerBtn) loginTriggerBtn.classList.add('hidden');
             if(loginModal) loginModal.classList.add('hidden');
+            if(loginMsg) loginMsg.classList.add('hidden');
             await loadDataFromFirestore();
         } else {
             currentUser = null;
             if(logoutBtn) logoutBtn.classList.add('hidden');
             if(loginTriggerBtn) loginTriggerBtn.classList.remove('hidden');
+            if(loginMsg) loginMsg.classList.remove('hidden');
             loadDataFromLocal();
         }
         
@@ -166,18 +177,13 @@ function loadDOMElements() {
     resetPwModal = document.getElementById('reset-pw-modal');
     entryList = document.getElementById('entry-list');
     writeModal = document.getElementById('write-modal');
-    readModal = document.getElementById('read-modal');
     trashModal = document.getElementById('trash-modal');
     trashList = document.getElementById('trash-list');
     tabContainer = document.getElementById('tab-container');
     editBody = document.getElementById('editor-body');
     editTitle = document.getElementById('edit-title');
     editSubtitle = document.getElementById('edit-subtitle');
-    modeBtnDefault = document.getElementById('mode-btn-default');
-    modeBtnFocus = document.getElementById('mode-btn-focus');
-    modeBtnBook = document.getElementById('mode-btn-book');
-    exitFocusBtn = document.getElementById('exit-focus-btn');
-    readContentArea = document.getElementById('read-content-area');
+    exitFocusBtn = document.getElementById('exit-view-btn');
     bookNavLeft = document.getElementById('book-nav-left');
     bookNavRight = document.getElementById('book-nav-right');
     pageIndicator = document.getElementById('page-indicator');
@@ -192,27 +198,28 @@ function loadDOMElements() {
     lockPwInput = document.getElementById('lock-pw-input');
     lockModalTitle = document.getElementById('lock-modal-title');
     lockModalDesc = document.getElementById('lock-modal-desc');
-    readTitle = document.getElementById('read-title');
-    readSubtitle = document.getElementById('read-subtitle');
-    readBody = document.getElementById('read-body');
-    readDate = document.getElementById('read-date');
-    readCategory = document.getElementById('read-category');
-    shareReadBtn = document.getElementById('share-read-btn');
+    editorToolbar = document.getElementById('editor-toolbar');
+    toolbarToggleBtn = document.getElementById('toolbar-toggle-btn');
 }
 
-function closeAllModals() {
-    if(writeModal) writeModal.classList.add('hidden');
-    if(readModal) readModal.classList.add('hidden');
+function closeAllModals(goBack = true) {
+    if(writeModal) {
+        writeModal.classList.add('hidden');
+        toggleViewMode('default', false);
+    }
     if(trashModal) trashModal.classList.add('hidden');
     if(loginModal) loginModal.classList.add('hidden');
     if(resetPwModal) resetPwModal.classList.add('hidden');
+    
+    if(stickerPalette) stickerPalette.classList.add('hidden');
+    if(colorPalettePopup) colorPalettePopup.classList.add('hidden');
     if(floatingMenu) floatingMenu.classList.add('hidden');
-    if(colorPalettePopup) colorPalettePopup.classList.add('hidden'); 
     if(contextMenu) contextMenu.classList.add('hidden');
-    if(catContextMenu) catContextMenu.classList.add('hidden');
     if(moveModal) moveModal.classList.add('hidden');
     if(lockModal) lockModal.classList.add('hidden');
-    if(stickerPalette) stickerPalette.classList.add('hidden');
+    
+    if(goBack) history.back();
+    renderEntries();
 }
 
 function openModal(modal) {
@@ -221,25 +228,36 @@ function openModal(modal) {
     modal.classList.remove('hidden');
 }
 
+function debouncedSave() {
+    if(autoSaveTimer) clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(saveEntry, 1000); 
+}
+
 function setupEventListeners() {
     if(loginTriggerBtn) loginTriggerBtn.addEventListener('click', () => openModal(loginModal));
     const closeLoginBtn = document.getElementById('close-login-btn');
-    if(closeLoginBtn) closeLoginBtn.addEventListener('click', () => history.back());
+    if(closeLoginBtn) closeLoginBtn.addEventListener('click', () => closeAllModals(true));
+    
     const loginForm = document.getElementById('login-form');
-    if(loginForm) loginForm.addEventListener('submit', async (e) => { e.preventDefault(); try { await setPersistence(auth, browserLocalPersistence); await signInWithEmailAndPassword(auth, document.getElementById('login-email').value, document.getElementById('login-pw').value); history.back(); } catch (error) { alert("로그인 정보를 다시 확인해주세요."); } });
+    if(loginForm) loginForm.addEventListener('submit', async (e) => { 
+        e.preventDefault(); 
+        try { 
+            const persistence = document.getElementById('save-id-check').checked ? browserLocalPersistence : browserSessionPersistence;
+            await setPersistence(auth, persistence); 
+            await signInWithEmailAndPassword(auth, document.getElementById('login-email').value, document.getElementById('login-pw').value); 
+            closeAllModals(true); 
+        } catch (error) { alert("로그인 정보를 다시 확인해주세요."); } 
+    });
+    
     const signupBtn = document.getElementById('signup-btn');
     if(signupBtn) signupBtn.addEventListener('click', async (e) => { e.preventDefault(); try { await createUserWithEmailAndPassword(auth, document.getElementById('login-email').value, document.getElementById('login-pw').value); alert('가입 완료되었습니다.'); } catch (error) { alert("실패: " + error.message); } });
     if(logoutBtn) logoutBtn.addEventListener('click', () => { if(confirm("로그아웃 하시겠습니까?")) signOut(auth); });
     const forgotPwBtn = document.getElementById('forgot-pw-btn');
     if(forgotPwBtn) forgotPwBtn.addEventListener('click', (e) => { e.preventDefault(); openModal(resetPwModal); });
     const closeResetBtn = document.getElementById('close-reset-btn');
-    if(closeResetBtn) closeResetBtn.addEventListener('click', () => history.back());
+    if(closeResetBtn) closeResetBtn.addEventListener('click', () => closeAllModals(true));
     
-    // [수정] 정렬 기능 복구
-    if(sortCriteria) sortCriteria.addEventListener('change', (e) => { 
-        currentSortBy = e.target.value; 
-        renderEntries(); 
-    });
+    if(sortCriteria) sortCriteria.addEventListener('change', (e) => { currentSortBy = e.target.value; renderEntries(); });
     if(sortOrderBtn) sortOrderBtn.addEventListener('click', () => { 
         currentSortOrder = currentSortOrder === 'desc' ? 'asc' : 'desc'; 
         if(sortIcon) { 
@@ -271,22 +289,6 @@ function setupEventListeners() {
         });
     });
 
-    const toolbarColorBtn = document.getElementById('toolbar-color-btn');
-    if(toolbarColorBtn) {
-        toolbarColorBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            if(stickerPalette) stickerPalette.classList.add('hidden');
-            if(colorPalettePopup) {
-                // 툴바 위치 기준
-                colorPalettePopup.style.top = '110px';
-                colorPalettePopup.style.bottom = 'auto';
-                colorPalettePopup.style.left = '50%';
-                colorPalettePopup.style.transform = 'translateX(-50%)';
-                colorPalettePopup.classList.toggle('hidden');
-            }
-        });
-    }
-
     const stickerBtn = document.getElementById('sticker-btn');
     if(stickerBtn) {
         stickerBtn.addEventListener('click', (e) => { 
@@ -295,10 +297,33 @@ function setupEventListeners() {
             toggleStickerMenu();
         });
     }
+    
+    if(toolbarToggleBtn) {
+        toolbarToggleBtn.addEventListener('click', () => {
+            if(editorToolbar) {
+                editorToolbar.classList.toggle('collapsed');
+                const icon = toolbarToggleBtn.querySelector('i');
+                if(editorToolbar.classList.contains('collapsed')) {
+                    icon.classList.remove('ph-caret-up');
+                    icon.classList.add('ph-caret-down');
+                } else {
+                    icon.classList.remove('ph-caret-down');
+                    icon.classList.add('ph-caret-up');
+                }
+            }
+        });
+    }
 
-    document.querySelectorAll('.color-dot[data-color]').forEach(btn => { 
+    document.querySelectorAll('.color-dot').forEach(btn => { 
         btn.addEventListener('mousedown', (e) => { 
-            e.preventDefault(); formatDoc('foreColor', btn.dataset.color); colorPalettePopup.classList.add('hidden'); 
+            e.preventDefault(); 
+            if(btn.id === 'btn-remove-color' || btn.classList.contains('remove-color')) {
+                 if(activeColorMode === 'hiliteColor') formatDoc('hiliteColor', 'transparent');
+                 else formatDoc('foreColor', '#000000');
+            } else {
+                 formatDoc(activeColorMode, btn.dataset.color); 
+            }
+            colorPalettePopup.classList.add('hidden'); 
         }); 
     });
 
@@ -306,10 +331,12 @@ function setupEventListeners() {
     if(editTitle) {
         editTitle.addEventListener('focus', () => trackFocus(editTitle));
         editTitle.addEventListener('click', (e) => { e.stopPropagation(); });
+        editTitle.addEventListener('input', debouncedSave);
     }
     if(editSubtitle) {
         editSubtitle.addEventListener('focus', () => trackFocus(editSubtitle));
         editSubtitle.addEventListener('click', (e) => { e.stopPropagation(); });
+        editSubtitle.addEventListener('input', debouncedSave);
     }
     if(editBody) {
         editBody.addEventListener('focus', () => trackFocus(editBody));
@@ -321,10 +348,19 @@ function setupEventListeners() {
                 e.preventDefault(); saveEntry(); 
             } 
         });
+        editBody.addEventListener('input', debouncedSave);
+        
         document.addEventListener('selectionchange', handleSelection);
         editBody.addEventListener('mouseup', handleSelection);
         editBody.addEventListener('keyup', handleSelection);
         editBody.addEventListener('touchend', () => setTimeout(handleSelection, 100));
+        
+        // 중요: 책 모드 스크롤 (editor-container가 스크롤러임)
+        const container = document.getElementById('editor-container');
+        if(container) {
+            container.addEventListener('touchstart', (e) => { if(currentViewMode !== 'book') return; touchStartX = e.changedTouches[0].screenX; }, {passive:true});
+            container.addEventListener('touchend', (e) => { if(currentViewMode !== 'book') return; touchEndX = e.changedTouches[0].screenX; handleSwipe(); }, {passive:true});
+        }
     }
 
     if(floatingMenu) {
@@ -338,76 +374,66 @@ function setupEventListeners() {
         const btnFloatColor = document.getElementById('btn-float-color');
         if(btnFloatColor) {
             btnFloatColor.addEventListener('mousedown', (e) => {
-                e.preventDefault(); 
-                e.stopPropagation(); 
-                if(colorPalettePopup) {
-                    const rect = floatingMenu.getBoundingClientRect();
-                    colorPalettePopup.style.bottom = 'auto'; 
-                    colorPalettePopup.style.top = `${rect.bottom + 10}px`;
-                    colorPalettePopup.style.left = `${rect.left + (rect.width/2)}px`; 
-                    colorPalettePopup.style.transform = 'translateX(-50%)';
-                    colorPalettePopup.classList.toggle('hidden');
-                }
+                e.preventDefault(); e.stopPropagation(); activeColorMode = 'foreColor'; openFloatingPalette();
             });
         }
         
-        // [추가] 형광펜 버튼 (노란색 배경)
-        const btnFloatHilite = document.getElementById('btn-float-hilite');
-        if(btnFloatHilite) {
-            btnFloatHilite.addEventListener('mousedown', (e) => {
-                e.preventDefault();
-                formatDoc('hiliteColor', '#FDE047');
+        const btnFloatBgColor = document.getElementById('btn-float-bg-color');
+        if(btnFloatBgColor) {
+            btnFloatBgColor.addEventListener('mousedown', (e) => {
+                e.preventDefault(); e.stopPropagation(); activeColorMode = 'hiliteColor'; openFloatingPalette();
             });
         }
     }
     
-    // [제거] 플로팅 메뉴의 글자크기 버튼 제거됨
+    function openFloatingPalette() {
+        if(colorPalettePopup) {
+            const rect = floatingMenu.getBoundingClientRect();
+            colorPalettePopup.style.bottom = 'auto'; 
+            colorPalettePopup.style.top = `${rect.bottom + 10}px`;
+            colorPalettePopup.style.left = `${rect.left + (rect.width/2)}px`; 
+            colorPalettePopup.style.transform = 'translateX(-50%)';
+            colorPalettePopup.classList.toggle('hidden');
+        }
+    }
+
+    const btnSizeUp = document.getElementById('btn-sel-size-up');
+    if(btnSizeUp) btnSizeUp.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); changeSelectionFontSize(2); });
+    const btnSizeDown = document.getElementById('btn-sel-size-down');
+    if(btnSizeDown) btnSizeDown.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); changeSelectionFontSize(-2); });
 
     const trashBtn = document.getElementById('trash-btn');
     if(trashBtn) trashBtn.addEventListener('click', openTrashModal);
     const closeTrashBtn = document.getElementById('close-trash-btn');
-    if(closeTrashBtn) closeTrashBtn.addEventListener('click', () => history.back());
+    if(closeTrashBtn) closeTrashBtn.addEventListener('click', () => closeAllModals(true));
     const writeBtn = document.getElementById('write-btn');
     if(writeBtn) writeBtn.addEventListener('click', () => openEditor(false));
     
+    // [수정] 목록 버튼 로직: 읽기모드 -> 편집모드, 편집모드 -> 목록
     const closeWriteBtn = document.getElementById('close-write-btn');
-    if(closeWriteBtn) closeWriteBtn.addEventListener('click', () => { 
-        if((editTitle && editTitle.value) || (editBody && editBody.innerText.trim())) { 
-            if(confirm('작성을 취소하시겠습니까?\n작성 중인 내용은 저장되지 않습니다.')) history.back(); 
-        } else { history.back(); } 
+    if(closeWriteBtn) closeWriteBtn.addEventListener('click', async () => { 
+        if(currentViewMode !== 'default') {
+            toggleViewMode('default', false);
+        } else {
+            await saveEntry(); 
+            closeAllModals(true); 
+        }
     });
     
-    const publishBtn = document.getElementById('publish-btn');
-    if(publishBtn) publishBtn.addEventListener('click', saveEntry);
+    const btnReadOnly = document.getElementById('btn-readonly');
+    if(btnReadOnly) btnReadOnly.addEventListener('click', () => toggleViewMode('readOnly'));
     
-    // [수정] 목록 버튼: 확실하게 뒤로가기
-    const closeReadBtn = document.getElementById('close-read-btn');
-    if(closeReadBtn) closeReadBtn.addEventListener('click', () => {
-        history.back(); // openModal로 pushState 했으므로 back 호출
-    });
+    const btnBookMode = document.getElementById('btn-bookmode');
+    if(btnBookMode) btnBookMode.addEventListener('click', () => toggleViewMode('book'));
     
-    const switchToEdit = () => {
-        const entry = entries.find(e => e.id === editingId);
-        if(entry) { history.back(); setTimeout(() => openEditor(true, entry), 50); }
-    };
-    
-    if(readTitle) readTitle.addEventListener('click', switchToEdit);
-    if(readSubtitle) readSubtitle.addEventListener('click', switchToEdit);
-    if(readBody) readBody.addEventListener('click', switchToEdit);
+    const btnCopyText = document.getElementById('btn-copy-text');
+    if(btnCopyText) btnCopyText.addEventListener('click', copyContentToClipboard);
 
-    if(shareReadBtn) shareReadBtn.addEventListener('click', shareEntry);
-
-    if(modeBtnDefault) modeBtnDefault.addEventListener('click', () => setReadMode('default'));
-    if(modeBtnFocus) modeBtnFocus.addEventListener('click', () => setReadMode('focus'));
-    if(modeBtnBook) modeBtnBook.addEventListener('click', () => setReadMode('book'));
-    if(exitFocusBtn) exitFocusBtn.addEventListener('click', () => setReadMode('default'));
+    if(exitFocusBtn) exitFocusBtn.addEventListener('click', () => toggleViewMode('default'));
     if(bookNavLeft) bookNavLeft.addEventListener('click', () => turnPage(-1));
     if(bookNavRight) bookNavRight.addEventListener('click', () => turnPage(1));
-    document.addEventListener('keydown', (e) => { if(currentViewMode === 'book' && readModal && !readModal.classList.contains('hidden')) { if(e.key === 'ArrowLeft') turnPage(-1); if(e.key === 'ArrowRight') turnPage(1); } });
-    if(readContentArea) {
-        readContentArea.addEventListener('touchstart', (e) => { if(currentViewMode !== 'book') return; touchStartX = e.changedTouches[0].screenX; }, {passive:true});
-        readContentArea.addEventListener('touchend', (e) => { if(currentViewMode !== 'book') return; touchEndX = e.changedTouches[0].screenX; handleSwipe(); }, {passive:true});
-    }
+    document.addEventListener('keydown', (e) => { if(currentViewMode === 'book' && !writeModal.classList.contains('hidden')) { if(e.key === 'ArrowLeft') turnPage(-1); if(e.key === 'ArrowRight') turnPage(1); } });
+
     const ctxMove = document.getElementById('ctx-move');
     if(ctxMove) ctxMove.addEventListener('click', () => openMoveModal());
     const ctxLock = document.getElementById('ctx-lock');
@@ -428,26 +454,19 @@ function setupEventListeners() {
     if(confirmLockBtn) confirmLockBtn.addEventListener('click', confirmLock);
 }
 
-async function shareEntry() {
-    const entry = entries.find(e => e.id === editingId);
-    if(!entry) return;
-    const shareData = {
-        title: entry.title,
-        text: `${entry.title}\n\n${entry.body.replace(/<[^>]*>?/gm, '')}`,
-        url: window.location.href
-    };
+function toggleStickerMenu() {
+    if(stickerPalette) stickerPalette.classList.toggle('hidden');
+}
+
+async function copyContentToClipboard() {
+    if(!editTitle || !editBody) return;
+    const text = `${editTitle.value}\n\n${editBody.innerText}`;
     try {
-        if (navigator.share) { await navigator.share(shareData); } 
-        else {
-            const tempInput = document.createElement('textarea');
-            tempInput.value = shareData.text;
-            document.body.appendChild(tempInput);
-            tempInput.select();
-            document.execCommand('copy');
-            document.body.removeChild(tempInput);
-            alert('내용이 클립보드에 복사되었습니다.');
-        }
-    } catch (err) { console.log('Share canceled or failed'); }
+        await navigator.clipboard.writeText(text);
+        alert("내용이 클립보드에 복사되었습니다.");
+    } catch(err) {
+        console.error("복사 실패", err);
+    }
 }
 
 function handleSelection() {
@@ -461,7 +480,6 @@ function handleSelection() {
     else if (activeEl === editSubtitle) targetEl = editSubtitle;
 
     if (!targetEl) return;
-
     if(targetEl.tagName === 'INPUT') {
         floatingMenu.classList.add('hidden');
         return;
@@ -482,13 +500,9 @@ function handleSelection() {
     const menuHeight = floatingMenu.offsetHeight || 50; 
     const menuWidth = floatingMenu.offsetWidth || 200;
     
-    // [수정] 플로팅 메뉴 위치: 글자 아래쪽으로
     let top = rect.bottom + 10; 
     let left = rect.left + (rect.width / 2) - (menuWidth / 2);
-    
-    if (top + menuHeight > window.innerHeight) {
-        top = rect.top - menuHeight - 10;
-    }
+    if (top + menuHeight > window.innerHeight) top = rect.top - menuHeight - 10;
     if (left < 10) left = 10;
     if (left + menuWidth > window.innerWidth - 10) left = window.innerWidth - menuWidth - 10;
     
@@ -503,6 +517,7 @@ window.formatDoc = (cmd, value = null) => {
     editBody.focus();
     document.execCommand(cmd, false, value);
     setTimeout(handleSelection, 0);
+    debouncedSave(); 
 };
 
 window.changeGlobalFontSize = (delta) => { 
@@ -525,6 +540,54 @@ window.changeGlobalFontSize = (delta) => {
             span.style.fontSize = newSpanSize + 'px';
         }
     });
+    debouncedSave();
+};
+
+window.changeSelectionFontSize = (delta) => {
+    const selection = window.getSelection();
+    if (!selection.rangeCount || selection.isCollapsed) return;
+
+    const range = selection.getRangeAt(0);
+    let parentElement = range.commonAncestorContainer.nodeType === 3 ? range.commonAncestorContainer.parentElement : range.commonAncestorContainer;
+    
+    if (parentElement.tagName === 'SPAN' && parentElement.style.fontSize) {
+        let currentSize = parseFloat(parentElement.style.fontSize);
+        if(!isNaN(currentSize)) {
+            let newSize = currentSize + delta;
+            if(newSize < 10) newSize = 10;
+            parentElement.style.fontSize = `${newSize}px`;
+            const newRange = document.createRange();
+            newRange.selectNodeContents(parentElement);
+            selection.removeAllRanges();
+            selection.addRange(newRange);
+            setTimeout(handleSelection, 0);
+            debouncedSave();
+            return;
+        }
+    }
+
+    const span = document.createElement("span");
+    let currentSize = 16;
+    const computedStyle = window.getComputedStyle(parentElement);
+    if(computedStyle.fontSize) currentSize = parseFloat(computedStyle.fontSize);
+    
+    let newSize = currentSize + delta;
+    if(newSize < 10) newSize = 10;
+    
+    span.style.fontSize = `${newSize}px`;
+
+    try {
+        const extractedContents = range.extractContents();
+        span.appendChild(extractedContents);
+        range.insertNode(span);
+        selection.removeAllRanges();
+        const newRange = document.createRange();
+        newRange.selectNodeContents(span);
+        selection.addRange(newRange);
+    } catch(e) { console.error("Selection wrapping failed", e); }
+    
+    setTimeout(handleSelection, 0);
+    debouncedSave();
 };
 
 window.insertSticker = (emoji) => { 
@@ -540,6 +603,7 @@ window.insertSticker = (emoji) => {
         editBody.focus(); 
         document.execCommand('insertText', false, emoji); 
     } 
+    debouncedSave();
 };
 
 function renderStickers() { 
@@ -563,6 +627,8 @@ function openEditor(m, d) {
     const catName = allCategories.find(c => c.id === currentCategory)?.name || '기록';
     const displayCat = document.getElementById('display-category');
     if(displayCat) displayCat.innerText = catName;
+    const displayDate = document.getElementById('display-date');
+    if(displayDate) displayDate.innerText = d ? d.date : new Date().toLocaleDateString('ko-KR');
 
     if(m&&d) { 
         editingId=d.id; 
@@ -578,12 +644,103 @@ function openEditor(m, d) {
         applyFontStyle('Pretendard', 16); 
     } 
     lastFocusedEdit = editBody;
-    editBody.focus(); 
+    toggleViewMode('default', false);
 }
 
-window.toggleStickerMenu = () => {
-    if(stickerPalette) stickerPalette.classList.toggle('hidden');
-};
+function toggleViewMode(mode, pushToHistory = true) {
+    currentViewMode = mode;
+    
+    if(pushToHistory && mode !== 'default') {
+        history.pushState({ modal: 'open', mode: mode }, null, '');
+    }
+
+    writeModal.classList.remove('mode-read-only', 'mode-book');
+    bookNavLeft.classList.add('hidden');
+    bookNavRight.classList.add('hidden');
+    pageIndicator.classList.add('hidden');
+    if(exitFocusBtn) exitFocusBtn.classList.add('hidden');
+    
+    // 버튼 활성 상태 표시
+    const btnReadOnly = document.getElementById('btn-readonly');
+    const btnBookMode = document.getElementById('btn-bookmode');
+    if(btnReadOnly) btnReadOnly.classList.remove('active');
+    if(btnBookMode) btnBookMode.classList.remove('active');
+    
+    // 모드에 따라 contenteditable 제어
+    if (mode === 'default') {
+        editTitle.readOnly = false;
+        editSubtitle.readOnly = false;
+        editBody.contentEditable = "true";
+    } else {
+        editTitle.readOnly = true;
+        editSubtitle.readOnly = true;
+        editBody.contentEditable = "false";
+    }
+
+    if (mode === 'readOnly') {
+        writeModal.classList.add('mode-read-only');
+        if(exitFocusBtn) exitFocusBtn.classList.remove('hidden');
+        if(btnReadOnly) btnReadOnly.classList.add('active');
+    } else if (mode === 'book') {
+        writeModal.classList.add('mode-book');
+        if(exitFocusBtn) exitFocusBtn.classList.remove('hidden');
+        if(btnBookMode) btnBookMode.classList.add('active');
+        // 책모드는 container 스크롤
+        const container = document.getElementById('editor-container');
+        if(container) container.scrollLeft = 0; 
+        updateBookNav();
+    }
+}
+
+function turnPage(direction) { 
+    if (currentViewMode !== 'book') return; 
+    const container = document.getElementById('editor-container');
+    const pageWidth = window.innerWidth; 
+    const currentScroll = container.scrollLeft; 
+    const newScroll = currentScroll + (direction * pageWidth); 
+    container.scrollTo({ left: newScroll, behavior: 'smooth' }); 
+    setTimeout(updateBookNav, 400); 
+}
+
+function updateBookNav() { 
+    if (currentViewMode !== 'book') return; 
+    const container = document.getElementById('editor-container');
+    const scrollLeft = container.scrollLeft; 
+    const scrollWidth = container.scrollWidth; 
+    const clientWidth = container.clientWidth; 
+    if (scrollLeft > 10) bookNavLeft.classList.remove('hidden'); else bookNavLeft.classList.add('hidden'); 
+    if (scrollLeft + clientWidth < scrollWidth - 10) bookNavRight.classList.remove('hidden'); else bookNavRight.classList.add('hidden'); 
+    const currentPage = Math.round(scrollLeft / clientWidth) + 1; 
+    const totalPages = Math.ceil(scrollWidth / clientWidth); 
+    pageIndicator.innerText = `${currentPage} / ${totalPages}`; 
+    pageIndicator.classList.remove('hidden'); 
+}
+
+function renderEntries(keyword = '') {
+    if(!entryList) return;
+    entryList.innerHTML = '';
+    if(isLoading) {
+        entryList.innerHTML = `<div style="text-align:center; margin-top:100px; color:#aaa; font-family:'Pretendard';">로딩 중...</div>`;
+        return;
+    }
+    const filtered = entries.filter(entry => !entry.isDeleted && entry.category === currentCategory && (entry.title.includes(keyword) || entry.body.includes(keyword)));
+    filtered.sort((a, b) => { let valA, valB; if (currentSortBy === 'title') { valA = a.title; valB = b.title; } else if (currentSortBy === 'modified') { valA = a.modifiedAt || a.timestamp; valB = b.modifiedAt || b.timestamp; } else { valA = a.timestamp; valB = b.timestamp; } if (valA < valB) return currentSortOrder === 'asc' ? -1 : 1; if (valA > valB) return currentSortOrder === 'asc' ? 1 : -1; return 0; });
+    if (filtered.length === 0) { entryList.innerHTML = `<div style="text-align:center; margin-top:100px; color:#aaa; font-family:'Pretendard';">기록이 없습니다.</div>`; return; }
+    filtered.forEach(entry => {
+        const div = document.createElement('article');
+        div.className = 'entry-card';
+        if (entry.isLocked) {
+            div.innerHTML = `<h3 class="card-title"><i class="ph ph-lock-key"></i> ${entry.title}</h3><p class="card-subtitle" style="color:#aaa;">비공개 글입니다.</p><div class="card-meta"><span>${entry.date}</span></div>`;
+            div.onclick = () => { contextTargetId = entry.id; openLockModal(); };
+        } else {
+            const dateStr = currentSortBy === 'modified' ? `수정: ${new Date(entry.modifiedAt || entry.timestamp).toLocaleDateString()}` : entry.date;
+            div.innerHTML = `<h3 class="card-title">${entry.title}</h3>${entry.subtitle ? `<p class="card-subtitle">${entry.subtitle}</p>` : ''}<div class="card-meta"><span>${dateStr}</span></div>`;
+            div.onclick = () => openEditor(true, entry);
+        }
+        attachContextMenu(div, entry.id);
+        entryList.appendChild(div);
+    });
+}
 
 function renderTabs() {
     if(!tabContainer) return;
@@ -797,107 +954,6 @@ async function updateEntryField(id, data) {
     }
 }
 
-function handleSwipe() { const swipeThreshold = 50; if (touchEndX < touchStartX - swipeThreshold) turnPage(1); else if (touchEndX > touchStartX + swipeThreshold) turnPage(-1); }
-function setReadMode(mode, pushToHistory = false) { 
-    if(!readModal) return;
-    currentViewMode = mode; 
-    
-    // pushToHistory 미사용 (단순 탭 전환 느낌)
-    
-    readModal.classList.remove('mode-focus', 'mode-book'); 
-    exitFocusBtn.classList.add('hidden'); 
-    bookNavLeft.classList.add('hidden'); 
-    bookNavRight.classList.add('hidden'); 
-    pageIndicator.classList.add('hidden'); 
-    readContentArea.style.transform = 'none'; 
-    modeBtnDefault.classList.remove('active'); 
-    modeBtnFocus.classList.remove('active'); 
-    modeBtnBook.classList.remove('active'); 
-    
-    if (mode === 'default') { 
-        modeBtnDefault.classList.add('active'); 
-    } else if (mode === 'focus') { 
-        modeBtnFocus.classList.add('active'); 
-        readModal.classList.add('mode-focus'); 
-        exitFocusBtn.classList.remove('hidden'); 
-    } else if (mode === 'book') { 
-        modeBtnBook.classList.add('active'); 
-        readModal.classList.add('mode-book'); 
-        exitFocusBtn.classList.remove('hidden'); 
-        readContentArea.scrollLeft = 0; 
-        updateBookNav(); 
-    } 
-}
-function turnPage(direction) { if (currentViewMode !== 'book') return; const pageWidth = window.innerWidth; const currentScroll = readContentArea.scrollLeft; const newScroll = currentScroll + (direction * pageWidth); readContentArea.scrollTo({ left: newScroll, behavior: 'smooth' }); setTimeout(updateBookNav, 400); }
-function updateBookNav() { if (currentViewMode !== 'book') return; const scrollLeft = readContentArea.scrollLeft; const scrollWidth = readContentArea.scrollWidth; const clientWidth = readContentArea.clientWidth; if (scrollLeft > 10) bookNavLeft.classList.remove('hidden'); else bookNavLeft.classList.add('hidden'); if (scrollLeft + clientWidth < scrollWidth - 10) bookNavRight.classList.remove('hidden'); else bookNavRight.classList.add('hidden'); const currentPage = Math.round(scrollLeft / clientWidth) + 1; const totalPages = Math.ceil(scrollWidth / clientWidth); pageIndicator.innerText = `${currentPage} / ${totalPages}`; pageIndicator.classList.remove('hidden'); }
-
-function renderEntries(keyword = '') {
-    if(!entryList) return;
-    entryList.innerHTML = '';
-    
-    if(isLoading) {
-        entryList.innerHTML = `<div style="text-align:center; margin-top:100px; color:#aaa; font-family:'Pretendard';">로딩 중...</div>`;
-        return;
-    }
-
-    const filtered = entries.filter(entry => !entry.isDeleted && entry.category === currentCategory && (entry.title.includes(keyword) || entry.body.includes(keyword)));
-    
-    // [수정] 정렬 로직 보완 (timestamp 등)
-    filtered.sort((a, b) => { 
-        let valA, valB; 
-        if (currentSortBy === 'title') { 
-            valA = a.title; valB = b.title; 
-        } else if (currentSortBy === 'modified') { 
-            valA = a.modifiedAt || a.timestamp; valB = b.modifiedAt || b.timestamp; 
-        } else { // created
-            valA = a.timestamp; valB = b.timestamp; 
-        }
-        
-        if (valA < valB) return currentSortOrder === 'asc' ? -1 : 1; 
-        if (valA > valB) return currentSortOrder === 'asc' ? 1 : -1; 
-        return 0; 
-    });
-
-    if (filtered.length === 0) { entryList.innerHTML = `<div style="text-align:center; margin-top:100px; color:#aaa; font-family:'Pretendard';">기록이 없습니다.</div>`; return; }
-    
-    filtered.forEach(entry => {
-        const div = document.createElement('article');
-        div.className = 'entry-card';
-        if (entry.isLocked) {
-            div.innerHTML = `<h3 class="card-title"><i class="ph ph-lock-key"></i> ${entry.title}</h3><p class="card-subtitle" style="color:#aaa;">비공개 글입니다.</p><div class="card-meta"><span>${entry.date}</span></div>`;
-            div.onclick = () => { contextTargetId = entry.id; openLockModal(); };
-        } else {
-            const dateStr = currentSortBy === 'modified' ? `수정: ${new Date(entry.modifiedAt || entry.timestamp).toLocaleDateString()}` : entry.date;
-            div.innerHTML = `<h3 class="card-title">${entry.title}</h3>${entry.subtitle ? `<p class="card-subtitle">${entry.subtitle}</p>` : ''}<div class="card-meta"><span>${dateStr}</span></div>`;
-            // [수정] 리스트 클릭 시 바로 수정 모드(Editor)로 진입
-            div.onclick = () => openEditor(true, entry);
-        }
-        attachContextMenu(div, entry.id);
-        entryList.appendChild(div);
-    });
-}
-
-function openReadModal(id) { 
-    const e = entries.find(x => x.id === id); if(!e) return; 
-    editingId = id; 
-    
-    openModal(readModal);
-    history.pushState({ modal: 'read', mode: 'default' }, null, '');
-
-    if(readTitle) readTitle.innerText = e.title; 
-    if(readSubtitle) readSubtitle.innerText = e.subtitle||''; 
-    if(readDate) readDate.innerText = e.date; 
-    if(readBody) {
-        const linkedContent = e.body.replace(/(?![^<]*>)(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank">$1</a>');
-        readBody.innerHTML = linkedContent; 
-        readBody.style.fontFamily = e.fontFamily||'Pretendard'; 
-        readBody.style.fontSize = (e.fontFamily==='Nanum Pen Script' ? (e.fontSize||16)+4 : (e.fontSize||16)) + 'px'; 
-    }
-    if(readCategory) readCategory.innerText = allCategories.find(c=>c.id===e.category)?.name || '기록'; 
-    
-    setReadMode('default', false); 
-}
-
 function loadDataFromLocal() { entries = JSON.parse(localStorage.getItem('faithLogDB')) || []; }
 
 async function loadDataFromFirestore() { 
@@ -911,15 +967,56 @@ async function loadDataFromFirestore() {
     } catch (e) { console.error(e); } 
 }
 
-async function saveEntry() { const title = editTitle.value.trim(); const body = editBody.innerHTML; if(!title || !body || body === '<br>') return alert('제목과 본문을 모두 입력해주세요.'); const now = Date.now(); const entryData = { category: currentCategory, title, subtitle: editSubtitle.value.trim(), body, fontFamily: currentFontFamily, fontSize: currentFontSize, date: new Date().toLocaleDateString('ko-KR'), timestamp: now, modifiedAt: now, isDeleted: false }; try { if(currentUser) { if(isEditMode && editingId) { const docRef = doc(db, "users", currentUser.uid, "entries", editingId); const updateData = { ...entryData }; delete updateData.timestamp; await updateDoc(docRef, updateData); } else { await addDoc(collection(db, "users", currentUser.uid, "entries"), entryData); } await loadDataFromFirestore(); } else { entryData.id = isEditMode ? editingId : now; if (isEditMode) { const index = entries.findIndex(e => e.id === editingId); if (index !== -1) { entries[index] = { ...entries[index], ...entryData, timestamp: entries[index].timestamp, modifiedAt: now }; } } else { entries.unshift(entryData); } localStorage.setItem('faithLogDB', JSON.stringify(entries)); } 
-    // [수정] 발행 후 읽기 화면 보기
-    closeAllModals(); 
-    renderEntries(); 
-    setTimeout(() => {
-        const savedId = isEditMode ? editingId : (currentUser ? entries.find(e => e.title === title && e.timestamp === now)?.id : entryData.id);
-        if(savedId) openReadModal(savedId);
-    }, 500); 
-} catch(e) { console.error("Save Error:", e); alert("저장에 실패했습니다. 잠시 후 다시 시도해주세요."); } }
+// [수정] 중복 저장 방지 로직 유지
+async function saveEntry() { 
+    const title = editTitle.value.trim(); 
+    const body = editBody.innerHTML; 
+    if(!title || !body || body === '<br>') return; 
+    
+    const now = Date.now(); 
+    const entryData = { 
+        category: currentCategory, 
+        title, 
+        subtitle: editSubtitle.value.trim(), 
+        body, 
+        fontFamily: currentFontFamily, 
+        fontSize: currentFontSize, 
+        date: new Date().toLocaleDateString('ko-KR'), 
+        timestamp: now, 
+        modifiedAt: now, 
+        isDeleted: false 
+    }; 
+    
+    try { 
+        if(currentUser) { 
+            if(isEditMode && editingId) { 
+                const docRef = doc(db, "users", currentUser.uid, "entries", editingId); 
+                const updateData = { ...entryData }; 
+                delete updateData.timestamp; 
+                await updateDoc(docRef, updateData); 
+            } else { 
+                const docRef = await addDoc(collection(db, "users", currentUser.uid, "entries"), entryData); 
+                isEditMode = true;
+                editingId = docRef.id;
+            } 
+            await loadDataFromFirestore(); 
+        } else { 
+            entryData.id = isEditMode ? editingId : now; 
+            if (isEditMode) { 
+                const index = entries.findIndex(e => e.id === editingId); 
+                if (index !== -1) { 
+                    entries[index] = { ...entries[index], ...entryData, timestamp: entries[index].timestamp, modifiedAt: now }; 
+                } 
+            } else { 
+                entries.unshift(entryData); 
+                isEditMode = true;
+                editingId = entryData.id;
+            } 
+            localStorage.setItem('faithLogDB', JSON.stringify(entries)); 
+        } 
+    } catch(e) { console.error("Save Error:", e); } 
+}
+
 async function moveToTrash(id) { if(!confirm('휴지통으로 이동하시겠습니까?')) return; if(currentUser){ const docRef = doc(db, "users", currentUser.uid, "entries", id); await updateDoc(docRef, { isDeleted: true }); await loadDataFromFirestore(); } else { const index = entries.findIndex(e => e.id === id); if(index !== -1) entries[index].isDeleted = true; localStorage.setItem('faithLogDB', JSON.stringify(entries)); } history.back(); renderEntries(); } 
 window.permanentDelete = async (id) => { 
     if(!confirm('영구 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.')) return; 
@@ -928,7 +1025,31 @@ window.permanentDelete = async (id) => {
     renderEntries(); 
 }
 window.restoreEntry = async (id) => { if(!confirm('이 글을 복구하시겠습니까?')) return; if(currentUser){ const docRef = doc(db, "users", currentUser.uid, "entries", id); await updateDoc(docRef, { isDeleted: false }); await loadDataFromFirestore(); } else { const index = entries.findIndex(e => e.id === id); if(index !== -1) entries[index].isDeleted = false; localStorage.setItem('faithLogDB', JSON.stringify(entries)); } renderTrash(); renderEntries(); }
-function renderTrash() { trashList.innerHTML = ''; const deleted = entries.filter(e => e.isDeleted); if(deleted.length === 0) { trashList.innerHTML = `<div style="text-align:center; margin-top:50px; color:#aaa;">비어있음</div>`; return; } deleted.forEach(entry => { const div = document.createElement('div'); div.className = 'entry-card'; div.innerHTML = `<h3 class="card-title" style="text-decoration:line-through; color:#aaa;">${entry.title}</h3><div class="trash-actions"><button class="restore-btn" onclick="restoreEntry('${entry.id}')">복구</button><button class="perm-del-btn" onclick="permanentDelete('${entry.id}')">삭제</button></div>`; trashList.appendChild(div); }); }
+
+// [수정] 휴지통 UI 개선 (trash-item 구조)
+function renderTrash() { 
+    trashList.innerHTML = ''; 
+    const deleted = entries.filter(e => e.isDeleted); 
+    if(deleted.length === 0) { 
+        trashList.innerHTML = `<div style="text-align:center; margin-top:50px; color:#aaa;">비어있음</div>`; 
+        return; 
+    } 
+    deleted.forEach(entry => { 
+        const div = document.createElement('div'); 
+        div.className = 'trash-item'; 
+        div.innerHTML = `
+            <div class="trash-info">
+                <h4>${entry.title}</h4>
+                <p>${entry.date}</p>
+            </div>
+            <div class="trash-btn-group">
+                <button class="btn-restore" onclick="restoreEntry('${entry.id}')">복구</button>
+                <button class="btn-perm-delete" onclick="permanentDelete('${entry.id}')">삭제</button>
+            </div>
+        `; 
+        trashList.appendChild(div); 
+    }); 
+}
 function openTrashModal() { renderTrash(); openModal(trashModal); }
 
 if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', init); } else { init(); }
