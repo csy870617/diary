@@ -32,13 +32,14 @@
             <div class="tabs" id="tab-container"></div>
             <div class="nav-actions">
                 <div class="sort-control">
-                    <i class="ph ph-sort-descending" id="sort-icon"></i>
+                    <button id="sort-order-btn" class="icon-nav-btn" title="정렬 순서 변경">
+                        <i class="ph ph-sort-descending" id="sort-icon"></i>
+                    </button>
                     <select class="sort-select" id="sort-criteria">
                         <option value="created">최신순</option>
                         <option value="modified">수정순</option>
                         <option value="title">제목순</option>
                     </select>
-                    <button id="sort-order-btn" class="hidden"></button>
                 </div>
                 <div class="divider-vertical"></div>
                 <button class="icon-nav-btn trash" id="trash-btn" title="휴지통">
@@ -76,6 +77,13 @@
             
             <div class="toolbar-divider"></div>
 
+            <div class="tool-group">
+                <button class="tool-btn" data-cmd="undo" title="되돌리기"><i class="ph ph-arrow-u-up-left"></i></button>
+                <button class="tool-btn" data-cmd="redo" title="다시하기"><i class="ph ph-arrow-u-up-right"></i></button>
+            </div>
+
+            <div class="toolbar-divider"></div>
+            
             <div class="tool-group">
                 <button class="tool-btn" data-cmd="justifyLeft"><i class="ph ph-text-align-left"></i></button>
                 <button class="tool-btn" data-cmd="justifyCenter"><i class="ph ph-text-align-center"></i></button>
@@ -121,13 +129,10 @@
 
         <div id="floating-menu" class="floating-menu hidden">
             <button class="float-btn" id="btn-float-color"><i class="ph ph-palette" style="color:#FCD34D;"></i></button>
-            <div class="float-divider"></div>
+            <button class="float-btn" id="btn-float-hilite"><i class="ph ph-highlighter" style="color:#FDE047;"></i></button> <div class="float-divider"></div>
             <button class="float-btn" data-cmd="bold"><i class="ph ph-text-b"></i></button>
             <button class="float-btn" data-cmd="italic"><i class="ph ph-text-italic"></i></button>
-            <div class="float-divider"></div>
-            <button class="float-btn small" id="btn-sel-size-down">가-</button>
-            <button class="float-btn small" id="btn-sel-size-up">가+</button>
-        </div>
+            <button class="float-btn" data-cmd="underline"><i class="ph ph-text-underline"></i></button> <button class="float-btn" data-cmd="strikeThrough"><i class="ph ph-text-strikethrough"></i></button> </div>
     </div>
 
     <div id="read-modal" class="full-screen-modal hidden">

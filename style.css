@@ -90,13 +90,13 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 
 /* 툴바 (상단 고정 - Sticky) */
 .editor-toolbar { 
-    position: sticky; /* 스크롤 시 상단 고정 */
+    position: sticky; 
     top: 0;           
     left: 0; 
     width: 100%; 
     background: white; 
     border-top: none;
-    border-bottom: 1px solid var(--gray-200); /* 하단 라인 */
+    border-bottom: 1px solid var(--gray-200); 
     padding: 10px 15px; 
     display: flex; 
     justify-content: space-around; 
@@ -134,12 +134,9 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .float-btn.small { font-size: 13px; font-weight: 600; width: auto; padding: 0 4px; }
 .float-divider { width: 1px; height: 16px; background: rgba(255,255,255,0.2); }
 
-/* 팔레트 (상단 툴바 아래쪽에 뜨도록 조정) */
+/* 팔레트 */
 .sticker-palette { 
-    position: fixed; 
-    top: 110px; /* 헤더 + 툴바 높이 고려 */
-    bottom: auto; 
-    left: 50%; transform: translateX(-50%); 
+    position: fixed; top: 110px; bottom: auto; left: 50%; transform: translateX(-50%); 
     background: white; border: 1px solid var(--gray-200); padding: 15px; 
     border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); 
     width: 90%; max-width: 360px; z-index: 2003; max-height: 250px; overflow-y: auto; 
@@ -149,10 +146,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .sticker-item { font-size: 26px; cursor: pointer; padding: 4px; transition: transform 0.2s; }
 
 .color-palette-popup { 
-    position: fixed; 
-    top: 110px !important; /* 상단 고정 */
-    bottom: auto; 
-    left: 50% !important; transform: translateX(-50%);
+    position: fixed; top: 110px !important; bottom: auto; left: 50% !important; transform: translateX(-50%);
     background: white; border: 1px solid var(--gray-200); padding: 12px; 
     border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); z-index: 2006; 
     width: 230px; 

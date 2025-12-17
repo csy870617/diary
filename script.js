@@ -95,7 +95,7 @@ function init() {
         });
     }
 
-    // [수정] 뒤로가기 핸들러 단순화 (무조건 닫기)
+    // [수정] 뒤로가기 시 모달 닫기
     window.addEventListener('popstate', (event) => {
         closeAllModals();
     });
@@ -234,8 +234,20 @@ function setupEventListeners() {
     if(forgotPwBtn) forgotPwBtn.addEventListener('click', (e) => { e.preventDefault(); openModal(resetPwModal); });
     const closeResetBtn = document.getElementById('close-reset-btn');
     if(closeResetBtn) closeResetBtn.addEventListener('click', () => history.back());
-    if(sortCriteria) sortCriteria.addEventListener('change', (e) => { currentSortBy = e.target.value; renderEntries(); });
-    if(sortOrderBtn) sortOrderBtn.addEventListener('click', () => { currentSortOrder = currentSortOrder === 'desc' ? 'asc' : 'desc'; if(sortIcon) { sortIcon.classList.toggle('ph-sort-descending'); sortIcon.classList.toggle('ph-sort-ascending'); } renderEntries(); });
+    
+    // [수정] 정렬 기능 복구
+    if(sortCriteria) sortCriteria.addEventListener('change', (e) => { 
+        currentSortBy = e.target.value; 
+        renderEntries(); 
+    });
+    if(sortOrderBtn) sortOrderBtn.addEventListener('click', () => { 
+        currentSortOrder = currentSortOrder === 'desc' ? 'asc' : 'desc'; 
+        if(sortIcon) { 
+            sortIcon.classList.toggle('ph-sort-descending'); 
+            sortIcon.classList.toggle('ph-sort-ascending'); 
+        } 
+        renderEntries(); 
+    });
     
     const searchInput = document.getElementById('search-input');
     if(searchInput) searchInput.addEventListener('input', (e) => renderEntries(e.target.value));
@@ -265,7 +277,7 @@ function setupEventListeners() {
             e.preventDefault();
             if(stickerPalette) stickerPalette.classList.add('hidden');
             if(colorPalettePopup) {
-                // 툴바 하단에 위치 (sticky top:0 이므로 고정 위치 사용)
+                // 툴바 위치 기준
                 colorPalettePopup.style.top = '110px';
                 colorPalettePopup.style.bottom = 'auto';
                 colorPalettePopup.style.left = '50%';
@@ -338,13 +350,18 @@ function setupEventListeners() {
                 }
             });
         }
+        
+        // [추가] 형광펜 버튼 (노란색 배경)
+        const btnFloatHilite = document.getElementById('btn-float-hilite');
+        if(btnFloatHilite) {
+            btnFloatHilite.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                formatDoc('hiliteColor', '#FDE047');
+            });
+        }
     }
     
-    // [수정] 정밀 조절 함수 연결
-    const btnSizeUp = document.getElementById('btn-sel-size-up');
-    if(btnSizeUp) btnSizeUp.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); changeSelectionFontSize(2); });
-    const btnSizeDown = document.getElementById('btn-sel-size-down');
-    if(btnSizeDown) btnSizeDown.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); changeSelectionFontSize(-2); });
+    // [제거] 플로팅 메뉴의 글자크기 버튼 제거됨
 
     const trashBtn = document.getElementById('trash-btn');
     if(trashBtn) trashBtn.addEventListener('click', openTrashModal);
@@ -363,10 +380,10 @@ function setupEventListeners() {
     const publishBtn = document.getElementById('publish-btn');
     if(publishBtn) publishBtn.addEventListener('click', saveEntry);
     
+    // [수정] 목록 버튼: 확실하게 뒤로가기
     const closeReadBtn = document.getElementById('close-read-btn');
     if(closeReadBtn) closeReadBtn.addEventListener('click', () => {
-        closeAllModals();
-        history.pushState(null, null, ''); 
+        history.back(); // openModal로 pushState 했으므로 back 호출
     });
     
     const switchToEdit = () => {
@@ -490,18 +507,14 @@ window.formatDoc = (cmd, value = null) => {
 
 window.changeGlobalFontSize = (delta) => { 
     if(!editBody) return;
-    
     const style = window.getComputedStyle(editBody);
     let currentSize = parseFloat(style.fontSize);
     if(isNaN(currentSize)) currentSize = 16;
-    
     let newSize = currentSize + delta;
     if(newSize < 12) newSize = 12;
     if(newSize > 60) newSize = 60;
-    
     currentFontSize = newSize; 
     applyFontStyle(currentFontFamily, newSize);
-
     const spans = editBody.querySelectorAll('span[style*="font-size"]');
     spans.forEach(span => {
         let spanCurrentStyle = window.getComputedStyle(span);
@@ -514,59 +527,8 @@ window.changeGlobalFontSize = (delta) => {
     });
 };
 
-window.changeSelectionFontSize = (delta) => {
-    const selection = window.getSelection();
-    if (!selection.rangeCount || selection.isCollapsed) return;
-
-    const range = selection.getRangeAt(0);
-    
-    let parentElement = range.commonAncestorContainer.nodeType === 3 ? range.commonAncestorContainer.parentElement : range.commonAncestorContainer;
-    
-    if (parentElement.tagName === 'SPAN' && parentElement.style.fontSize) {
-        let currentSize = parseFloat(parentElement.style.fontSize);
-        if(!isNaN(currentSize)) {
-            let newSize = currentSize + delta;
-            if(newSize < 10) newSize = 10;
-            parentElement.style.fontSize = `${newSize}px`;
-            
-            const newRange = document.createRange();
-            newRange.selectNodeContents(parentElement);
-            selection.removeAllRanges();
-            selection.addRange(newRange);
-            setTimeout(handleSelection, 0);
-            return;
-        }
-    }
-
-    const span = document.createElement("span");
-    let currentSize = 16;
-    const computedStyle = window.getComputedStyle(parentElement);
-    if(computedStyle.fontSize) currentSize = parseFloat(computedStyle.fontSize);
-    
-    let newSize = currentSize + delta;
-    if(newSize < 10) newSize = 10;
-    
-    span.style.fontSize = `${newSize}px`;
-
-    try {
-        const extractedContents = range.extractContents();
-        span.appendChild(extractedContents);
-        range.insertNode(span);
-        
-        selection.removeAllRanges();
-        const newRange = document.createRange();
-        newRange.selectNodeContents(span);
-        selection.addRange(newRange);
-    } catch(e) {
-        console.error("Selection wrapping failed", e);
-    }
-    
-    setTimeout(handleSelection, 0);
-};
-
 window.insertSticker = (emoji) => { 
     const target = lastFocusedEdit || editBody;
-    
     if (target === editTitle || target === editSubtitle) { 
         const start = target.selectionStart; 
         const end = target.selectionEnd; 
@@ -836,13 +798,11 @@ async function updateEntryField(id, data) {
 }
 
 function handleSwipe() { const swipeThreshold = 50; if (touchEndX < touchStartX - swipeThreshold) turnPage(1); else if (touchEndX > touchStartX + swipeThreshold) turnPage(-1); }
-
-// [수정] 모드 변경 시 히스토리 쌓지 않음
 function setReadMode(mode, pushToHistory = false) { 
     if(!readModal) return;
     currentViewMode = mode; 
     
-    // pushToHistory 파라미터는 하위 호환성을 위해 남겨두되 기본 false
+    // pushToHistory 미사용 (단순 탭 전환 느낌)
     
     readModal.classList.remove('mode-focus', 'mode-book'); 
     exitFocusBtn.classList.add('hidden'); 
@@ -868,20 +828,38 @@ function setReadMode(mode, pushToHistory = false) {
         updateBookNav(); 
     } 
 }
-
 function turnPage(direction) { if (currentViewMode !== 'book') return; const pageWidth = window.innerWidth; const currentScroll = readContentArea.scrollLeft; const newScroll = currentScroll + (direction * pageWidth); readContentArea.scrollTo({ left: newScroll, behavior: 'smooth' }); setTimeout(updateBookNav, 400); }
 function updateBookNav() { if (currentViewMode !== 'book') return; const scrollLeft = readContentArea.scrollLeft; const scrollWidth = readContentArea.scrollWidth; const clientWidth = readContentArea.clientWidth; if (scrollLeft > 10) bookNavLeft.classList.remove('hidden'); else bookNavLeft.classList.add('hidden'); if (scrollLeft + clientWidth < scrollWidth - 10) bookNavRight.classList.remove('hidden'); else bookNavRight.classList.add('hidden'); const currentPage = Math.round(scrollLeft / clientWidth) + 1; const totalPages = Math.ceil(scrollWidth / clientWidth); pageIndicator.innerText = `${currentPage} / ${totalPages}`; pageIndicator.classList.remove('hidden'); }
 
 function renderEntries(keyword = '') {
     if(!entryList) return;
     entryList.innerHTML = '';
+    
     if(isLoading) {
         entryList.innerHTML = `<div style="text-align:center; margin-top:100px; color:#aaa; font-family:'Pretendard';">로딩 중...</div>`;
         return;
     }
+
     const filtered = entries.filter(entry => !entry.isDeleted && entry.category === currentCategory && (entry.title.includes(keyword) || entry.body.includes(keyword)));
-    filtered.sort((a, b) => { let valA, valB; if (currentSortBy === 'title') { valA = a.title; valB = b.title; } else if (currentSortBy === 'modified') { valA = a.modifiedAt || a.timestamp; valB = b.modifiedAt || b.timestamp; } else { valA = a.timestamp; valB = b.timestamp; } if (valA < valB) return currentSortOrder === 'asc' ? -1 : 1; if (valA > valB) return currentSortOrder === 'asc' ? 1 : -1; return 0; });
+    
+    // [수정] 정렬 로직 보완 (timestamp 등)
+    filtered.sort((a, b) => { 
+        let valA, valB; 
+        if (currentSortBy === 'title') { 
+            valA = a.title; valB = b.title; 
+        } else if (currentSortBy === 'modified') { 
+            valA = a.modifiedAt || a.timestamp; valB = b.modifiedAt || b.timestamp; 
+        } else { // created
+            valA = a.timestamp; valB = b.timestamp; 
+        }
+        
+        if (valA < valB) return currentSortOrder === 'asc' ? -1 : 1; 
+        if (valA > valB) return currentSortOrder === 'asc' ? 1 : -1; 
+        return 0; 
+    });
+
     if (filtered.length === 0) { entryList.innerHTML = `<div style="text-align:center; margin-top:100px; color:#aaa; font-family:'Pretendard';">기록이 없습니다.</div>`; return; }
+    
     filtered.forEach(entry => {
         const div = document.createElement('article');
         div.className = 'entry-card';
@@ -891,7 +869,8 @@ function renderEntries(keyword = '') {
         } else {
             const dateStr = currentSortBy === 'modified' ? `수정: ${new Date(entry.modifiedAt || entry.timestamp).toLocaleDateString()}` : entry.date;
             div.innerHTML = `<h3 class="card-title">${entry.title}</h3>${entry.subtitle ? `<p class="card-subtitle">${entry.subtitle}</p>` : ''}<div class="card-meta"><span>${dateStr}</span></div>`;
-            div.onclick = () => openReadModal(entry.id);
+            // [수정] 리스트 클릭 시 바로 수정 모드(Editor)로 진입
+            div.onclick = () => openEditor(true, entry);
         }
         attachContextMenu(div, entry.id);
         entryList.appendChild(div);
@@ -933,9 +912,9 @@ async function loadDataFromFirestore() {
 }
 
 async function saveEntry() { const title = editTitle.value.trim(); const body = editBody.innerHTML; if(!title || !body || body === '<br>') return alert('제목과 본문을 모두 입력해주세요.'); const now = Date.now(); const entryData = { category: currentCategory, title, subtitle: editSubtitle.value.trim(), body, fontFamily: currentFontFamily, fontSize: currentFontSize, date: new Date().toLocaleDateString('ko-KR'), timestamp: now, modifiedAt: now, isDeleted: false }; try { if(currentUser) { if(isEditMode && editingId) { const docRef = doc(db, "users", currentUser.uid, "entries", editingId); const updateData = { ...entryData }; delete updateData.timestamp; await updateDoc(docRef, updateData); } else { await addDoc(collection(db, "users", currentUser.uid, "entries"), entryData); } await loadDataFromFirestore(); } else { entryData.id = isEditMode ? editingId : now; if (isEditMode) { const index = entries.findIndex(e => e.id === editingId); if (index !== -1) { entries[index] = { ...entries[index], ...entryData, timestamp: entries[index].timestamp, modifiedAt: now }; } } else { entries.unshift(entryData); } localStorage.setItem('faithLogDB', JSON.stringify(entries)); } 
-    // 저장 후 바로 읽기 모드로 보기
+    // [수정] 발행 후 읽기 화면 보기
     closeAllModals(); 
-    renderEntries(); // 백그라운드 갱신
+    renderEntries(); 
     setTimeout(() => {
         const savedId = isEditMode ? editingId : (currentUser ? entries.find(e => e.title === title && e.timestamp === now)?.id : entryData.id);
         if(savedId) openReadModal(savedId);
