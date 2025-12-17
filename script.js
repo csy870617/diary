@@ -95,21 +95,25 @@ function init() {
         });
     }
 
+    // [수정] 뒤로가기(popstate) 핸들러 개선
     window.addEventListener('popstate', (event) => {
-        // [수정] 뒤로가기 시 읽기 모드 상태 관리
+        // 1. 읽기 모드 내에서 뷰 모드 변경 이력이 있는 경우
+        if (event.state && event.state.modal === 'read' && event.state.mode) {
+            // 모달을 닫지 않고 뷰 모드만 변경 (히스토리 복귀)
+            setReadMode(event.state.mode, false); // false: pushState 하지 않음
+            if(readModal) readModal.classList.remove('hidden'); // 혹시 닫혔다면 다시 열기
+            return;
+        }
+
+        // 2. 읽기 모드 초기 상태(default)로 돌아왔거나, 아예 다른 상태인 경우
         if (event.state && event.state.modal === 'read') {
-            // 모드가 지정되어 있다면 해당 모드로 복귀 (예: focus -> default)
-            // 만약 현재 default 상태라면 모달 닫힘 (history.back 효과)
-            if(event.state.mode && event.state.mode !== 'default') {
-                setReadMode(event.state.mode, false);
-            } else {
-                setReadMode('default', false);
-            }
+            // 기본 보기 상태 유지
+            setReadMode('default', false);
             if(readModal) readModal.classList.remove('hidden');
             return;
         }
-        
-        // 그 외엔 닫기
+
+        // 3. 그 외의 경우 (홈으로 가야 함) -> 모든 모달 닫기
         closeAllModals();
     });
 
@@ -118,9 +122,8 @@ function init() {
         if (catContextMenu && !catContextMenu.contains(e.target)) catContextMenu.classList.add('hidden');
         
         if (floatingMenu && !floatingMenu.classList.contains('hidden')) {
-             const isEditorClick = (editBody && editBody.contains(e.target)) || 
-                                   (editTitle && editTitle.contains(e.target)) || 
-                                   (editSubtitle && editSubtitle.contains(e.target));
+             const isEditorClick = (editBody && editBody.contains(e.target));
+             // 제목/소제목은 플로팅 제외 -> 외부 클릭으로 간주하여 닫음
              if (!floatingMenu.contains(e.target) && !isEditorClick) {
                  floatingMenu.classList.add('hidden');
              }
@@ -232,6 +235,7 @@ function closeAllModals() {
 
 function openModal(modal) {
     if(!modal) return;
+    // 일반 모달 열 때는 기본 상태 푸시
     history.pushState({ modal: 'open' }, null, '');
     modal.classList.remove('hidden');
 }
@@ -307,11 +311,16 @@ function setupEventListeners() {
     const trackFocus = (el) => { lastFocusedEdit = el; };
     if(editTitle) {
         editTitle.addEventListener('focus', () => trackFocus(editTitle));
+        // [수정] 제목 클릭 시 전파 중단
         editTitle.addEventListener('click', (e) => { e.stopPropagation(); });
+        editTitle.addEventListener('mouseup', handleSelection);
+        editTitle.addEventListener('keyup', handleSelection);
     }
     if(editSubtitle) {
         editSubtitle.addEventListener('focus', () => trackFocus(editSubtitle));
         editSubtitle.addEventListener('click', (e) => { e.stopPropagation(); });
+        editSubtitle.addEventListener('mouseup', handleSelection);
+        editSubtitle.addEventListener('keyup', handleSelection);
     }
     if(editBody) {
         editBody.addEventListener('focus', () => trackFocus(editBody));
@@ -378,7 +387,13 @@ function setupEventListeners() {
     if(publishBtn) publishBtn.addEventListener('click', saveEntry);
     
     const closeReadBtn = document.getElementById('close-read-btn');
-    if(closeReadBtn) closeReadBtn.addEventListener('click', () => history.back());
+    if(closeReadBtn) closeReadBtn.addEventListener('click', () => {
+        // 읽기 모달 닫기
+        // history.back() 대신 직접 닫기 (이전 상태로 돌아가기 위함)
+        // 만약 현재 읽기 모드라면 닫고, 아니라면 back
+        // 하지만 여기선 확실하게 목록으로 나가길 원함
+        closeAllModals();
+    });
     
     const switchToEdit = () => {
         const entry = entries.find(e => e.id === editingId);
@@ -456,6 +471,7 @@ function handleSelection() {
 
     if (!targetEl) return;
 
+    // [수정] 제목/소제목은 플로팅 메뉴 확실히 닫기 (숨김)
     if(targetEl.tagName === 'INPUT') {
         floatingMenu.classList.add('hidden');
         return;
@@ -493,6 +509,7 @@ window.formatDoc = (cmd, value = null) => {
     setTimeout(handleSelection, 0);
 };
 
+// [수정] 툴바용: 현재 에디터 글자 크기에 더해서 변경 (모든 자식 span도 같이 비율 조정)
 window.changeGlobalFontSize = (delta) => { 
     if(!editBody) return;
     
@@ -519,7 +536,7 @@ window.changeGlobalFontSize = (delta) => {
     });
 };
 
-// [수정] 선택 영역만 확실하게 변경 (물리적 태그 분리)
+// [수정] 플로팅용: 선택 영역만 확실하게 변경 (물리적 태그 분리)
 window.changeSelectionFontSize = (delta) => {
     const selection = window.getSelection();
     if (!selection.rangeCount || selection.isCollapsed) return;
@@ -530,7 +547,7 @@ window.changeSelectionFontSize = (delta) => {
     let parentElement = range.commonAncestorContainer.nodeType === 3 ? range.commonAncestorContainer.parentElement : range.commonAncestorContainer;
     
     // 만약 선택된 영역이 span 하나에 정확히 일치하거나 포함되어 있다면
-    if (parentElement.tagName === 'SPAN' && parentElement.style.fontSize && parentElement.textContent === selection.toString()) {
+    if (parentElement.tagName === 'SPAN' && parentElement.style.fontSize) {
         let currentSize = parseFloat(parentElement.style.fontSize);
         if(!isNaN(currentSize)) {
             let newSize = currentSize + delta;
@@ -608,6 +625,7 @@ function applyFontStyle(f, s) {
     if(fontSelector) fontSelector.value = f; 
 }
 
+// [수정] 상단 주제 표시 & 히스토리 추가
 function openEditor(m, d) { 
     isEditMode = m; 
     openModal(writeModal); 
@@ -851,12 +869,12 @@ async function updateEntryField(id, data) {
 
 function handleSwipe() { const swipeThreshold = 50; if (touchEndX < touchStartX - swipeThreshold) turnPage(1); else if (touchEndX > touchStartX + swipeThreshold) turnPage(-1); }
 
-// [수정] 뷰 모드 변경 함수
+// [수정] 뷰 모드 변경 함수 (히스토리 관리)
 function setReadMode(mode, pushToHistory = true) { 
     if(!readModal) return;
     currentViewMode = mode; 
     
-    // 히스토리 추가
+    // 히스토리 추가 (뒤로가기 시 이 상태로 돌아오기 위해)
     if(pushToHistory) {
         history.pushState({ modal: 'read', mode: mode }, null, '');
     }
@@ -950,7 +968,12 @@ async function loadDataFromFirestore() {
     } catch (e) { console.error(e); } 
 }
 
-async function saveEntry() { const title = editTitle.value.trim(); const body = editBody.innerHTML; if(!title || !body || body === '<br>') return alert('제목과 본문을 모두 입력해주세요.'); const now = Date.now(); const entryData = { category: currentCategory, title, subtitle: editSubtitle.value.trim(), body, fontFamily: currentFontFamily, fontSize: currentFontSize, date: new Date().toLocaleDateString('ko-KR'), timestamp: now, modifiedAt: now, isDeleted: false }; try { if(currentUser) { if(isEditMode && editingId) { const docRef = doc(db, "users", currentUser.uid, "entries", editingId); const updateData = { ...entryData }; delete updateData.timestamp; await updateDoc(docRef, updateData); } else { await addDoc(collection(db, "users", currentUser.uid, "entries"), entryData); } await loadDataFromFirestore(); } else { entryData.id = isEditMode ? editingId : now; if (isEditMode) { const index = entries.findIndex(e => e.id === editingId); if (index !== -1) { entries[index] = { ...entries[index], ...entryData, timestamp: entries[index].timestamp, modifiedAt: now }; } } else { entries.unshift(entryData); } localStorage.setItem('faithLogDB', JSON.stringify(entries)); } history.back(); renderEntries(); } catch(e) { console.error("Save Error:", e); alert("저장에 실패했습니다. 잠시 후 다시 시도해주세요."); } }
+async function saveEntry() { const title = editTitle.value.trim(); const body = editBody.innerHTML; if(!title || !body || body === '<br>') return alert('제목과 본문을 모두 입력해주세요.'); const now = Date.now(); const entryData = { category: currentCategory, title, subtitle: editSubtitle.value.trim(), body, fontFamily: currentFontFamily, fontSize: currentFontSize, date: new Date().toLocaleDateString('ko-KR'), timestamp: now, modifiedAt: now, isDeleted: false }; try { if(currentUser) { if(isEditMode && editingId) { const docRef = doc(db, "users", currentUser.uid, "entries", editingId); const updateData = { ...entryData }; delete updateData.timestamp; await updateDoc(docRef, updateData); } else { await addDoc(collection(db, "users", currentUser.uid, "entries"), entryData); } await loadDataFromFirestore(); } else { entryData.id = isEditMode ? editingId : now; if (isEditMode) { const index = entries.findIndex(e => e.id === editingId); if (index !== -1) { entries[index] = { ...entries[index], ...entryData, timestamp: entries[index].timestamp, modifiedAt: now }; } } else { entries.unshift(entryData); } localStorage.setItem('faithLogDB', JSON.stringify(entries)); } 
+    // 저장 후 바로 읽기 모드로 보기
+    closeAllModals(); 
+    renderEntries(); // 백그라운드 갱신
+    openReadModal(entryData.id); 
+} catch(e) { console.error("Save Error:", e); alert("저장에 실패했습니다. 잠시 후 다시 시도해주세요."); } }
 async function moveToTrash(id) { if(!confirm('휴지통으로 이동하시겠습니까?')) return; if(currentUser){ const docRef = doc(db, "users", currentUser.uid, "entries", id); await updateDoc(docRef, { isDeleted: true }); await loadDataFromFirestore(); } else { const index = entries.findIndex(e => e.id === id); if(index !== -1) entries[index].isDeleted = true; localStorage.setItem('faithLogDB', JSON.stringify(entries)); } history.back(); renderEntries(); } 
 window.permanentDelete = async (id) => { 
     if(!confirm('영구 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.')) return; 

@@ -146,12 +146,11 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .sticker-grid { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-start; }
 .sticker-item { font-size: 26px; cursor: pointer; padding: 4px; transition: transform 0.2s; }
 
-/* [수정] 색상 팔레트: 6열 */
 .color-palette-popup { 
     position: fixed; top: auto !important; bottom: auto; left: 50% !important; transform: translateX(-50%);
     background: white; border: 1px solid var(--gray-200); padding: 12px; 
     border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); z-index: 2006; 
-    width: 230px; /* 너비 확장 */
+    width: 230px; 
 }
 .color-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; justify-items: center; }
 .color-dot { width: 28px; height: 28px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.1); cursor: pointer; padding: 0; transition: transform 0.2s; display: flex; align-items: center; justify-content: center; }
