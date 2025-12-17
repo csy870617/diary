@@ -195,7 +195,6 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 /* 읽기전용/책모드 수정 */
 #write-modal.mode-read-only .editor-toolbar { display: none; }
 #write-modal.mode-read-only .editor-container { padding-top: 40px; }
-/* 본문 입력 불가, 스크롤은 가능 */
 #write-modal.mode-read-only .editor-title, 
 #write-modal.mode-read-only .editor-subtitle,
 #write-modal.mode-read-only .editor-body { pointer-events: none; } 
@@ -203,7 +202,6 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 #write-modal.mode-book { overflow: hidden; }
 #write-modal.mode-book .editor-toolbar { display: none; }
 #write-modal.mode-book .editor-container {
-    /* 높이 계산: 100vh - 헤더높이(약 60px) */
     margin: 0; max-width: none; width: 100vw; height: calc(100vh - 60px);
     padding: 20px 40px; 
     column-width: 100vw; column-gap: 80px; column-fill: auto;
@@ -215,10 +213,9 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 #write-modal.mode-book .divider { break-inside: avoid; pointer-events: none; }
 #write-modal.mode-book .editor-body { text-align: justify; pointer-events: none; }
 
-.book-nav { position: fixed; top: 50%; transform: translateY(-50%); width: 60px; height: 100px; display: flex; justify-content: center; align-items: center; font-size: 32px; color: var(--gray-400); cursor: pointer; z-index: 1050; opacity: 0.6; transition: opacity 0.3s; }
-.book-nav:hover { opacity: 1; background: rgba(0,0,0,0.05); }
-.book-nav.prev { left: 0; }
-.book-nav.next { right: 0; }
+/* [수정] 책 모드 화살표 숨김 */
+.book-nav { display: none !important; }
+
 .page-indicator { position: fixed; bottom: 15px; left: 50%; transform: translateX(-50%); font-family: var(--text-sans); font-size: 12px; color: var(--gray-400); z-index: 1050; background: rgba(255,255,255,0.8); padding: 4px 10px; border-radius: 10px; }
 
 /* 휴지통 스타일 */

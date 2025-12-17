@@ -355,11 +355,31 @@ function setupEventListeners() {
         editBody.addEventListener('keyup', handleSelection);
         editBody.addEventListener('touchend', () => setTimeout(handleSelection, 100));
         
-        // 중요: 책 모드 스크롤 (editor-container가 스크롤러임)
+        // [수정] 책 모드 스크롤 및 마우스 이벤트 (PC용)
         const container = document.getElementById('editor-container');
         if(container) {
             container.addEventListener('touchstart', (e) => { if(currentViewMode !== 'book') return; touchStartX = e.changedTouches[0].screenX; }, {passive:true});
             container.addEventListener('touchend', (e) => { if(currentViewMode !== 'book') return; touchEndX = e.changedTouches[0].screenX; handleSwipe(); }, {passive:true});
+            
+            // [추가] PC 마우스 조작 (책 모드일 때만)
+            container.addEventListener('mousedown', (e) => {
+                if(currentViewMode !== 'book') return;
+                // 우클릭 메뉴 방지 및 페이지 넘김
+                if(e.button === 2) { // 우클릭 -> 다음
+                    e.preventDefault();
+                    turnPage(1);
+                } else if(e.button === 0) { // 좌클릭 -> 이전
+                    // 텍스트 선택 등과 충돌 방지를 위해, readOnly 모드이므로 페이지 넘김으로 사용
+                    // 하지만 좌클릭은 선택 의도일 수 있으니, 
+                    // 사용자가 "왼쪽 클릭하면 이전 페이지"라고 명시했으므로 구현.
+                    // 단, 드래그가 아닐 때만 동작하게 하려면 mouseup 등을 써야 하지만, 간단히 구현.
+                    turnPage(-1); 
+                }
+            });
+            // 우클릭 컨텍스트 메뉴 차단 (책 모드에서)
+            container.addEventListener('contextmenu', (e) => {
+                if(currentViewMode === 'book') e.preventDefault();
+            });
         }
     }
 
@@ -374,14 +394,20 @@ function setupEventListeners() {
         const btnFloatColor = document.getElementById('btn-float-color');
         if(btnFloatColor) {
             btnFloatColor.addEventListener('mousedown', (e) => {
-                e.preventDefault(); e.stopPropagation(); activeColorMode = 'foreColor'; openFloatingPalette();
+                e.preventDefault(); 
+                e.stopPropagation(); 
+                activeColorMode = 'foreColor';
+                openFloatingPalette();
             });
         }
         
         const btnFloatBgColor = document.getElementById('btn-float-bg-color');
         if(btnFloatBgColor) {
             btnFloatBgColor.addEventListener('mousedown', (e) => {
-                e.preventDefault(); e.stopPropagation(); activeColorMode = 'hiliteColor'; openFloatingPalette();
+                e.preventDefault(); 
+                e.stopPropagation(); 
+                activeColorMode = 'hiliteColor';
+                openFloatingPalette();
             });
         }
     }
@@ -420,11 +446,18 @@ function setupEventListeners() {
         }
     });
     
+    // [수정] 버튼 토글 로직 추가
     const btnReadOnly = document.getElementById('btn-readonly');
-    if(btnReadOnly) btnReadOnly.addEventListener('click', () => toggleViewMode('readOnly'));
+    if(btnReadOnly) btnReadOnly.addEventListener('click', () => {
+        if (currentViewMode === 'readOnly') toggleViewMode('default');
+        else toggleViewMode('readOnly');
+    });
     
     const btnBookMode = document.getElementById('btn-bookmode');
-    if(btnBookMode) btnBookMode.addEventListener('click', () => toggleViewMode('book'));
+    if(btnBookMode) btnBookMode.addEventListener('click', () => {
+        if (currentViewMode === 'book') toggleViewMode('default');
+        else toggleViewMode('book');
+    });
     
     const btnCopyText = document.getElementById('btn-copy-text');
     if(btnCopyText) btnCopyText.addEventListener('click', copyContentToClipboard);
@@ -644,7 +677,7 @@ function openEditor(m, d) {
         applyFontStyle('Pretendard', 16); 
     } 
     lastFocusedEdit = editBody;
-    toggleViewMode('default', false);
+    toggleViewMode('default');
 }
 
 function toggleViewMode(mode, pushToHistory = true) {
@@ -692,14 +725,16 @@ function toggleViewMode(mode, pushToHistory = true) {
     }
 }
 
+function handleSwipe() { const swipeThreshold = 50; if (touchEndX < touchStartX - swipeThreshold) turnPage(1); else if (touchEndX > touchStartX + swipeThreshold) turnPage(-1); }
 function turnPage(direction) { 
     if (currentViewMode !== 'book') return; 
     const container = document.getElementById('editor-container');
     const pageWidth = window.innerWidth; 
     const currentScroll = container.scrollLeft; 
     const newScroll = currentScroll + (direction * pageWidth); 
-    container.scrollTo({ left: newScroll, behavior: 'smooth' }); 
-    setTimeout(updateBookNav, 400); 
+    // [수정] 애니메이션 제거 (auto)
+    container.scrollTo({ left: newScroll, behavior: 'auto' }); 
+    setTimeout(updateBookNav, 50); 
 }
 
 function updateBookNav() { 
@@ -1025,8 +1060,7 @@ window.permanentDelete = async (id) => {
     renderEntries(); 
 }
 window.restoreEntry = async (id) => { if(!confirm('이 글을 복구하시겠습니까?')) return; if(currentUser){ const docRef = doc(db, "users", currentUser.uid, "entries", id); await updateDoc(docRef, { isDeleted: false }); await loadDataFromFirestore(); } else { const index = entries.findIndex(e => e.id === id); if(index !== -1) entries[index].isDeleted = false; localStorage.setItem('faithLogDB', JSON.stringify(entries)); } renderTrash(); renderEntries(); }
-
-// [수정] 휴지통 UI 개선 (trash-item 구조)
+// [수정] 휴지통 UI 개선
 function renderTrash() { 
     trashList.innerHTML = ''; 
     const deleted = entries.filter(e => e.isDeleted); 
