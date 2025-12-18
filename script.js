@@ -48,7 +48,6 @@ let lastFocusedEdit = null;
 let activeColorMode = 'foreColor';
 let autoSaveTimer = null;
 let wheelDebounceTimer = null;
-let snapTimer = null; // [추가] 책 모드 스냅 제어용 타이머
 
 // --- DOM 요소 변수 ---
 let loginModal, loginTriggerBtn, logoutBtn, resetPwModal;
@@ -61,6 +60,7 @@ let sortCriteria, sortOrderBtn, sortIcon;
 let contextMenu, catContextMenu, moveModal, moveCategoryList, lockModal;
 let lockPwInput, lockModalTitle, lockModalDesc;
 let editorToolbar, toolbarToggleBtn;
+let btnBookEdit; // 책 편집 버튼
 
 const stickers = [ '✝️','🙏','📖','🕊️','🕯️','💒','🍞','🍷','🩸','🔥','☁️','☀️','🌙','⭐','✨','🌧️','🌈','❄️','🌿','🌷','🌻','🍂','🌱','🌲','🕊️','🦋','🐾','🧸','🎀','🎈','🎁','🔔','💡','🗝️','📝','📌','📎','✂️','🖍️','🖌️','💌','📅','☕','🍵','🥪','🍎','🤍','💛','🧡','❤️','💜','💙','💚','🤎','🖤','😊','😭','🥰','🤔','💪' ];
 
@@ -102,7 +102,24 @@ function init() {
         }
     });
 
-    document.addEventListener('click', (e) => {
+    // [최종 수정] 전역 클릭 이벤트 캡처링 (링크 클릭 강제)
+    window.addEventListener('click', (e) => {
+        // 1. 에디터 내부의 링크 클릭 감지
+        const link = e.target.closest('#editor-body a');
+        
+        if (link && link.href) {
+            // 에디터가 존재하고, contenteditable 속성이 "false"일 때 (읽기전용, 책모드)
+            // 반드시 새 창으로 엽니다.
+            if (editBody && editBody.getAttribute('contenteditable') === "false") {
+                e.preventDefault(); 
+                e.stopPropagation();
+                const win = window.open(link.href, '_blank');
+                if(win) win.focus();
+                return;
+            }
+        }
+
+        // 2. 팝업 닫기 (기존 기능 유지)
         if (contextMenu && !contextMenu.contains(e.target)) contextMenu.classList.add('hidden');
         if (catContextMenu && !catContextMenu.contains(e.target)) catContextMenu.classList.add('hidden');
         
@@ -110,19 +127,14 @@ function init() {
             const isClickInside = colorPalettePopup.contains(e.target);
             const isToolbarBtn = document.getElementById('toolbar-color-btn') && document.getElementById('toolbar-color-btn').contains(e.target);
             const isHiliteBtn = document.getElementById('toolbar-hilite-btn') && document.getElementById('toolbar-hilite-btn').contains(e.target);
-            
-            if (!isClickInside && !isToolbarBtn && !isHiliteBtn) {
-                colorPalettePopup.classList.add('hidden');
-            }
+            if (!isClickInside && !isToolbarBtn && !isHiliteBtn) colorPalettePopup.classList.add('hidden');
         }
         if(stickerPalette && !stickerPalette.classList.contains('hidden')) {
              const isClickInside = stickerPalette.contains(e.target);
              const isStickerBtn = document.getElementById('sticker-btn') && document.getElementById('sticker-btn').contains(e.target);
-             if(!isClickInside && !isStickerBtn) {
-                 stickerPalette.classList.add('hidden');
-             }
+             if(!isClickInside && !isStickerBtn) stickerPalette.classList.add('hidden');
         }
-    });
+    }, true); // true: 캡처링 단계에서 실행하여 다른 이벤트보다 먼저 처리
 
     const savedId = localStorage.getItem('savedEmail');
     if(savedId && document.getElementById('login-email')) {
@@ -196,6 +208,9 @@ function loadDOMElements() {
     editorToolbar = document.getElementById('editor-toolbar');
     toolbarToggleBtn = document.getElementById('toolbar-toggle-btn');
     
+    // [유지] 로드시 책 편집 버튼 생성 시도
+    makeBookEditButton();
+
     const toolbarScroll = document.querySelector('.toolbar-content-scroll');
     if(toolbarScroll) {
         toolbarScroll.addEventListener('wheel', (evt) => {
@@ -204,6 +219,45 @@ function loadDOMElements() {
                 toolbarScroll.scrollLeft += evt.deltaY;
             }
         });
+    }
+}
+
+// [기능 유지] 책 편집 버튼 생성 함수 (무조건 생성)
+function makeBookEditButton() {
+    const btnBookMode = document.getElementById('btn-bookmode');
+    
+    // 이미 버튼이 있으면 할당만 하고 종료
+    if (document.getElementById('btn-book-edit')) {
+        btnBookEdit = document.getElementById('btn-book-edit');
+        return;
+    }
+
+    if (btnBookMode && btnBookMode.parentElement) {
+        btnBookEdit = document.createElement('button');
+        btnBookEdit.id = 'btn-book-edit';
+        btnBookEdit.className = 'icon-btn';
+        btnBookEdit.title = "페이지 편집";
+        // 디자인 스타일링
+        btnBookEdit.innerHTML = '<i class="ph ph-pencil-simple" style="font-size: 18px;"></i>';
+        btnBookEdit.style.cssText = "display: none; align-items: center; justify-content: center; gap: 4px; font-family: 'Pretendard'; font-size: 14px; font-weight: 600; color: #4B5563; background: transparent; border: none; cursor: pointer; padding: 8px; margin-left: 4px; border-radius: 6px; width: 36px; height: 36px;";
+        
+        btnBookEdit.addEventListener('mouseover', () => btnBookEdit.style.backgroundColor = '#F3F4F6');
+        btnBookEdit.addEventListener('mouseout', () => btnBookEdit.style.backgroundColor = 'transparent');
+        btnBookEdit.addEventListener('click', enableBookEditing);
+
+        // btn-bookmode 바로 옆에 삽입
+        if (btnBookMode.nextSibling) {
+            btnBookMode.parentElement.insertBefore(btnBookEdit, btnBookMode.nextSibling);
+        } else {
+            btnBookMode.parentElement.appendChild(btnBookEdit);
+        }
+    }
+    
+    // 목록 버튼(닫기) 왼쪽 정렬 보장
+    const closeWriteBtn = document.getElementById('close-write-btn');
+    const headerLeft = document.querySelector('.write-header .header-left');
+    if (headerLeft && closeWriteBtn && !headerLeft.contains(closeWriteBtn)) {
+        headerLeft.prepend(closeWriteBtn);
     }
 }
 
@@ -248,10 +302,7 @@ function debouncedSave() {
     autoSaveTimer = setTimeout(saveEntry, 1000); 
 }
 
-// [추가] 텍스트 내 URL 자동 링크 변환 함수
 function autoLink(text) {
-    // 이미 링크 태그인 경우는 제외하고 URL 패턴을 찾아 링크로 변환
-    // 간단한 구현을 위해 DOMParser 사용
     const div = document.createElement('div');
     div.innerHTML = text;
     
@@ -260,7 +311,7 @@ function autoLink(text) {
     const nodesToReplace = [];
     
     while(node = walker.nextNode()) {
-        if(node.parentElement.tagName === 'A') continue; // 이미 링크면 건너뜀
+        if(node.parentElement.tagName === 'A') continue; 
         if(node.nodeValue.match(/(https?:\/\/[^\s]+)/)) {
             nodesToReplace.push(node);
         }
@@ -268,10 +319,9 @@ function autoLink(text) {
     
     nodesToReplace.forEach(node => {
         const span = document.createElement('span');
-        // URL을 찾아 링크로 감쌈
-        span.innerHTML = node.nodeValue.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" style="color:#2563EB; text-decoration:underline;">$1</a>');
+        // 중요: pointer-events auto 추가하여 클릭 보장
+        span.innerHTML = node.nodeValue.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" style="color:#2563EB; text-decoration:underline; pointer-events: auto !important; cursor: pointer;">$1</a>');
         node.parentElement.replaceChild(span, node);
-        // span 태그를 벗기고 내용만 넣음 (불필요한 DOM 깊이 방지)
         const parent = span.parentElement;
         while(span.firstChild) {
             parent.insertBefore(span.firstChild, span);
@@ -280,26 +330,6 @@ function autoLink(text) {
     });
     
     return div.innerHTML;
-}
-
-// [추가] 책 모드 스크롤 보정 함수
-function fixBookModeScroll() {
-    if(currentViewMode !== 'book') return;
-    
-    if(snapTimer) clearTimeout(snapTimer);
-    snapTimer = setTimeout(() => {
-        const container = document.getElementById('editor-container');
-        if(!container) return;
-        
-        const pageWidth = container.clientWidth;
-        const currentScroll = container.scrollLeft;
-        const targetScroll = Math.round(currentScroll / pageWidth) * pageWidth;
-        
-        if(Math.abs(currentScroll - targetScroll) > 5) {
-            container.scrollTo({ left: targetScroll, behavior: 'smooth' });
-            setTimeout(updateBookNav, 300);
-        }
-    }, 100); // 0.1초 딜레이 후 스냅
 }
 
 function setupEventListeners() {
@@ -462,23 +492,13 @@ function setupEventListeners() {
     }
     if(editBody) {
         editBody.addEventListener('focus', () => trackFocus(editBody));
-        editBody.addEventListener('click', () => { 
-            if(stickerPalette) stickerPalette.classList.add('hidden'); 
-        });
         editBody.addEventListener('keydown', (e) => { 
             if ((e.altKey && (e.key === 's' || e.key === 'S')) || (e.ctrlKey && (e.key === 's' || e.key === 'S'))) { 
                 e.preventDefault(); saveEntry(); 
             } 
         });
         
-        // [수정] 입력 시 스냅 보정 및 저장
-        editBody.addEventListener('input', () => {
-            debouncedSave();
-            fixBookModeScroll();
-        });
-        // [추가] 클릭 및 키입력 시에도 스냅 보정 (커서 이동 대응)
-        editBody.addEventListener('keyup', fixBookModeScroll);
-        editBody.addEventListener('click', fixBookModeScroll);
+        editBody.addEventListener('input', debouncedSave);
         
         document.addEventListener('selectionchange', handleSelection);
         editBody.addEventListener('mouseup', handleSelection);
@@ -675,6 +695,9 @@ function openEditor(m, d) {
     isEditMode = m; 
     openModal(writeModal); 
     
+    // 모달 열 때 버튼 생성 (확실한 보장)
+    makeBookEditButton();
+    
     const catName = allCategories.find(c => c.id === currentCategory)?.name || '기록';
     const displayCat = document.getElementById('display-category');
     if(displayCat) displayCat.innerText = catName;
@@ -685,7 +708,7 @@ function openEditor(m, d) {
         editingId=d.id; 
         editTitle.value=d.title; 
         editSubtitle.value=d.subtitle; 
-        editBody.innerHTML=d.body; 
+        editBody.innerHTML= autoLink(d.body); 
         applyFontStyle(d.fontFamily||'Pretendard', d.fontSize||16); 
     } else { 
         editingId=null; 
@@ -696,6 +719,21 @@ function openEditor(m, d) {
     } 
     lastFocusedEdit = editBody;
     toggleViewMode('default', false);
+}
+
+// [수정] 책 모드에서 편집 활성화
+function enableBookEditing() {
+    if(currentViewMode !== 'book') return;
+    
+    editTitle.readOnly = false;
+    editSubtitle.readOnly = false;
+    editBody.contentEditable = "true";
+    
+    // 버튼 다시 찾고 숨기기
+    if(!btnBookEdit) btnBookEdit = document.getElementById('btn-book-edit');
+    if(btnBookEdit) btnBookEdit.style.display = 'none'; // CSS 클래스 대신 직접 스타일 제어
+    
+    // 툴바는 접힌 상태 유지
 }
 
 function toggleViewMode(mode, pushToHistory = false) {
@@ -718,14 +756,22 @@ function toggleViewMode(mode, pushToHistory = false) {
         editTitle.readOnly = true;
         editSubtitle.readOnly = true;
         editBody.contentEditable = "false";
+        // [중요] 읽기 전용 포인터 이벤트 활성화
+        editBody.style.pointerEvents = "auto";
+        editBody.style.userSelect = "text";
+        
         writeModal.classList.add('mode-read-only');
         if(exitFocusBtn) exitFocusBtn.classList.remove('hidden');
         if(btnReadOnly) btnReadOnly.classList.add('active');
 
     } else if (mode === 'book') {
-        editTitle.readOnly = false;
-        editSubtitle.readOnly = false;
-        editBody.contentEditable = "true";
+        editTitle.readOnly = true; 
+        editSubtitle.readOnly = true;
+        editBody.contentEditable = "false";
+        // [중요] 책 모드 포인터 이벤트 활성화
+        editBody.style.pointerEvents = "auto";
+        editBody.style.userSelect = "text";
+        
         writeModal.classList.add('mode-book');
         if(exitFocusBtn) exitFocusBtn.classList.remove('hidden');
         if(btnBookMode) btnBookMode.classList.add('active');
@@ -740,10 +786,21 @@ function toggleViewMode(mode, pushToHistory = false) {
                 toolbarIcon.classList.add('ph-caret-down');
             }
         }
+        
+        // 버튼 표시
+        if(!btnBookEdit) btnBookEdit = document.getElementById('btn-book-edit');
+        if(!btnBookEdit) makeBookEditButton();
+        if(btnBookEdit) btnBookEdit.style.display = 'inline-flex'; // 보이게 설정
+
     } else {
         editTitle.readOnly = false;
         editSubtitle.readOnly = false;
         editBody.contentEditable = "true";
+        editBody.style.pointerEvents = "auto";
+        editBody.style.userSelect = "text";
+        
+        if(!btnBookEdit) btnBookEdit = document.getElementById('btn-book-edit');
+        if(btnBookEdit) btnBookEdit.style.display = 'none'; // 숨김
         
         if(editorToolbar) {
             editorToolbar.classList.remove('collapsed');
@@ -756,12 +813,17 @@ function toggleViewMode(mode, pushToHistory = false) {
 }
 
 function handleSwipe() { const swipeThreshold = 50; if (touchEndX < touchStartX - swipeThreshold) turnPage(1); else if (touchEndX > touchStartX + swipeThreshold) turnPage(-1); }
+
 function turnPage(direction) { 
     if (currentViewMode !== 'book') return; 
     const container = document.getElementById('editor-container');
-    const pageWidth = window.innerWidth; 
+    const pageWidth = container.clientWidth; 
     const currentScroll = container.scrollLeft; 
-    const newScroll = currentScroll + (direction * pageWidth); 
+    
+    const currentPageIndex = Math.round(currentScroll / pageWidth);
+    const nextPageIndex = currentPageIndex + direction;
+    const newScroll = nextPageIndex * pageWidth;
+    
     container.scrollTo({ left: newScroll, behavior: 'auto' }); 
     setTimeout(updateBookNav, 50); 
 }
@@ -1033,7 +1095,6 @@ async function loadDataFromFirestore() {
 
 async function saveEntry() { 
     const title = editTitle.value.trim(); 
-    // [수정] 본문 저장 시 링크 자동 변환 적용
     const body = autoLink(editBody.innerHTML);
     
     if(!title || !body || body === '<br>') return; 
