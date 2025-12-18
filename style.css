@@ -42,9 +42,19 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .login-btn-header { background: none; border: 1px solid var(--gray-200); color: var(--gray-500); padding: 6px 14px; border-radius: 20px; font-size: 12px; cursor: pointer; font-family: var(--text-sans); font-weight: 500; }
 .login-btn-header:hover { border-color: var(--gray-900); color: var(--gray-900); }
 
-.login-msg {
-    position: absolute; top: -20px; right: 5px; white-space: nowrap; font-size: 11px; color: var(--accent); font-family: var(--text-sans); font-weight: 500;
+/* [수정] 로그인 메시지 스타일 (두 줄 처리) */
+.login-msg-wrapper {
+    position: absolute; 
+    top: -34px; /* 높이 조정 */
+    right: 5px; 
+    display: flex; 
+    flex-direction: column; 
+    align-items: flex-end; 
+    font-family: var(--text-sans);
+    pointer-events: none; /* 클릭 통과 */
 }
+.login-msg-main { font-size: 11px; color: var(--accent); font-weight: 500; white-space: nowrap; }
+.login-msg-sub { font-size: 10px; color: var(--gray-500); margin-top: 2px; white-space: nowrap; }
 
 /* 탭 */
 .nav-row { padding: 0 24px; display: flex; align-items: center; border-bottom: 1px solid var(--gray-100); margin-bottom: 10px; padding-bottom: 0; gap: 15px; }
@@ -55,7 +65,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .sortable-ghost { opacity: 0.4; background: var(--gray-100); border-radius: 8px; }
 .sortable-drag { cursor: grabbing; }
 
-/* 탭 아래 기능 버튼 영역 (새로 추가) */
+/* 탭 아래 기능 버튼 영역 */
 .controls-row {
     display: flex;
     justify-content: flex-end; /* 오른쪽 정렬 */

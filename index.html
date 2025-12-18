@@ -22,7 +22,11 @@
                     <input type="text" id="search-input" placeholder="검색어를 입력하세요">
                 </div>
                 <div class="auth-area">
-                    <span class="login-msg hidden" id="login-msg-area">로그인으로 기록을 간직하세요</span>
+                    <div class="login-msg-wrapper hidden" id="login-msg-area">
+                        <span class="login-msg-main">로그인으로 기록을 간직하세요</span>
+                        <span class="login-msg-sub">로그아웃 상태의 기록은 오프라인에만 남습니다</span>
+                    </div>
+                    
                     <button id="login-trigger-btn" class="login-btn-header">로그인</button>
                     <button id="logout-btn" class="login-btn-header hidden">로그아웃</button>
                 </div>
