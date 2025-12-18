@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence, browserSessionPersistence } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -53,7 +53,7 @@ let loginModal, loginTriggerBtn, logoutBtn, resetPwModal;
 let entryList, writeModal, trashModal, trashList, tabContainer;
 let editBody, editTitle, editSubtitle;
 let fontSelector, stickerPalette, stickerGrid; 
-let floatingMenu, floatColorBtn, colorPalettePopup, colorPicker; 
+let colorPalettePopup; 
 let exitFocusBtn, bookNavLeft, bookNavRight, pageIndicator;
 let sortCriteria, sortOrderBtn, sortIcon;
 let contextMenu, catContextMenu, moveModal, moveCategoryList, lockModal;
@@ -64,6 +64,7 @@ const stickers = [ '✝️','🙏','📖','🕊️','🕯️','💒','🍞','�
 
 function init() {
     loadDOMElements();
+
     if(categoryOrder.length === 0) categoryOrder = allCategories.map(c => c.id);
 
     if (typeof Sortable !== 'undefined' && tabContainer) {
@@ -93,29 +94,25 @@ function init() {
         });
     }
 
+    // [중요 수정] 브라우저/기기 뒤로가기 감지
     window.addEventListener('popstate', (event) => {
-        if (event.state && event.state.modal === 'open' && event.state.mode) {
-            toggleViewMode('default', false);
-            return;
+        // 히스토리 state가 없거나(목록화면) modal이 열려있는 상태가 아니면
+        // 에디터를 닫고 목록으로 복귀합니다.
+        if (!event.state || event.state.modal !== 'open') {
+            closeAllModals(false); // false: history.back()을 다시 호출하지 않음
         }
-        closeAllModals(false);
     });
 
     document.addEventListener('click', (e) => {
         if (contextMenu && !contextMenu.contains(e.target)) contextMenu.classList.add('hidden');
         if (catContextMenu && !catContextMenu.contains(e.target)) catContextMenu.classList.add('hidden');
         
-        if (floatingMenu && !floatingMenu.classList.contains('hidden')) {
-             const isEditorClick = (editBody && editBody.contains(e.target));
-             if (!floatingMenu.contains(e.target) && !isEditorClick) {
-                 floatingMenu.classList.add('hidden');
-             }
-        }
         if(colorPalettePopup && !colorPalettePopup.classList.contains('hidden')) {
             const isClickInside = colorPalettePopup.contains(e.target);
-            const isFloatColor = document.getElementById('btn-float-color') && document.getElementById('btn-float-color').contains(e.target);
-            const isFloatBg = document.getElementById('btn-float-bg-color') && document.getElementById('btn-float-bg-color').contains(e.target);
-            if (!isClickInside && !isFloatColor && !isFloatBg) {
+            const isToolbarBtn = document.getElementById('toolbar-color-btn') && document.getElementById('toolbar-color-btn').contains(e.target);
+            const isHiliteBtn = document.getElementById('toolbar-hilite-btn') && document.getElementById('toolbar-hilite-btn').contains(e.target);
+            
+            if (!isClickInside && !isToolbarBtn && !isHiliteBtn) {
                 colorPalettePopup.classList.add('hidden');
             }
         }
@@ -168,9 +165,6 @@ function loadDOMElements() {
     stickerPalette = document.getElementById('sticker-palette');
     stickerGrid = document.getElementById('sticker-grid');
     colorPalettePopup = document.getElementById('color-palette-popup');
-    colorPicker = document.getElementById('color-picker');
-    floatingMenu = document.getElementById('floating-menu');
-    floatColorBtn = document.getElementById('float-color-btn');
     loginModal = document.getElementById('login-modal');
     loginTriggerBtn = document.getElementById('login-trigger-btn');
     logoutBtn = document.getElementById('logout-btn');
@@ -200,12 +194,33 @@ function loadDOMElements() {
     lockModalDesc = document.getElementById('lock-modal-desc');
     editorToolbar = document.getElementById('editor-toolbar');
     toolbarToggleBtn = document.getElementById('toolbar-toggle-btn');
+    
+    const toolbarScroll = document.querySelector('.toolbar-content-scroll');
+    if(toolbarScroll) {
+        toolbarScroll.addEventListener('wheel', (evt) => {
+            if(evt.deltaY !== 0) {
+                evt.preventDefault();
+                toolbarScroll.scrollLeft += evt.deltaY;
+            }
+        });
+    }
 }
 
+// [중요 수정] 모달 닫을 때 뷰 모드와 툴바 상태를 초기화
 function closeAllModals(goBack = true) {
     if(writeModal) {
         writeModal.classList.add('hidden');
-        toggleViewMode('default', false);
+        toggleViewMode('default', false); // 뷰 모드 초기화
+        
+        // 툴바 상태 초기화 (펼치기)
+        if(editorToolbar) {
+            editorToolbar.classList.remove('collapsed');
+            const icon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
+            if(icon) {
+                icon.classList.remove('ph-caret-down');
+                icon.classList.add('ph-caret-up');
+            }
+        }
     }
     if(trashModal) trashModal.classList.add('hidden');
     if(loginModal) loginModal.classList.add('hidden');
@@ -213,11 +228,11 @@ function closeAllModals(goBack = true) {
     
     if(stickerPalette) stickerPalette.classList.add('hidden');
     if(colorPalettePopup) colorPalettePopup.classList.add('hidden');
-    if(floatingMenu) floatingMenu.classList.add('hidden');
     if(contextMenu) contextMenu.classList.add('hidden');
     if(moveModal) moveModal.classList.add('hidden');
     if(lockModal) lockModal.classList.add('hidden');
     
+    // 버튼 클릭으로 닫는 경우에만 history.back() 실행
     if(goBack) history.back();
     renderEntries();
 }
@@ -293,6 +308,7 @@ function setupEventListeners() {
     if(stickerBtn) {
         stickerBtn.addEventListener('click', (e) => { 
             e.preventDefault();
+            e.stopPropagation(); 
             if(colorPalettePopup) colorPalettePopup.classList.add('hidden'); 
             toggleStickerMenu();
         });
@@ -314,18 +330,70 @@ function setupEventListeners() {
         });
     }
 
+    const toolbarColorBtn = document.getElementById('toolbar-color-btn');
+    if(toolbarColorBtn) {
+        toolbarColorBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            activeColorMode = 'foreColor';
+            openColorPalette();
+        });
+    }
+
+    const toolbarHiliteBtn = document.getElementById('toolbar-hilite-btn');
+    if(toolbarHiliteBtn) {
+        toolbarHiliteBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            activeColorMode = 'hiliteColor';
+            openColorPalette();
+        });
+    }
+
+    function openColorPalette() {
+        if(stickerPalette) stickerPalette.classList.add('hidden');
+        if(colorPalettePopup) {
+            colorPalettePopup.style.top = '110px';
+            colorPalettePopup.style.bottom = 'auto';
+            colorPalettePopup.style.left = '50%';
+            colorPalettePopup.style.transform = 'translateX(-50%)';
+            colorPalettePopup.classList.toggle('hidden');
+        }
+    }
+
     document.querySelectorAll('.color-dot').forEach(btn => { 
         btn.addEventListener('mousedown', (e) => { 
             e.preventDefault(); 
+            if(editBody) editBody.focus(); 
+
             if(btn.id === 'btn-remove-color' || btn.classList.contains('remove-color')) {
-                 if(activeColorMode === 'hiliteColor') formatDoc('hiliteColor', 'transparent');
-                 else formatDoc('foreColor', '#000000');
+                 if(activeColorMode === 'hiliteColor') {
+                     document.execCommand('hiliteColor', false, 'transparent');
+                 } else {
+                     document.execCommand('foreColor', false, '#111827'); 
+                 }
             } else {
                  formatDoc(activeColorMode, btn.dataset.color); 
             }
             colorPalettePopup.classList.add('hidden'); 
+            debouncedSave();
         }); 
     });
+
+    const btnRemoveColor = document.getElementById('btn-remove-color');
+    if(btnRemoveColor) {
+        btnRemoveColor.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            if(editBody) editBody.focus();
+            if(activeColorMode === 'hiliteColor') {
+                 document.execCommand('hiliteColor', false, 'transparent');
+            } else {
+                 document.execCommand('foreColor', false, '#111827'); 
+            }
+            if(colorPalettePopup) colorPalettePopup.classList.add('hidden'); 
+            debouncedSave();
+        });
+    }
 
     const trackFocus = (el) => { lastFocusedEdit = el; };
     if(editTitle) {
@@ -355,71 +423,21 @@ function setupEventListeners() {
         editBody.addEventListener('keyup', handleSelection);
         editBody.addEventListener('touchend', () => setTimeout(handleSelection, 100));
         
-        // [수정] 책 모드 스크롤 및 마우스 이벤트 (PC용)
         const container = document.getElementById('editor-container');
         if(container) {
             container.addEventListener('touchstart', (e) => { if(currentViewMode !== 'book') return; touchStartX = e.changedTouches[0].screenX; }, {passive:true});
             container.addEventListener('touchend', (e) => { if(currentViewMode !== 'book') return; touchEndX = e.changedTouches[0].screenX; handleSwipe(); }, {passive:true});
             
-            // [추가] PC 마우스 조작 (책 모드일 때만)
             container.addEventListener('mousedown', (e) => {
                 if(currentViewMode !== 'book') return;
-                // 우클릭 메뉴 방지 및 페이지 넘김
-                if(e.button === 2) { // 우클릭 -> 다음
+                if(e.button === 2) { 
                     e.preventDefault();
                     turnPage(1);
-                } else if(e.button === 0) { // 좌클릭 -> 이전
-                    // 텍스트 선택 등과 충돌 방지를 위해, readOnly 모드이므로 페이지 넘김으로 사용
-                    // 하지만 좌클릭은 선택 의도일 수 있으니, 
-                    // 사용자가 "왼쪽 클릭하면 이전 페이지"라고 명시했으므로 구현.
-                    // 단, 드래그가 아닐 때만 동작하게 하려면 mouseup 등을 써야 하지만, 간단히 구현.
-                    turnPage(-1); 
                 }
             });
-            // 우클릭 컨텍스트 메뉴 차단 (책 모드에서)
             container.addEventListener('contextmenu', (e) => {
                 if(currentViewMode === 'book') e.preventDefault();
             });
-        }
-    }
-
-    if(floatingMenu) {
-        floatingMenu.querySelectorAll('.float-btn[data-cmd]').forEach(btn => { 
-            btn.addEventListener('mousedown', (e) => { 
-                e.preventDefault(); 
-                formatDoc(btn.dataset.cmd); 
-            }); 
-        });
-
-        const btnFloatColor = document.getElementById('btn-float-color');
-        if(btnFloatColor) {
-            btnFloatColor.addEventListener('mousedown', (e) => {
-                e.preventDefault(); 
-                e.stopPropagation(); 
-                activeColorMode = 'foreColor';
-                openFloatingPalette();
-            });
-        }
-        
-        const btnFloatBgColor = document.getElementById('btn-float-bg-color');
-        if(btnFloatBgColor) {
-            btnFloatBgColor.addEventListener('mousedown', (e) => {
-                e.preventDefault(); 
-                e.stopPropagation(); 
-                activeColorMode = 'hiliteColor';
-                openFloatingPalette();
-            });
-        }
-    }
-    
-    function openFloatingPalette() {
-        if(colorPalettePopup) {
-            const rect = floatingMenu.getBoundingClientRect();
-            colorPalettePopup.style.bottom = 'auto'; 
-            colorPalettePopup.style.top = `${rect.bottom + 10}px`;
-            colorPalettePopup.style.left = `${rect.left + (rect.width/2)}px`; 
-            colorPalettePopup.style.transform = 'translateX(-50%)';
-            colorPalettePopup.classList.toggle('hidden');
         }
     }
 
@@ -435,18 +453,13 @@ function setupEventListeners() {
     const writeBtn = document.getElementById('write-btn');
     if(writeBtn) writeBtn.addEventListener('click', () => openEditor(false));
     
-    // [수정] 목록 버튼 로직: 읽기모드 -> 편집모드, 편집모드 -> 목록
+    // [중요 수정] 뒤로가기 버튼(목록 버튼) 클릭 시 무조건 저장 후 목록으로 이동
     const closeWriteBtn = document.getElementById('close-write-btn');
     if(closeWriteBtn) closeWriteBtn.addEventListener('click', async () => { 
-        if(currentViewMode !== 'default') {
-            toggleViewMode('default', false);
-        } else {
-            await saveEntry(); 
-            closeAllModals(true); 
-        }
+        await saveEntry(); 
+        closeAllModals(true); 
     });
     
-    // [수정] 버튼 토글 로직 추가
     const btnReadOnly = document.getElementById('btn-readonly');
     if(btnReadOnly) btnReadOnly.addEventListener('click', () => {
         if (currentViewMode === 'readOnly') toggleViewMode('default');
@@ -503,45 +516,7 @@ async function copyContentToClipboard() {
 }
 
 function handleSelection() {
-    if (!writeModal || !floatingMenu) return;
-    if (writeModal.classList.contains('hidden')) return;
-
-    let targetEl = null;
-    const activeEl = document.activeElement;
-    if (activeEl === editBody || (editBody && editBody.contains(activeEl))) targetEl = editBody;
-    else if (activeEl === editTitle) targetEl = editTitle;
-    else if (activeEl === editSubtitle) targetEl = editSubtitle;
-
-    if (!targetEl) return;
-    if(targetEl.tagName === 'INPUT') {
-        floatingMenu.classList.add('hidden');
-        return;
-    }
-
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0 || selection.isCollapsed || !editBody.contains(selection.anchorNode)) {
-        if(colorPalettePopup && colorPalettePopup.classList.contains('hidden')) {
-            floatingMenu.classList.add('hidden');
-        }
-        return;
-    }
-    const range = selection.getRangeAt(0);
-    const rect = range.getBoundingClientRect();
-    if (rect.width === 0 && rect.height === 0) return;
-    
-    floatingMenu.classList.remove('hidden');
-    const menuHeight = floatingMenu.offsetHeight || 50; 
-    const menuWidth = floatingMenu.offsetWidth || 200;
-    
-    let top = rect.bottom + 10; 
-    let left = rect.left + (rect.width / 2) - (menuWidth / 2);
-    if (top + menuHeight > window.innerHeight) top = rect.top - menuHeight - 10;
-    if (left < 10) left = 10;
-    if (left + menuWidth > window.innerWidth - 10) left = window.innerWidth - menuWidth - 10;
-    
-    floatingMenu.style.top = `${top}px`;
-    floatingMenu.style.left = `${left}px`;
-    floatingMenu.style.transform = 'none';
+    // 플로팅 메뉴 없음
 }
 
 window.formatDoc = (cmd, value = null) => {
@@ -549,7 +524,6 @@ window.formatDoc = (cmd, value = null) => {
     if (!editBody) return;
     editBody.focus();
     document.execCommand(cmd, false, value);
-    setTimeout(handleSelection, 0);
     debouncedSave(); 
 };
 
@@ -577,50 +551,7 @@ window.changeGlobalFontSize = (delta) => {
 };
 
 window.changeSelectionFontSize = (delta) => {
-    const selection = window.getSelection();
-    if (!selection.rangeCount || selection.isCollapsed) return;
-
-    const range = selection.getRangeAt(0);
-    let parentElement = range.commonAncestorContainer.nodeType === 3 ? range.commonAncestorContainer.parentElement : range.commonAncestorContainer;
-    
-    if (parentElement.tagName === 'SPAN' && parentElement.style.fontSize) {
-        let currentSize = parseFloat(parentElement.style.fontSize);
-        if(!isNaN(currentSize)) {
-            let newSize = currentSize + delta;
-            if(newSize < 10) newSize = 10;
-            parentElement.style.fontSize = `${newSize}px`;
-            const newRange = document.createRange();
-            newRange.selectNodeContents(parentElement);
-            selection.removeAllRanges();
-            selection.addRange(newRange);
-            setTimeout(handleSelection, 0);
-            debouncedSave();
-            return;
-        }
-    }
-
-    const span = document.createElement("span");
-    let currentSize = 16;
-    const computedStyle = window.getComputedStyle(parentElement);
-    if(computedStyle.fontSize) currentSize = parseFloat(computedStyle.fontSize);
-    
-    let newSize = currentSize + delta;
-    if(newSize < 10) newSize = 10;
-    
-    span.style.fontSize = `${newSize}px`;
-
-    try {
-        const extractedContents = range.extractContents();
-        span.appendChild(extractedContents);
-        range.insertNode(span);
-        selection.removeAllRanges();
-        const newRange = document.createRange();
-        newRange.selectNodeContents(span);
-        selection.addRange(newRange);
-    } catch(e) { console.error("Selection wrapping failed", e); }
-    
-    setTimeout(handleSelection, 0);
-    debouncedSave();
+    // 사용 안함
 };
 
 window.insertSticker = (emoji) => { 
@@ -677,15 +608,14 @@ function openEditor(m, d) {
         applyFontStyle('Pretendard', 16); 
     } 
     lastFocusedEdit = editBody;
-    toggleViewMode('default');
+    toggleViewMode('default', false);
 }
 
-function toggleViewMode(mode, pushToHistory = true) {
+// [중요 수정] 책 모드 툴바 접기 및 히스토리 관리 수정
+function toggleViewMode(mode, pushToHistory = false) {
     currentViewMode = mode;
     
-    if(pushToHistory && mode !== 'default') {
-        history.pushState({ modal: 'open', mode: mode }, null, '');
-    }
+    // pushToHistory는 더 이상 사용하지 않음 (뒤로가기는 항상 목록으로)
 
     writeModal.classList.remove('mode-read-only', 'mode-book');
     bookNavLeft.classList.add('hidden');
@@ -693,35 +623,55 @@ function toggleViewMode(mode, pushToHistory = true) {
     pageIndicator.classList.add('hidden');
     if(exitFocusBtn) exitFocusBtn.classList.add('hidden');
     
-    // 버튼 활성 상태 표시
     const btnReadOnly = document.getElementById('btn-readonly');
     const btnBookMode = document.getElementById('btn-bookmode');
     if(btnReadOnly) btnReadOnly.classList.remove('active');
     if(btnBookMode) btnBookMode.classList.remove('active');
     
-    // 모드에 따라 contenteditable 제어
-    if (mode === 'default') {
-        editTitle.readOnly = false;
-        editSubtitle.readOnly = false;
-        editBody.contentEditable = "true";
-    } else {
+    // 툴바 아이콘 제어
+    const toolbarIcon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
+
+    if (mode === 'readOnly') {
         editTitle.readOnly = true;
         editSubtitle.readOnly = true;
         editBody.contentEditable = "false";
-    }
-
-    if (mode === 'readOnly') {
         writeModal.classList.add('mode-read-only');
         if(exitFocusBtn) exitFocusBtn.classList.remove('hidden');
         if(btnReadOnly) btnReadOnly.classList.add('active');
+
     } else if (mode === 'book') {
+        editTitle.readOnly = false;
+        editSubtitle.readOnly = false;
+        editBody.contentEditable = "true";
         writeModal.classList.add('mode-book');
         if(exitFocusBtn) exitFocusBtn.classList.remove('hidden');
         if(btnBookMode) btnBookMode.classList.add('active');
-        // 책모드는 container 스크롤
         const container = document.getElementById('editor-container');
         if(container) container.scrollLeft = 0; 
         updateBookNav();
+        
+        // [추가] 책 모드 진입 시 툴바 자동 접기
+        if(editorToolbar) {
+            editorToolbar.classList.add('collapsed');
+            if(toolbarIcon) {
+                toolbarIcon.classList.remove('ph-caret-up');
+                toolbarIcon.classList.add('ph-caret-down');
+            }
+        }
+    } else {
+        // default 모드
+        editTitle.readOnly = false;
+        editSubtitle.readOnly = false;
+        editBody.contentEditable = "true";
+        
+        // [추가] 기본 모드 복귀 시 툴바 펼치기
+        if(editorToolbar) {
+            editorToolbar.classList.remove('collapsed');
+            if(toolbarIcon) {
+                toolbarIcon.classList.remove('ph-caret-down');
+                toolbarIcon.classList.add('ph-caret-up');
+            }
+        }
     }
 }
 
@@ -732,7 +682,6 @@ function turnPage(direction) {
     const pageWidth = window.innerWidth; 
     const currentScroll = container.scrollLeft; 
     const newScroll = currentScroll + (direction * pageWidth); 
-    // [수정] 애니메이션 제거 (auto)
     container.scrollTo({ left: newScroll, behavior: 'auto' }); 
     setTimeout(updateBookNav, 50); 
 }
@@ -1002,7 +951,6 @@ async function loadDataFromFirestore() {
     } catch (e) { console.error(e); } 
 }
 
-// [수정] 중복 저장 방지 로직 유지
 async function saveEntry() { 
     const title = editTitle.value.trim(); 
     const body = editBody.innerHTML; 
@@ -1060,7 +1008,7 @@ window.permanentDelete = async (id) => {
     renderEntries(); 
 }
 window.restoreEntry = async (id) => { if(!confirm('이 글을 복구하시겠습니까?')) return; if(currentUser){ const docRef = doc(db, "users", currentUser.uid, "entries", id); await updateDoc(docRef, { isDeleted: false }); await loadDataFromFirestore(); } else { const index = entries.findIndex(e => e.id === id); if(index !== -1) entries[index].isDeleted = false; localStorage.setItem('faithLogDB', JSON.stringify(entries)); } renderTrash(); renderEntries(); }
-// [수정] 휴지통 UI 개선
+
 function renderTrash() { 
     trashList.innerHTML = ''; 
     const deleted = entries.filter(e => e.isDeleted); 

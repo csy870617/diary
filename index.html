@@ -70,7 +70,14 @@
         </div>
 
         <div class="editor-toolbar" id="editor-toolbar">
-            <div class="toolbar-content">
+            <div class="toolbar-content-scroll" id="toolbar-scroll-area">
+                <div class="tool-group">
+                    <button class="tool-btn" data-cmd="undo" title="되돌리기"><i class="ph ph-arrow-u-up-left"></i></button>
+                    <button class="tool-btn" data-cmd="redo" title="다시하기"><i class="ph ph-arrow-u-up-right"></i></button>
+                </div>
+
+                <div class="toolbar-divider"></div>
+
                 <div class="tool-group">
                     <select id="font-selector" class="font-select">
                         <option value="Pretendard">고딕</option>
@@ -82,26 +89,30 @@
                         <button class="tool-btn small" id="btn-global-size-up">가+</button>
                     </div>
                 </div>
-                
+
                 <div class="toolbar-divider"></div>
 
                 <div class="tool-group">
-                    <button class="tool-btn" data-cmd="undo" title="되돌리기"><i class="ph ph-arrow-u-up-left"></i></button>
-                    <button class="tool-btn" data-cmd="redo" title="다시하기"><i class="ph ph-arrow-u-up-right"></i></button>
+                    <button class="tool-btn" id="toolbar-color-btn" title="글자색"><i class="ph ph-palette" style="color:#F59E0B;"></i></button>
+                    <button class="tool-btn" id="toolbar-hilite-btn" title="형광펜"><i class="ph ph-highlighter" style="color:#FDE047;"></i></button>
+                    <button class="tool-btn" id="sticker-btn" title="스티커"><i class="ph ph-smiley"></i></button>
                 </div>
 
+                <div class="toolbar-divider"></div>
+
+                <div class="tool-group">
+                    <button class="tool-btn" data-cmd="bold" title="굵게"><i class="ph ph-text-b"></i></button>
+                    <button class="tool-btn" data-cmd="italic" title="기울임"><i class="ph ph-text-italic"></i></button>
+                    <button class="tool-btn" data-cmd="underline" title="밑줄"><i class="ph ph-text-underline"></i></button>
+                    <button class="tool-btn" data-cmd="strikeThrough" title="취소선"><i class="ph ph-text-strikethrough"></i></button>
+                </div>
+                
                 <div class="toolbar-divider"></div>
                 
                 <div class="tool-group">
                     <button class="tool-btn" data-cmd="justifyLeft"><i class="ph ph-text-align-left"></i></button>
                     <button class="tool-btn" data-cmd="justifyCenter"><i class="ph ph-text-align-center"></i></button>
                     <button class="tool-btn" data-cmd="justifyRight"><i class="ph ph-text-align-right"></i></button>
-                </div>
-
-                <div class="toolbar-divider"></div>
-
-                <div class="tool-group">
-                    <button class="tool-btn" id="sticker-btn" title="스티커"><i class="ph ph-smiley"></i></button>
                 </div>
             </div>
             
@@ -124,7 +135,7 @@
         <div id="book-nav-left" class="book-nav prev hidden"><i class="ph ph-caret-left"></i></div>
         <div id="book-nav-right" class="book-nav next hidden"><i class="ph ph-caret-right"></i></div>
         <div id="page-indicator" class="page-indicator hidden"></div>
-        
+
         <div id="sticker-palette" class="sticker-palette hidden">
             <div id="sticker-grid" class="sticker-grid"></div>
         </div>
@@ -141,23 +152,12 @@
                 <button class="color-dot" style="background-color: #F97316;" data-color="#F97316" title="Orange"></button>
                 <button class="color-dot" style="background-color: #F59E0B;" data-color="#F59E0B" title="Amber"></button>
                 <button class="color-dot" style="background-color: #10B981;" data-color="#10B981" title="Green"></button>
-                
                 <button class="color-dot" style="background-color: #3B82F6;" data-color="#3B82F6" title="Blue"></button>
                 <button class="color-dot" style="background-color: #6366F1;" data-color="#6366F1" title="Indigo"></button>
                 <button class="color-dot" style="background-color: #8B5CF6;" data-color="#8B5CF6" title="Violet"></button>
                 <button class="color-dot" style="background-color: #EC4899;" data-color="#EC4899" title="Pink"></button>
                 <button class="color-dot" style="background-color: #6B7280;" data-color="#6B7280" title="Gray"></button>
             </div>
-        </div>
-
-        <div id="floating-menu" class="floating-menu hidden">
-            <button class="float-btn" id="btn-float-color"><i class="ph ph-palette" style="color:#FCD34D;"></i></button>
-            <button class="float-btn" id="btn-float-bg-color" title="배경색"><i class="ph ph-paint-bucket" style="color:#FDE047;"></i></button>
-            <div class="float-divider"></div>
-            <button class="float-btn" data-cmd="bold"><i class="ph ph-text-b"></i></button>
-            <button class="float-btn" data-cmd="italic"><i class="ph ph-text-italic"></i></button>
-            <button class="float-btn" data-cmd="underline"><i class="ph ph-text-underline"></i></button>
-            <button class="float-btn" data-cmd="strikeThrough"><i class="ph ph-text-strikethrough"></i></button>
         </div>
     </div>
 
