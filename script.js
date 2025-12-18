@@ -861,7 +861,10 @@ function renderEntries(keyword = '') {
         } else {
             const dateStr = currentSortBy === 'modified' ? `수정: ${new Date(entry.modifiedAt || entry.timestamp).toLocaleDateString()}` : entry.date;
             div.innerHTML = `<h3 class="card-title">${entry.title}</h3>${entry.subtitle ? `<p class="card-subtitle">${entry.subtitle}</p>` : ''}<div class="card-meta"><span>${dateStr}</span></div>`;
-            div.onclick = () => openEditor(true, entry);
+            div.onclick = () => {
+                openEditor(true, entry);
+                toggleViewMode('readOnly'); // [수정] 클릭 시 읽기 전용으로 열기
+            };
         }
         attachContextMenu(div, entry.id);
         entryList.appendChild(div);
@@ -1234,5 +1237,6 @@ function renderTrash() {
     }); 
 }
 function openTrashModal() { renderTrash(); openModal(trashModal); }
+
 
 if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', init); } else { init(); }

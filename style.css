@@ -47,7 +47,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 }
 
 /* 탭 */
-.nav-row { padding: 0 24px; display: flex; align-items: center; border-bottom: 1px solid var(--gray-100); margin-bottom: 20px; padding-bottom: 0; gap: 15px; }
+.nav-row { padding: 0 24px; display: flex; align-items: center; border-bottom: 1px solid var(--gray-100); margin-bottom: 10px; padding-bottom: 0; gap: 15px; }
 .tabs { display: flex; gap: 10px; overflow-x: auto; flex-grow: 1; align-items: center; padding-bottom: 1px; white-space: nowrap; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none; }
 .tabs::-webkit-scrollbar { display: none; }
 .tab-btn { background: none; border: none; padding: 10px 4px; font-family: var(--text-sans); color: var(--gray-500); cursor: pointer; font-size: 15px; display: flex; align-items: center; gap: 4px; white-space: nowrap; user-select: none; flex-shrink: 0; }
@@ -55,7 +55,15 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .sortable-ghost { opacity: 0.4; background: var(--gray-100); border-radius: 8px; }
 .sortable-drag { cursor: grabbing; }
 
-.nav-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
+/* 탭 아래 기능 버튼 영역 (새로 추가) */
+.controls-row {
+    display: flex;
+    justify-content: flex-end; /* 오른쪽 정렬 */
+    padding: 0 24px 10px; /* 탭 아래 간격 */
+    margin-bottom: 10px;
+}
+
+.nav-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .sort-control { display: flex; align-items: center; gap: 4px; }
 .sort-select { border: none; background: transparent; font-size: 12px; color: var(--gray-500); outline: none; cursor: pointer; text-align: right; font-family: var(--text-sans); }
 .icon-nav-btn { background: none; border: none; padding: 6px; color: var(--gray-400); cursor: pointer; font-size: 18px; transition: color 0.2s; display: flex; align-items: center; }
@@ -232,4 +240,5 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .ctx-item:hover { background: var(--gray-100); }
 .ctx-item.danger { color: var(--danger); }
 .ctx-item i { font-size: 16px; color: var(--gray-500); width: 20px; text-align: center; } 
+
 .ctx-item.danger i { color: var(--danger); }
