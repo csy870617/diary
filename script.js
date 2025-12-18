@@ -47,6 +47,8 @@ let longPressTimer = null;
 let lastFocusedEdit = null;
 let activeColorMode = 'foreColor';
 let autoSaveTimer = null;
+let wheelDebounceTimer = null;
+let snapTimer = null; // [추가] 책 모드 스냅 제어용 타이머
 
 // --- DOM 요소 변수 ---
 let loginModal, loginTriggerBtn, logoutBtn, resetPwModal;
@@ -94,12 +96,9 @@ function init() {
         });
     }
 
-    // [핵심 수정] 브라우저/기기 뒤로가기 감지
     window.addEventListener('popstate', (event) => {
-        // 뒤로가기를 누르면 상태(state)가 'open'이 아니게 되거나 null이 됨
-        // 이 경우 무조건 모든 모달을 닫고 초기화하여 목록을 보여줌
         if (!event.state || event.state.modal !== 'open') {
-            closeAllModals(false); // false: 여기서 history.back()을 또 호출하지 않음
+            closeAllModals(false); 
         }
     });
 
@@ -150,6 +149,8 @@ function init() {
             if(loginMsg) loginMsg.classList.remove('hidden');
             loadDataFromLocal();
         }
+        
+        await checkOldTrash();
         
         isLoading = false; 
         renderTabs();
@@ -206,13 +207,11 @@ function loadDOMElements() {
     }
 }
 
-// [핵심 수정] 모달 닫기 시 상태 초기화
 function closeAllModals(goBack = true) {
     if(writeModal) {
         writeModal.classList.add('hidden');
-        toggleViewMode('default', false); // 뷰 모드 및 툴바 초기화
+        toggleViewMode('default', false); 
         
-        // 툴바 강제 펼치기 (초기화)
         if(editorToolbar) {
             editorToolbar.classList.remove('collapsed');
             const icon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
@@ -232,15 +231,12 @@ function closeAllModals(goBack = true) {
     if(moveModal) moveModal.classList.add('hidden');
     if(lockModal) lockModal.classList.add('hidden');
     
-    // UI 버튼으로 닫을 때만 history.back() 실행 (물리 버튼으로 닫을 때는 실행 X)
     if(goBack) history.back();
     renderEntries();
 }
 
-// [핵심 수정] 히스토리 중복 방지 (목록 -> 모달 1단계만 유지)
 function openModal(modal) {
     if(!modal) return;
-    // 현재 이미 모달이 열려있는 상태라면(state가 open), 히스토리를 추가하지 않음
     if (!history.state || history.state.modal !== 'open') {
         history.pushState({ modal: 'open' }, null, '');
     }
@@ -250,6 +246,60 @@ function openModal(modal) {
 function debouncedSave() {
     if(autoSaveTimer) clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(saveEntry, 1000); 
+}
+
+// [추가] 텍스트 내 URL 자동 링크 변환 함수
+function autoLink(text) {
+    // 이미 링크 태그인 경우는 제외하고 URL 패턴을 찾아 링크로 변환
+    // 간단한 구현을 위해 DOMParser 사용
+    const div = document.createElement('div');
+    div.innerHTML = text;
+    
+    const walker = document.createTreeWalker(div, NodeFilter.SHOW_TEXT, null, false);
+    let node;
+    const nodesToReplace = [];
+    
+    while(node = walker.nextNode()) {
+        if(node.parentElement.tagName === 'A') continue; // 이미 링크면 건너뜀
+        if(node.nodeValue.match(/(https?:\/\/[^\s]+)/)) {
+            nodesToReplace.push(node);
+        }
+    }
+    
+    nodesToReplace.forEach(node => {
+        const span = document.createElement('span');
+        // URL을 찾아 링크로 감쌈
+        span.innerHTML = node.nodeValue.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" style="color:#2563EB; text-decoration:underline;">$1</a>');
+        node.parentElement.replaceChild(span, node);
+        // span 태그를 벗기고 내용만 넣음 (불필요한 DOM 깊이 방지)
+        const parent = span.parentElement;
+        while(span.firstChild) {
+            parent.insertBefore(span.firstChild, span);
+        }
+        parent.removeChild(span);
+    });
+    
+    return div.innerHTML;
+}
+
+// [추가] 책 모드 스크롤 보정 함수
+function fixBookModeScroll() {
+    if(currentViewMode !== 'book') return;
+    
+    if(snapTimer) clearTimeout(snapTimer);
+    snapTimer = setTimeout(() => {
+        const container = document.getElementById('editor-container');
+        if(!container) return;
+        
+        const pageWidth = container.clientWidth;
+        const currentScroll = container.scrollLeft;
+        const targetScroll = Math.round(currentScroll / pageWidth) * pageWidth;
+        
+        if(Math.abs(currentScroll - targetScroll) > 5) {
+            container.scrollTo({ left: targetScroll, behavior: 'smooth' });
+            setTimeout(updateBookNav, 300);
+        }
+    }, 100); // 0.1초 딜레이 후 스냅
 }
 
 function setupEventListeners() {
@@ -420,7 +470,15 @@ function setupEventListeners() {
                 e.preventDefault(); saveEntry(); 
             } 
         });
-        editBody.addEventListener('input', debouncedSave);
+        
+        // [수정] 입력 시 스냅 보정 및 저장
+        editBody.addEventListener('input', () => {
+            debouncedSave();
+            fixBookModeScroll();
+        });
+        // [추가] 클릭 및 키입력 시에도 스냅 보정 (커서 이동 대응)
+        editBody.addEventListener('keyup', fixBookModeScroll);
+        editBody.addEventListener('click', fixBookModeScroll);
         
         document.addEventListener('selectionchange', handleSelection);
         editBody.addEventListener('mouseup', handleSelection);
@@ -442,6 +500,23 @@ function setupEventListeners() {
             container.addEventListener('contextmenu', (e) => {
                 if(currentViewMode === 'book') e.preventDefault();
             });
+
+            container.addEventListener('wheel', (e) => {
+                if(currentViewMode !== 'book') return;
+                e.preventDefault(); 
+
+                if(wheelDebounceTimer) return; 
+
+                if(e.deltaY > 0) {
+                    turnPage(1);
+                } else if(e.deltaY < 0) {
+                    turnPage(-1);
+                }
+
+                wheelDebounceTimer = setTimeout(() => {
+                    wheelDebounceTimer = null;
+                }, 250);
+            }, { passive: false });
         }
     }
 
@@ -457,11 +532,10 @@ function setupEventListeners() {
     const writeBtn = document.getElementById('write-btn');
     if(writeBtn) writeBtn.addEventListener('click', () => openEditor(false));
     
-    // [핵심 수정] 목록 버튼: 무조건 저장 후 목록으로 이동
     const closeWriteBtn = document.getElementById('close-write-btn');
     if(closeWriteBtn) closeWriteBtn.addEventListener('click', async () => { 
         await saveEntry(); 
-        closeAllModals(true); // true = history.back() 호출
+        closeAllModals(true); 
     });
     
     const btnReadOnly = document.getElementById('btn-readonly');
@@ -502,6 +576,15 @@ function setupEventListeners() {
     if(closeLockBtn) closeLockBtn.addEventListener('click', () => lockModal.classList.add('hidden'));
     const confirmLockBtn = document.getElementById('confirm-lock-btn');
     if(confirmLockBtn) confirmLockBtn.addEventListener('click', confirmLock);
+
+    const trashHeader = document.querySelector('#trash-modal .write-header');
+    if(trashHeader) {
+        const spacer = trashHeader.querySelector('div[style*="width: 60px"]');
+        if(spacer) {
+            spacer.outerHTML = '<button id="btn-empty-trash" class="text-btn" style="font-size:13px; color:#EF4444; border:none; background:none; cursor:pointer; font-family:var(--text-sans); font-weight:600;">비우기</button>';
+            document.getElementById('btn-empty-trash').addEventListener('click', emptyTrash);
+        }
+    }
 }
 
 function toggleStickerMenu() {
@@ -618,8 +701,6 @@ function openEditor(m, d) {
 function toggleViewMode(mode, pushToHistory = false) {
     currentViewMode = mode;
     
-    // pushToHistory 미사용 (항상 목록으로 이동)
-
     writeModal.classList.remove('mode-read-only', 'mode-book');
     bookNavLeft.classList.add('hidden');
     bookNavRight.classList.add('hidden');
@@ -652,7 +733,6 @@ function toggleViewMode(mode, pushToHistory = false) {
         if(container) container.scrollLeft = 0; 
         updateBookNav();
         
-        // 책 모드: 툴바 접기
         if(editorToolbar) {
             editorToolbar.classList.add('collapsed');
             if(toolbarIcon) {
@@ -661,12 +741,10 @@ function toggleViewMode(mode, pushToHistory = false) {
             }
         }
     } else {
-        // default 모드
         editTitle.readOnly = false;
         editSubtitle.readOnly = false;
         editBody.contentEditable = "true";
         
-        // 기본 모드: 툴바 펼치기
         if(editorToolbar) {
             editorToolbar.classList.remove('collapsed');
             if(toolbarIcon) {
@@ -955,7 +1033,9 @@ async function loadDataFromFirestore() {
 
 async function saveEntry() { 
     const title = editTitle.value.trim(); 
-    const body = editBody.innerHTML; 
+    // [수정] 본문 저장 시 링크 자동 변환 적용
+    const body = autoLink(editBody.innerHTML);
+    
     if(!title || !body || body === '<br>') return; 
     
     const now = Date.now(); 
@@ -1002,20 +1082,78 @@ async function saveEntry() {
     } catch(e) { console.error("Save Error:", e); } 
 }
 
-async function moveToTrash(id) { if(!confirm('휴지통으로 이동하시겠습니까?')) return; if(currentUser){ const docRef = doc(db, "users", currentUser.uid, "entries", id); await updateDoc(docRef, { isDeleted: true }); await loadDataFromFirestore(); } else { const index = entries.findIndex(e => e.id === id); if(index !== -1) entries[index].isDeleted = true; localStorage.setItem('faithLogDB', JSON.stringify(entries)); } history.back(); renderEntries(); } 
+async function moveToTrash(id) { 
+    if(!confirm('휴지통으로 이동하시겠습니까?')) return; 
+    const now = Date.now();
+    if(currentUser){ 
+        const docRef = doc(db, "users", currentUser.uid, "entries", id); 
+        await updateDoc(docRef, { isDeleted: true, deletedAt: now }); 
+        await loadDataFromFirestore(); 
+    } else { 
+        const index = entries.findIndex(e => e.id === id); 
+        if(index !== -1) {
+            entries[index].isDeleted = true;
+            entries[index].deletedAt = now;
+            localStorage.setItem('faithLogDB', JSON.stringify(entries)); 
+        }
+    } 
+    renderEntries(); 
+} 
+
 window.permanentDelete = async (id) => { 
     if(!confirm('영구 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.')) return; 
     if(currentUser){ await deleteDoc(doc(db, "users", currentUser.uid, "entries", id)); await loadDataFromFirestore(); } else { entries = entries.filter(e => e.id !== id); localStorage.setItem('faithLogDB', JSON.stringify(entries)); } 
-    closeAllModals(); 
+    renderTrash(); 
     renderEntries(); 
 }
+
 window.restoreEntry = async (id) => { if(!confirm('이 글을 복구하시겠습니까?')) return; if(currentUser){ const docRef = doc(db, "users", currentUser.uid, "entries", id); await updateDoc(docRef, { isDeleted: false }); await loadDataFromFirestore(); } else { const index = entries.findIndex(e => e.id === id); if(index !== -1) entries[index].isDeleted = false; localStorage.setItem('faithLogDB', JSON.stringify(entries)); } renderTrash(); renderEntries(); }
 
+async function emptyTrash() {
+    if(!confirm('휴지통을 비우시겠습니까? 모든 글이 영구 삭제됩니다.')) return;
+    const deletedEntries = entries.filter(e => e.isDeleted);
+    
+    if (!currentUser) {
+        entries = entries.filter(e => !e.isDeleted);
+        localStorage.setItem('faithLogDB', JSON.stringify(entries));
+        renderTrash();
+        renderEntries();
+        return;
+    }
+    
+    for (const entry of deletedEntries) {
+        await deleteDoc(doc(db, "users", currentUser.uid, "entries", entry.id));
+    }
+    await loadDataFromFirestore();
+    renderTrash();
+    renderEntries();
+}
+
+async function checkOldTrash() {
+    const now = Date.now();
+    const thirtyDays = 1000 * 60 * 60 * 24 * 30; 
+    
+    const toDelete = entries.filter(e => e.isDeleted && e.deletedAt && (now - e.deletedAt > thirtyDays));
+
+    if(toDelete.length > 0) {
+        if(currentUser) {
+            for (const entry of toDelete) {
+                await deleteDoc(doc(db, "users", currentUser.uid, "entries", entry.id));
+            }
+            await loadDataFromFirestore();
+        } else {
+            entries = entries.filter(e => !(e.isDeleted && e.deletedAt && (now - e.deletedAt > thirtyDays)));
+            localStorage.setItem('faithLogDB', JSON.stringify(entries));
+        }
+        renderEntries();
+    }
+}
+
 function renderTrash() { 
-    trashList.innerHTML = ''; 
+    trashList.innerHTML = `<div style="padding:10px 0; text-align:center; font-size:12px; color:#9CA3AF; font-family:'Pretendard'; margin-bottom:10px;">휴지통에 보관된 글은 30일 후 자동 삭제됩니다.</div>`;
     const deleted = entries.filter(e => e.isDeleted); 
     if(deleted.length === 0) { 
-        trashList.innerHTML = `<div style="text-align:center; margin-top:50px; color:#aaa;">비어있음</div>`; 
+        trashList.innerHTML += `<div style="text-align:center; margin-top:50px; color:#aaa; font-family:'Pretendard';">비어있음</div>`; 
         return; 
     } 
     deleted.forEach(entry => { 
