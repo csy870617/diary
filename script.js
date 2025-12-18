@@ -94,12 +94,12 @@ function init() {
         });
     }
 
-    // [중요 수정] 브라우저/기기 뒤로가기 감지
+    // [핵심 수정] 브라우저/기기 뒤로가기 감지
     window.addEventListener('popstate', (event) => {
-        // 히스토리 state가 없거나(목록화면) modal이 열려있는 상태가 아니면
-        // 에디터를 닫고 목록으로 복귀합니다.
+        // 뒤로가기를 누르면 상태(state)가 'open'이 아니게 되거나 null이 됨
+        // 이 경우 무조건 모든 모달을 닫고 초기화하여 목록을 보여줌
         if (!event.state || event.state.modal !== 'open') {
-            closeAllModals(false); // false: history.back()을 다시 호출하지 않음
+            closeAllModals(false); // false: 여기서 history.back()을 또 호출하지 않음
         }
     });
 
@@ -206,13 +206,13 @@ function loadDOMElements() {
     }
 }
 
-// [중요 수정] 모달 닫을 때 뷰 모드와 툴바 상태를 초기화
+// [핵심 수정] 모달 닫기 시 상태 초기화
 function closeAllModals(goBack = true) {
     if(writeModal) {
         writeModal.classList.add('hidden');
-        toggleViewMode('default', false); // 뷰 모드 초기화
+        toggleViewMode('default', false); // 뷰 모드 및 툴바 초기화
         
-        // 툴바 상태 초기화 (펼치기)
+        // 툴바 강제 펼치기 (초기화)
         if(editorToolbar) {
             editorToolbar.classList.remove('collapsed');
             const icon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
@@ -232,14 +232,18 @@ function closeAllModals(goBack = true) {
     if(moveModal) moveModal.classList.add('hidden');
     if(lockModal) lockModal.classList.add('hidden');
     
-    // 버튼 클릭으로 닫는 경우에만 history.back() 실행
+    // UI 버튼으로 닫을 때만 history.back() 실행 (물리 버튼으로 닫을 때는 실행 X)
     if(goBack) history.back();
     renderEntries();
 }
 
+// [핵심 수정] 히스토리 중복 방지 (목록 -> 모달 1단계만 유지)
 function openModal(modal) {
     if(!modal) return;
-    history.pushState({ modal: 'open' }, null, '');
+    // 현재 이미 모달이 열려있는 상태라면(state가 open), 히스토리를 추가하지 않음
+    if (!history.state || history.state.modal !== 'open') {
+        history.pushState({ modal: 'open' }, null, '');
+    }
     modal.classList.remove('hidden');
 }
 
@@ -453,11 +457,11 @@ function setupEventListeners() {
     const writeBtn = document.getElementById('write-btn');
     if(writeBtn) writeBtn.addEventListener('click', () => openEditor(false));
     
-    // [중요 수정] 뒤로가기 버튼(목록 버튼) 클릭 시 무조건 저장 후 목록으로 이동
+    // [핵심 수정] 목록 버튼: 무조건 저장 후 목록으로 이동
     const closeWriteBtn = document.getElementById('close-write-btn');
     if(closeWriteBtn) closeWriteBtn.addEventListener('click', async () => { 
         await saveEntry(); 
-        closeAllModals(true); 
+        closeAllModals(true); // true = history.back() 호출
     });
     
     const btnReadOnly = document.getElementById('btn-readonly');
@@ -611,11 +615,10 @@ function openEditor(m, d) {
     toggleViewMode('default', false);
 }
 
-// [중요 수정] 책 모드 툴바 접기 및 히스토리 관리 수정
 function toggleViewMode(mode, pushToHistory = false) {
     currentViewMode = mode;
     
-    // pushToHistory는 더 이상 사용하지 않음 (뒤로가기는 항상 목록으로)
+    // pushToHistory 미사용 (항상 목록으로 이동)
 
     writeModal.classList.remove('mode-read-only', 'mode-book');
     bookNavLeft.classList.add('hidden');
@@ -628,7 +631,6 @@ function toggleViewMode(mode, pushToHistory = false) {
     if(btnReadOnly) btnReadOnly.classList.remove('active');
     if(btnBookMode) btnBookMode.classList.remove('active');
     
-    // 툴바 아이콘 제어
     const toolbarIcon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
 
     if (mode === 'readOnly') {
@@ -650,7 +652,7 @@ function toggleViewMode(mode, pushToHistory = false) {
         if(container) container.scrollLeft = 0; 
         updateBookNav();
         
-        // [추가] 책 모드 진입 시 툴바 자동 접기
+        // 책 모드: 툴바 접기
         if(editorToolbar) {
             editorToolbar.classList.add('collapsed');
             if(toolbarIcon) {
@@ -664,7 +666,7 @@ function toggleViewMode(mode, pushToHistory = false) {
         editSubtitle.readOnly = false;
         editBody.contentEditable = "true";
         
-        // [추가] 기본 모드 복귀 시 툴바 펼치기
+        // 기본 모드: 툴바 펼치기
         if(editorToolbar) {
             editorToolbar.classList.remove('collapsed');
             if(toolbarIcon) {
