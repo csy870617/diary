@@ -9,20 +9,21 @@ let gisInited = false;
 export function initGoogleDrive(callback) {
     gapi.load('client', async () => {
         try {
-            // [수정] discoveryDocs 제거하고 gapi.client.load 사용
             await gapi.client.init({
                 apiKey: GOOGLE_CONFIG.API_KEY,
-                // discoveryDocs: [GOOGLE_CONFIG.DISCOVERY_DOC], // 삭제 (오류 원인)
+                // 명시적인 Discovery URL 사용 (가장 안정적)
+                discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"],
             });
             
-            // [추가] 드라이브 API v3 직접 로드 (더 안정적)
-            await gapi.client.load('drive', 'v3');
-            
             gapiInited = true;
+            
+            // 초기화 성공 시 콜백 (로그인 상태는 아직 모름)
             if(callback) callback(false); 
+            
         } catch (err) {
             console.error("GAPI init error:", err);
-            alert("초기화 오류(재시도해주세요): " + JSON.stringify(err));
+            // 모바일 디버깅용: 1단계 설정(API키 제한 해제)을 안 하면 여기서 에러가 남
+            alert("구글 연결 실패. API키 설정을 확인하세요.\n" + JSON.stringify(err));
             if(callback) callback(false);
         }
     });
@@ -44,7 +45,7 @@ export function initGoogleDrive(callback) {
 // 2. 로그인 요청
 export function handleAuthClick() {
     if(!gisInited || !gapiInited) {
-        alert("잠시만 기다려주세요. 구글 연결 중입니다.");
+        alert("구글 연결 준비 중입니다. 잠시만 기다려주세요.");
         return;
     }
     tokenClient.requestAccessToken({prompt: 'consent'});
