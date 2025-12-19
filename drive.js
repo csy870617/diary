@@ -7,23 +7,26 @@ let gisInited = false;
 
 // 1. Google API 초기화
 export function initGoogleDrive(callback) {
-    // GAPI 로드
     gapi.load('client', async () => {
         try {
+            // [수정] discoveryDocs 제거하고 gapi.client.load 사용
             await gapi.client.init({
                 apiKey: GOOGLE_CONFIG.API_KEY,
-                discoveryDocs: [GOOGLE_CONFIG.DISCOVERY_DOC],
+                // discoveryDocs: [GOOGLE_CONFIG.DISCOVERY_DOC], // 삭제 (오류 원인)
             });
+            
+            // [추가] 드라이브 API v3 직접 로드 (더 안정적)
+            await gapi.client.load('drive', 'v3');
+            
             gapiInited = true;
-            // 초기 로딩 시에는 자동 로그인 시도를 하지 않고 false 반환 (버튼 눌러 로그인 유도)
             if(callback) callback(false); 
         } catch (err) {
             console.error("GAPI init error:", err);
+            alert("초기화 오류(재시도해주세요): " + JSON.stringify(err));
             if(callback) callback(false);
         }
     });
 
-    // GIS 로드
     tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: GOOGLE_CONFIG.CLIENT_ID,
         scope: GOOGLE_CONFIG.SCOPES,
@@ -31,7 +34,6 @@ export function initGoogleDrive(callback) {
             if (resp.error !== undefined) {
                 throw (resp);
             }
-            // 로그인 성공 시 상태 업데이트
             state.currentUser = { name: "Google User", provider: "google" };
             await syncFromDrive(callback);
         },
@@ -42,10 +44,9 @@ export function initGoogleDrive(callback) {
 // 2. 로그인 요청
 export function handleAuthClick() {
     if(!gisInited || !gapiInited) {
-        alert("구글 연결 준비 중입니다. 1초 뒤에 다시 시도해주세요.");
+        alert("잠시만 기다려주세요. 구글 연결 중입니다.");
         return;
     }
-    // 팝업 트리거
     tokenClient.requestAccessToken({prompt: 'consent'});
 }
 
@@ -81,10 +82,11 @@ export async function syncFromDrive(callback) {
             await saveToDrive();
         }
         
-        if(callback) callback(true); // 로그인 성공 알림
+        if(callback) callback(true);
         
     } catch (err) {
         console.error("Sync Error", err);
+        alert("동기화 오류: " + JSON.stringify(err));
         if(callback) callback(false);
     }
 }
@@ -118,7 +120,6 @@ export async function saveToDrive() {
             close_delim;
 
         if (fileId) {
-            // PATCH
             await gapi.client.request({
                 path: '/upload/drive/v3/files/' + fileId,
                 method: 'PATCH',
@@ -127,7 +128,6 @@ export async function saveToDrive() {
                 body: multipartRequestBody
             });
         } else {
-            // POST
             await gapi.client.request({
                 path: '/upload/drive/v3/files',
                 method: 'POST',
