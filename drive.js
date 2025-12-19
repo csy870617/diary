@@ -1,6 +1,6 @@
 import { GOOGLE_CONFIG, APP_FOLDER_NAME, DB_FILE_NAME } from './config.js';
 import { state } from './state.js';
-import { renderEntries } from './ui.js'; // 화면 갱신을 위해 필요
+import { renderEntries } from './ui.js';
 
 let tokenClient;
 let gapiInited = false;
@@ -16,7 +16,6 @@ export function initGoogleDrive(callback) {
             });
             gapiInited = true;
             
-            // 자동 로그인 체크
             const storedToken = localStorage.getItem('faith_token');
             const storedExp = localStorage.getItem('faith_token_exp');
             const now = Date.now();
@@ -73,7 +72,7 @@ export function handleSignoutClick(callback) {
     }
 }
 
-// 4. 데이터 가져오기 (단순 로드)
+// 4. 데이터 동기화 (로드 시에도 병합 수행)
 export async function syncFromDrive(callback) {
     try {
         const folderId = await ensureAppFolder();
@@ -81,11 +80,17 @@ export async function syncFromDrive(callback) {
         
         if (fileId) {
             const cloudData = await downloadFile(fileId);
-            state.entries = Array.isArray(cloudData) ? cloudData : [];
-            localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-            console.log("동기화(로드) 완료");
+            if (Array.isArray(cloudData)) {
+                // [핵심 수정] 불러올 때도 내 기기의 데이터와 합칩니다.
+                // 그래야 방금 쓴 글이 안 날아갑니다.
+                const merged = mergeData(cloudData, state.entries);
+                state.entries = merged;
+                localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+                renderEntries(); // 화면 갱신
+                console.log("동기화(로드&병합) 완료");
+            }
         } else {
-            await saveToDrive(); // 파일 없으면 생성
+            await saveToDrive(); 
         }
         if(callback) callback(true);
     } catch (err) {
@@ -93,7 +98,7 @@ export async function syncFromDrive(callback) {
     }
 }
 
-// 5. [핵심] 스마트 저장 (병합 후 저장)
+// 5. 저장 (업로드)
 export async function saveToDrive() {
     if (!state.currentUser) return;
 
@@ -103,25 +108,20 @@ export async function saveToDrive() {
         
         let mergedEntries = state.entries;
 
-        // 파일이 이미 존재하면, 클라우드 데이터를 먼저 가져와서 병합
         if (fileId) {
             try {
                 const cloudData = await downloadFile(fileId);
                 if (Array.isArray(cloudData)) {
-                    // 병합 로직 실행
                     mergedEntries = mergeData(cloudData, state.entries);
-                    
-                    // 병합된 최신 데이터를 내 화면(state)에도 반영
                     state.entries = mergedEntries;
                     localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-                    renderEntries(); // UI 갱신 (혹시 다른 기기에서 쓴 글이 들어왔을 수 있으므로)
+                    renderEntries();
                 }
             } catch (e) {
-                console.warn("병합 전 읽기 실패, 강제 저장 시도", e);
+                console.warn("병합 전 읽기 실패", e);
             }
         }
 
-        // 병합된 데이터를 업로드
         const fileContent = JSON.stringify(mergedEntries);
         const fileMetadata = { name: DB_FILE_NAME, mimeType: 'application/json' };
         if (!fileId) fileMetadata.parents = [folderId];
@@ -146,7 +146,7 @@ export async function saveToDrive() {
             body: multipartRequestBody
         });
         
-        console.log("안전하게 저장됨 (병합 완료)");
+        console.log("저장 완료");
 
     } catch (err) {
         handleDriveError(err);
@@ -155,33 +155,31 @@ export async function saveToDrive() {
 
 // --- Helper Functions ---
 
-// 두 데이터(클라우드 vs 로컬)를 비교해서 최신 수정본으로 합치는 함수
+// [중요] 병합 로직 개선: 클라우드와 로컬을 합집합으로 처리
 function mergeData(cloud, local) {
     const map = new Map();
 
-    // 1. 클라우드 데이터를 먼저 맵에 넣음
+    // 1. 클라우드 데이터를 먼저 넣음
     cloud.forEach(item => map.set(item.id, item));
 
-    // 2. 로컬 데이터를 돌면서 비교
+    // 2. 로컬 데이터를 넣을 때 비교
     local.forEach(localItem => {
         const cloudItem = map.get(localItem.id);
         
         if (!cloudItem) {
-            // 로컬에만 있는 새 글 -> 추가
+            // 구글엔 없는데 내 폰엔 있다? -> 방금 쓴 새 글임! (추가)
             map.set(localItem.id, localItem);
         } else {
-            // 둘 다 있음 -> 수정일(modifiedAt 없으면 timestamp) 비교
+            // 둘 다 있다? -> 더 최신 수정본을 선택
             const localTime = new Date(localItem.modifiedAt || localItem.timestamp).getTime();
             const cloudTime = new Date(cloudItem.modifiedAt || cloudItem.timestamp).getTime();
 
-            // 로컬이 더 최신이거나 같으면 덮어씀 (아니면 클라우드 버전 유지)
-            if (localTime >= cloudTime) {
-                map.set(localItem.id, localItem);
+            if (localTime > cloudTime) {
+                map.set(localItem.id, localItem); // 내 께 더 최신이면 덮어씀
             }
         }
     });
 
-    // 맵을 배열로 변환해서 반환
     return Array.from(map.values());
 }
 
@@ -195,13 +193,12 @@ async function downloadFile(fileId) {
 
 function handleDriveError(err, callback) {
     console.error("Drive Error", err);
+    // 401: 토큰 만료 등 인증 에러
     if(err.status === 401) {
         localStorage.removeItem('faith_token');
         localStorage.removeItem('faith_token_exp');
-        if(confirm("로그인이 만료되었습니다. 다시 로그인할까요?")) location.reload();
-    } else {
-        // alert("동기화 중 오류 발생: " + (err.result?.error?.message || JSON.stringify(err)));
     }
+    // Cross-Origin 등 무시해도 되는 에러는 alert 띄우지 않음
     if(callback) callback(false);
 }
 

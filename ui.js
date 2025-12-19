@@ -9,20 +9,32 @@ export function renderEntries(keyword = '') {
     const entryList = getEl('entry-list');
     if(!entryList) return;
     entryList.innerHTML = '';
+    
+    // 로딩 중 표시 (동기화 중일 때 유용)
     if(state.isLoading) {
         entryList.innerHTML = `<div style="text-align:center; margin-top:100px; color:#aaa; font-family:'Pretendard';">로딩 중...</div>`;
         return;
     }
+
     const filtered = state.entries.filter(entry => !entry.isDeleted && entry.category === state.currentCategory && (entry.title.includes(keyword) || entry.body.includes(keyword)));
     
+    // [핵심 수정] 정렬 로직 개선: 날짜 문자열을 시간(숫자)으로 변환하여 비교
     filtered.sort((a, b) => { 
-        let valA, valB; 
-        if (state.currentSortBy === 'title') { valA = a.title; valB = b.title; } 
-        else if (state.currentSortBy === 'modified') { valA = a.modifiedAt || a.timestamp; valB = b.modifiedAt || b.timestamp; } 
-        else { valA = a.timestamp; valB = b.timestamp; } 
-        if (valA < valB) return state.currentSortOrder === 'asc' ? -1 : 1; 
-        if (valA > valB) return state.currentSortOrder === 'asc' ? 1 : -1; 
-        return 0; 
+        if (state.currentSortBy === 'title') { 
+            // 제목순 (가나다)
+            const valA = (a.title || '').toLowerCase();
+            const valB = (b.title || '').toLowerCase();
+            if (valA < valB) return state.currentSortOrder === 'asc' ? -1 : 1;
+            if (valA > valB) return state.currentSortOrder === 'asc' ? 1 : -1;
+            return 0;
+        } else {
+            // 최신순 or 수정순 (날짜)
+            const timeA = new Date(state.currentSortBy === 'modified' ? (a.modifiedAt || a.timestamp) : a.timestamp).getTime() || 0;
+            const timeB = new Date(state.currentSortBy === 'modified' ? (b.modifiedAt || b.timestamp) : b.timestamp).getTime() || 0;
+            
+            // 숫자로 변환해서 비교하므로 정확함
+            return state.currentSortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+        }
     });
 
     if (filtered.length === 0) { entryList.innerHTML = `<div style="text-align:center; margin-top:100px; color:#aaa; font-family:'Pretendard';">기록이 없습니다.</div>`; return; }
@@ -34,7 +46,11 @@ export function renderEntries(keyword = '') {
             div.innerHTML = `<h3 class="card-title"><i class="ph ph-lock-key"></i> ${entry.title}</h3><p class="card-subtitle" style="color:#aaa;">비공개 글입니다.</p><div class="card-meta"><span>${entry.date}</span></div>`;
             div.onclick = () => { state.contextTargetId = entry.id; openLockModal(); };
         } else {
-            const dateStr = state.currentSortBy === 'modified' ? `수정: ${new Date(entry.modifiedAt || entry.timestamp).toLocaleDateString()}` : entry.date;
+            // 수정순일 경우 수정일 표시, 아니면 작성일 표시
+            const dateStr = state.currentSortBy === 'modified' 
+                ? `수정: ${new Date(entry.modifiedAt || entry.timestamp).toLocaleDateString()}` 
+                : entry.date;
+                
             div.innerHTML = `<h3 class="card-title">${entry.title}</h3>${entry.subtitle ? `<p class="card-subtitle">${entry.subtitle}</p>` : ''}<div class="card-meta"><span>${dateStr}</span></div>`;
             div.onclick = () => {
                 openEditor(true, entry);
@@ -104,7 +120,7 @@ export function closeAllModals(goBack = true) {
     const stickerPalette = getEl('sticker-palette');
     const colorPalettePopup = getEl('color-palette-popup');
     const contextMenu = getEl('context-menu');
-    const catContextMenu = getEl('category-context-menu'); // [추가] 주제 메뉴도 닫기 대상에 포함
+    const catContextMenu = getEl('category-context-menu');
     const moveModal = getEl('move-modal');
     const lockModal = getEl('lock-modal');
     const editorToolbar = getEl('editor-toolbar');
@@ -130,7 +146,7 @@ export function closeAllModals(goBack = true) {
     if(colorPalettePopup) colorPalettePopup.classList.add('hidden');
     
     if(contextMenu) contextMenu.classList.add('hidden');
-    if(catContextMenu) catContextMenu.classList.add('hidden'); // [추가] 주제 메뉴 닫기
+    if(catContextMenu) catContextMenu.classList.add('hidden');
     
     if(moveModal) moveModal.classList.add('hidden');
     if(lockModal) lockModal.classList.add('hidden');
@@ -172,7 +188,6 @@ function showContextMenu(x, y, id) {
     const contextMenu = getEl('context-menu');
     if(!contextMenu) return;
 
-    // [수정] 게시글 메뉴 열 때, 주제 메뉴 닫기
     const catContextMenu = getEl('category-context-menu');
     if(catContextMenu) catContextMenu.classList.add('hidden');
 
@@ -207,7 +222,6 @@ function showCatContextMenu(x, y, id) {
     const catContextMenu = getEl('category-context-menu');
     if(!catContextMenu) return;
 
-    // [수정] 주제 메뉴 열 때, 게시글 메뉴 닫기
     const contextMenu = getEl('context-menu');
     if(contextMenu) contextMenu.classList.add('hidden');
 
