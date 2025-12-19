@@ -8,12 +8,17 @@ let gisInited = false;
 // 1. Google API 초기화
 export function initGoogleDrive(callback) {
     gapi.load('client', async () => {
-        await gapi.client.init({
-            apiKey: GOOGLE_CONFIG.API_KEY,
-            discoveryDocs: [GOOGLE_CONFIG.DISCOVERY_DOC],
-        });
-        gapiInited = true;
-        checkAuth(callback);
+        try {
+            await gapi.client.init({
+                apiKey: GOOGLE_CONFIG.API_KEY,
+                discoveryDocs: [GOOGLE_CONFIG.DISCOVERY_DOC],
+            });
+            gapiInited = true;
+            // console.log("GAPI Loaded"); // 디버깅용
+            checkAuth(callback);
+        } catch (err) {
+            alert("Google API 초기화 실패: " + JSON.stringify(err));
+        }
     });
 
     tokenClient = google.accounts.oauth2.initTokenClient({
@@ -23,6 +28,7 @@ export function initGoogleDrive(callback) {
             if (resp.error !== undefined) {
                 throw (resp);
             }
+            // alert("인증 성공! 데이터를 동기화합니다."); // 모바일 디버깅용 알림
             state.currentUser = { name: "Google User", provider: "google" };
             await syncFromDrive(callback);
         },
@@ -30,10 +36,18 @@ export function initGoogleDrive(callback) {
     gisInited = true;
 }
 
-// 2. 로그인 요청
+// 2. 로그인 요청 (안정성 강화)
 export function handleAuthClick() {
-    if(!gisInited) return;
-    tokenClient.requestAccessToken({prompt: 'consent'});
+    if (!gisInited || !gapiInited) {
+        alert("구글 연결 중입니다... 3초 뒤에 다시 시도해주세요.");
+        return;
+    }
+    
+    try {
+        tokenClient.requestAccessToken({prompt: 'consent'});
+    } catch (err) {
+        alert("로그인 창을 여는 중 오류 발생: " + err.message);
+    }
 }
 
 // 3. 로그아웃 (토큰 취소)
@@ -68,7 +82,7 @@ export async function syncFromDrive(callback) {
             
             state.entries = Array.isArray(cloudData) ? cloudData : [];
             localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-            console.log("구글 드라이브에서 동기화 완료");
+            // alert("동기화 완료!"); // 완료 알림
         } else {
             await saveToDrive();
         }
@@ -77,12 +91,12 @@ export async function syncFromDrive(callback) {
         
     } catch (err) {
         console.error("Sync Error", err);
-        // alert("동기화 실패: " + err.message); // 너무 잦은 알림 방지
+        alert("동기화 실패: " + JSON.stringify(err));
         if(callback) callback(false);
     }
 }
 
-// 6. 드라이브에 데이터 저장 (업로드) - [수정됨]
+// 6. 드라이브에 데이터 저장 (업로드)
 export async function saveToDrive() {
     if (!state.currentUser) return;
 
@@ -92,7 +106,7 @@ export async function saveToDrive() {
         
         const fileContent = JSON.stringify(state.entries);
         
-        // [수정 포인트] 메타데이터 분기 처리
+        // 메타데이터 설정
         let fileMetadata = {
             name: DB_FILE_NAME,
             mimeType: 'application/json'
@@ -135,7 +149,7 @@ export async function saveToDrive() {
         }
     } catch (err) {
         console.error("Save Error", err);
-        // 인증 만료 시 재로그인 유도 등 추가 처리가 가능하나 일단 로그만 출력
+        // 저장 실패는 사용자 경험을 위해 alert를 띄우지 않고 콘솔에만 남김
     }
 }
 
