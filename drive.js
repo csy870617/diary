@@ -1,5 +1,6 @@
 import { GOOGLE_CONFIG, APP_FOLDER_NAME, DB_FILE_NAME } from './config.js';
 import { state } from './state.js';
+import { renderEntries } from './ui.js'; // 화면 갱신을 위해 필요
 
 let tokenClient;
 let gapiInited = false;
@@ -13,28 +14,23 @@ export function initGoogleDrive(callback) {
                 apiKey: GOOGLE_CONFIG.API_KEY,
                 discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"],
             });
-            
             gapiInited = true;
             
-            // [추가된 기능] 저장된 토큰이 있고 유효한지 확인
+            // 자동 로그인 체크
             const storedToken = localStorage.getItem('faith_token');
             const storedExp = localStorage.getItem('faith_token_exp');
             const now = Date.now();
 
             if (storedToken && storedExp && now < parseInt(storedExp)) {
-                // 토큰이 유효하면 자동으로 로그인 처리
                 gapi.client.setToken({ access_token: storedToken });
                 state.currentUser = { name: "Google User", provider: "google" };
-                console.log("기존 로그인 세션 복구됨");
+                console.log("세션 복구됨");
                 await syncFromDrive(callback);
             } else {
-                // 토큰이 없거나 만료되었으면 로그아웃 상태 알림
                 if(callback) callback(false); 
             }
-            
         } catch (err) {
             console.error("GAPI init error:", err);
-            // 오류 발생 시 조용히 넘어감 (사용자가 버튼 눌러서 해결하도록)
             if(callback) callback(false);
         }
     });
@@ -43,11 +39,8 @@ export function initGoogleDrive(callback) {
         client_id: GOOGLE_CONFIG.CLIENT_ID,
         scope: GOOGLE_CONFIG.SCOPES,
         callback: async (resp) => {
-            if (resp.error !== undefined) {
-                throw (resp);
-            }
+            if (resp.error !== undefined) throw (resp);
             
-            // [추가된 기능] 로그인 성공 시 토큰과 만료시간(1시간 뒤) 저장
             const expiresIn = resp.expires_in || 3599; 
             const expiryTime = Date.now() + (expiresIn * 1000);
             localStorage.setItem('faith_token', resp.access_token);
@@ -62,10 +55,7 @@ export function initGoogleDrive(callback) {
 
 // 2. 로그인 요청
 export function handleAuthClick() {
-    if(!gisInited || !gapiInited) {
-        alert("구글 연결 준비 중입니다. 잠시만 기다려주세요.");
-        return;
-    }
+    if(!gisInited || !gapiInited) return alert("연결 준비 중입니다.");
     tokenClient.requestAccessToken({prompt: 'consent'});
 }
 
@@ -76,51 +66,34 @@ export function handleSignoutClick(callback) {
         google.accounts.oauth2.revoke(token.access_token, () => {
             gapi.client.setToken('');
             state.currentUser = null;
-            
-            // [추가] 로그아웃 시 저장된 정보 삭제
             localStorage.removeItem('faith_token');
             localStorage.removeItem('faith_token_exp');
-            
             if(callback) callback();
         });
     }
 }
 
-// 4. 데이터 동기화 (다운로드)
+// 4. 데이터 가져오기 (단순 로드)
 export async function syncFromDrive(callback) {
     try {
         const folderId = await ensureAppFolder();
         const fileId = await findDbFile(folderId);
         
         if (fileId) {
-            const response = await gapi.client.drive.files.get({
-                fileId: fileId,
-                alt: 'media'
-            });
-            const cloudData = response.result;
-            
+            const cloudData = await downloadFile(fileId);
             state.entries = Array.isArray(cloudData) ? cloudData : [];
             localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-            console.log("동기화 완료");
+            console.log("동기화(로드) 완료");
         } else {
-            await saveToDrive();
+            await saveToDrive(); // 파일 없으면 생성
         }
-        
         if(callback) callback(true);
-        
     } catch (err) {
-        console.error("Sync Error", err);
-        // 토큰 만료 에러(401)일 경우 저장된 토큰 삭제
-        if(err.status === 401) {
-             localStorage.removeItem('faith_token');
-             localStorage.removeItem('faith_token_exp');
-        }
-        alert("동기화 오류: " + JSON.stringify(err));
-        if(callback) callback(false);
+        handleDriveError(err, callback);
     }
 }
 
-// 5. 데이터 저장 (업로드)
+// 5. [핵심] 스마트 저장 (병합 후 저장)
 export async function saveToDrive() {
     if (!state.currentUser) return;
 
@@ -128,16 +101,30 @@ export async function saveToDrive() {
         const folderId = await ensureAppFolder();
         const fileId = await findDbFile(folderId);
         
-        const fileContent = JSON.stringify(state.entries);
-        
-        let fileMetadata = {
-            name: DB_FILE_NAME,
-            mimeType: 'application/json'
-        };
+        let mergedEntries = state.entries;
 
-        if (!fileId) {
-            fileMetadata.parents = [folderId];
+        // 파일이 이미 존재하면, 클라우드 데이터를 먼저 가져와서 병합
+        if (fileId) {
+            try {
+                const cloudData = await downloadFile(fileId);
+                if (Array.isArray(cloudData)) {
+                    // 병합 로직 실행
+                    mergedEntries = mergeData(cloudData, state.entries);
+                    
+                    // 병합된 최신 데이터를 내 화면(state)에도 반영
+                    state.entries = mergedEntries;
+                    localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+                    renderEntries(); // UI 갱신 (혹시 다른 기기에서 쓴 글이 들어왔을 수 있으므로)
+                }
+            } catch (e) {
+                console.warn("병합 전 읽기 실패, 강제 저장 시도", e);
+            }
         }
+
+        // 병합된 데이터를 업로드
+        const fileContent = JSON.stringify(mergedEntries);
+        const fileMetadata = { name: DB_FILE_NAME, mimeType: 'application/json' };
+        if (!fileId) fileMetadata.parents = [folderId];
 
         const multipartRequestBody =
             delimiter +
@@ -148,35 +135,76 @@ export async function saveToDrive() {
             fileContent +
             close_delim;
 
-        if (fileId) {
-            await gapi.client.request({
-                path: '/upload/drive/v3/files/' + fileId,
-                method: 'PATCH',
-                params: { uploadType: 'multipart' },
-                headers: { 'Content-Type': 'multipart/related; boundary="' + boundary + '"' },
-                body: multipartRequestBody
-            });
-        } else {
-            await gapi.client.request({
-                path: '/upload/drive/v3/files',
-                method: 'POST',
-                params: { uploadType: 'multipart' },
-                headers: { 'Content-Type': 'multipart/related; boundary="' + boundary + '"' },
-                body: multipartRequestBody
-            });
-        }
+        const requestPath = fileId ? '/upload/drive/v3/files/' + fileId : '/upload/drive/v3/files';
+        const requestMethod = fileId ? 'PATCH' : 'POST';
+
+        await gapi.client.request({
+            path: requestPath,
+            method: requestMethod,
+            params: { uploadType: 'multipart' },
+            headers: { 'Content-Type': 'multipart/related; boundary="' + boundary + '"' },
+            body: multipartRequestBody
+        });
+        
+        console.log("안전하게 저장됨 (병합 완료)");
+
     } catch (err) {
-        console.error("Save Error", err);
-        if(err.status === 401) {
-            alert("로그인 세션이 만료되었습니다. 다시 로그인해주세요.");
-            localStorage.removeItem('faith_token');
-            localStorage.removeItem('faith_token_exp');
-            location.reload();
-        }
+        handleDriveError(err);
     }
 }
 
-// --- Helpers ---
+// --- Helper Functions ---
+
+// 두 데이터(클라우드 vs 로컬)를 비교해서 최신 수정본으로 합치는 함수
+function mergeData(cloud, local) {
+    const map = new Map();
+
+    // 1. 클라우드 데이터를 먼저 맵에 넣음
+    cloud.forEach(item => map.set(item.id, item));
+
+    // 2. 로컬 데이터를 돌면서 비교
+    local.forEach(localItem => {
+        const cloudItem = map.get(localItem.id);
+        
+        if (!cloudItem) {
+            // 로컬에만 있는 새 글 -> 추가
+            map.set(localItem.id, localItem);
+        } else {
+            // 둘 다 있음 -> 수정일(modifiedAt 없으면 timestamp) 비교
+            const localTime = new Date(localItem.modifiedAt || localItem.timestamp).getTime();
+            const cloudTime = new Date(cloudItem.modifiedAt || cloudItem.timestamp).getTime();
+
+            // 로컬이 더 최신이거나 같으면 덮어씀 (아니면 클라우드 버전 유지)
+            if (localTime >= cloudTime) {
+                map.set(localItem.id, localItem);
+            }
+        }
+    });
+
+    // 맵을 배열로 변환해서 반환
+    return Array.from(map.values());
+}
+
+async function downloadFile(fileId) {
+    const response = await gapi.client.drive.files.get({
+        fileId: fileId,
+        alt: 'media'
+    });
+    return response.result;
+}
+
+function handleDriveError(err, callback) {
+    console.error("Drive Error", err);
+    if(err.status === 401) {
+        localStorage.removeItem('faith_token');
+        localStorage.removeItem('faith_token_exp');
+        if(confirm("로그인이 만료되었습니다. 다시 로그인할까요?")) location.reload();
+    } else {
+        // alert("동기화 중 오류 발생: " + (err.result?.error?.message || JSON.stringify(err)));
+    }
+    if(callback) callback(false);
+}
+
 const boundary = '-------314159265358979323846';
 const delimiter = "\r\n--" + boundary + "\r\n";
 const close_delim = "\r\n--" + boundary + "--";
@@ -184,27 +212,16 @@ const close_delim = "\r\n--" + boundary + "--";
 async function ensureAppFolder() {
     const q = `mimeType='application/vnd.google-apps.folder' and name='${APP_FOLDER_NAME}' and trashed=false`;
     const response = await gapi.client.drive.files.list({ q, fields: 'files(id, name)' });
-    
-    if (response.result.files.length > 0) {
-        return response.result.files[0].id;
-    } else {
-        const fileMetadata = {
-            'name': APP_FOLDER_NAME,
-            'mimeType': 'application/vnd.google-apps.folder'
-        };
-        const res = await gapi.client.drive.files.create({
-            resource: fileMetadata,
-            fields: 'id'
-        });
-        return res.result.id;
-    }
+    if (response.result.files.length > 0) return response.result.files[0].id;
+    const res = await gapi.client.drive.files.create({
+        resource: { 'name': APP_FOLDER_NAME, 'mimeType': 'application/vnd.google-apps.folder' },
+        fields: 'id'
+    });
+    return res.result.id;
 }
 
 async function findDbFile(folderId) {
     const q = `name='${DB_FILE_NAME}' and '${folderId}' in parents and trashed=false`;
     const response = await gapi.client.drive.files.list({ q, fields: 'files(id, name)' });
-    if (response.result.files.length > 0) {
-        return response.result.files[0].id;
-    }
-    return null;
+    return response.result.files.length > 0 ? response.result.files[0].id : null;
 }
