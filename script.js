@@ -15,7 +15,7 @@ window.insertSticker = insertSticker;
 const stickers = [ '✝️','🙏','📖','🕊️','🕯️','💒','🍞','🍷','🩸','🔥','☁️','☀️','🌙','⭐','✨','🌧️','🌈','❄️','🌿','🌷','🌻','🍂','🌱','🌲','🕊️','🦋','🐾','🧸','🎀','🎈','🎁','🔔','💡','🗝️','📝','📌','📎','✂️','🖍️','🖌️','💌','📅','☕','🍵','🥪','🍎','🤍','💛','🧡','❤️','💜','💙','💚','🤎','🖤','😊','😭','🥰','🤔','💪' ];
 
 function init() {
-    // 1. 로컬 데이터 먼저 로드 (빠른 화면 표시)
+    // 1. 로컬 데이터 로드
     loadDataFromLocal();
     checkOldTrash();
     renderTabs();
@@ -30,22 +30,21 @@ function init() {
         const loginModal = document.getElementById('login-modal');
 
         if (isLoggedIn) {
-            // 로그인 성공 시 UI 업데이트 및 데이터 리렌더링
+            // 로그인 성공 시: 로그아웃 버튼 표시, 로그인 버튼/문구 숨김
             if(logoutBtn) logoutBtn.classList.remove('hidden');
             if(loginTriggerBtn) loginTriggerBtn.classList.add('hidden');
             if(loginModal) loginModal.classList.add('hidden');
-            if(loginMsg) loginMsg.classList.add('hidden');
-            renderEntries(); // 클라우드 데이터가 병합되었을 수 있으므로 다시 렌더링
+            if(loginMsg) loginMsg.classList.add('hidden'); // 문구 숨기기
+            renderEntries(); 
         } else {
-            // 비로그인 상태
+            // 비로그인 상태: 로그인 버튼/문구 표시
             state.currentUser = null;
             if(logoutBtn) logoutBtn.classList.add('hidden');
             if(loginTriggerBtn) loginTriggerBtn.classList.remove('hidden');
-            if(loginMsg) loginMsg.classList.remove('hidden');
+            if(loginMsg) loginMsg.classList.remove('hidden'); // 문구 보이기 (혹시 가려졌다면)
         }
     });
 
-    // 탭 Sortable 및 기타 리스너 설정
     setupListeners();
     renderStickers();
     makeBookEditButton();
@@ -83,7 +82,6 @@ function setupListeners() {
         }
     });
 
-    // 전역 클릭 이벤트 캡처링
     window.addEventListener('click', (e) => {
         const link = e.target.closest('#editor-body a');
         const editBody = document.getElementById('editor-body');
@@ -357,7 +355,6 @@ function setupUIListeners() {
     if(ctxLock) ctxLock.addEventListener('click', () => openLockModal());
     const ctxCopy = document.getElementById('ctx-copy');
     if(ctxCopy) ctxCopy.addEventListener('click', () => {
-         // 복제 로직 (data.js에서 import 또는 직접 구현) - 단순화를 위해 생략되었으나 기존 로직 유지
          document.getElementById('context-menu').classList.add('hidden');
          alert('복제 기능은 현재 구글 드라이브 버전에서 단순화를 위해 제외되었습니다.');
     });

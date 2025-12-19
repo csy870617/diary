@@ -25,7 +25,7 @@
                     <input type="text" id="search-input" placeholder="검색어를 입력하세요">
                 </div>
                 <div class="auth-area">
-                    <div class="login-msg-wrapper hidden" id="login-msg-area">
+                    <div class="login-msg-wrapper" id="login-msg-area">
                         <span class="login-msg-main">구글 동기화로 기록을 간직하세요</span>
                     </div>
                     
@@ -70,23 +70,19 @@
             <button id="close-write-btn" class="text-btn nav-back-btn">
                 <i class="ph ph-caret-left"></i> <span id="back-btn-text">목록</span>
             </button>
-            
             <div class="header-actions">
                 <button id="btn-readonly" class="icon-action-btn" title="읽기 전용"><i class="ph ph-eye"></i></button>
                 <button id="btn-bookmode" class="icon-action-btn" title="책 모드"><i class="ph ph-book-open"></i></button>
                 <button id="btn-copy-text" class="icon-action-btn" title="내용 복사"><i class="ph ph-copy"></i></button>
             </div>
         </div>
-
         <div class="editor-toolbar" id="editor-toolbar">
             <div class="toolbar-content-scroll" id="toolbar-scroll-area">
                 <div class="tool-group">
-                    <button class="tool-btn" data-cmd="undo" title="되돌리기"><i class="ph ph-arrow-u-up-left"></i></button>
-                    <button class="tool-btn" data-cmd="redo" title="다시하기"><i class="ph ph-arrow-u-up-right"></i></button>
+                    <button class="tool-btn" data-cmd="undo"><i class="ph ph-arrow-u-up-left"></i></button>
+                    <button class="tool-btn" data-cmd="redo"><i class="ph ph-arrow-u-up-right"></i></button>
                 </div>
-
                 <div class="toolbar-divider"></div>
-
                 <div class="tool-group">
                     <select id="font-selector" class="font-select">
                         <option value="Pretendard">고딕</option>
@@ -98,38 +94,28 @@
                         <button class="tool-btn small" id="btn-global-size-up">가+</button>
                     </div>
                 </div>
-
                 <div class="toolbar-divider"></div>
-
                 <div class="tool-group">
-                    <button class="tool-btn" id="toolbar-color-btn" title="글자색"><i class="ph ph-palette" style="color:#F59E0B;"></i></button>
-                    <button class="tool-btn" id="toolbar-hilite-btn" title="형광펜"><i class="ph ph-highlighter" style="color:#FDE047;"></i></button>
-                    <button class="tool-btn" id="sticker-btn" title="스티커"><i class="ph ph-smiley"></i></button>
+                    <button class="tool-btn" id="toolbar-color-btn"><i class="ph ph-palette" style="color:#F59E0B;"></i></button>
+                    <button class="tool-btn" id="toolbar-hilite-btn"><i class="ph ph-highlighter" style="color:#FDE047;"></i></button>
+                    <button class="tool-btn" id="sticker-btn"><i class="ph ph-smiley"></i></button>
                 </div>
-
                 <div class="toolbar-divider"></div>
-
                 <div class="tool-group">
-                    <button class="tool-btn" data-cmd="bold" title="굵게"><i class="ph ph-text-b"></i></button>
-                    <button class="tool-btn" data-cmd="italic" title="기울임"><i class="ph ph-text-italic"></i></button>
-                    <button class="tool-btn" data-cmd="underline" title="밑줄"><i class="ph ph-text-underline"></i></button>
-                    <button class="tool-btn" data-cmd="strikeThrough" title="취소선"><i class="ph ph-text-strikethrough"></i></button>
+                    <button class="tool-btn" data-cmd="bold"><i class="ph ph-text-b"></i></button>
+                    <button class="tool-btn" data-cmd="italic"><i class="ph ph-text-italic"></i></button>
+                    <button class="tool-btn" data-cmd="underline"><i class="ph ph-text-underline"></i></button>
+                    <button class="tool-btn" data-cmd="strikeThrough"><i class="ph ph-text-strikethrough"></i></button>
                 </div>
-                
                 <div class="toolbar-divider"></div>
-                
                 <div class="tool-group">
                     <button class="tool-btn" data-cmd="justifyLeft"><i class="ph ph-text-align-left"></i></button>
                     <button class="tool-btn" data-cmd="justifyCenter"><i class="ph ph-text-align-center"></i></button>
                     <button class="tool-btn" data-cmd="justifyRight"><i class="ph ph-text-align-right"></i></button>
                 </div>
             </div>
-            
-            <button id="toolbar-toggle-btn" class="toolbar-toggle-btn" title="툴바 접기/펴기">
-                <i class="ph ph-caret-up"></i>
-            </button>
+            <button id="toolbar-toggle-btn" class="toolbar-toggle-btn"><i class="ph ph-caret-up"></i></button>
         </div>
-        
         <div class="editor-container" id="editor-container">
             <div class="meta-info-row" id="meta-info-row">
                 <span id="display-category" class="write-category"></span>
@@ -140,32 +126,23 @@
             <div class="divider"></div>
             <div id="editor-body" class="editor-body" contenteditable="true" placeholder="이곳에 은혜를 기록하세요..."></div>
         </div>
-
         <div id="book-nav-left" class="book-nav prev hidden"><i class="ph ph-caret-left"></i></div>
         <div id="book-nav-right" class="book-nav next hidden"><i class="ph ph-caret-right"></i></div>
         <div id="page-indicator" class="page-indicator hidden"></div>
-
-        <div id="sticker-palette" class="sticker-palette hidden">
-            <div id="sticker-grid" class="sticker-grid"></div>
-        </div>
-
+        <div id="sticker-palette" class="sticker-palette hidden"><div id="sticker-grid" class="sticker-grid"></div></div>
         <div id="color-palette-popup" class="color-palette-popup hidden">
-            <div class="palette-header">
-                <button class="color-remove-btn" id="btn-remove-color">
-                    <i class="ph ph-prohibit"></i> 색상 없음
-                </button>
-            </div>
+            <div class="palette-header"><button class="color-remove-btn" id="btn-remove-color"><i class="ph ph-prohibit"></i> 색상 없음</button></div>
             <div class="color-grid">
-                <button class="color-dot" style="background-color: #111827;" data-color="#111827" title="Black"></button>
-                <button class="color-dot" style="background-color: #EF4444;" data-color="#EF4444" title="Red"></button>
-                <button class="color-dot" style="background-color: #F97316;" data-color="#F97316" title="Orange"></button>
-                <button class="color-dot" style="background-color: #F59E0B;" data-color="#F59E0B" title="Amber"></button>
-                <button class="color-dot" style="background-color: #10B981;" data-color="#10B981" title="Green"></button>
-                <button class="color-dot" style="background-color: #3B82F6;" data-color="#3B82F6" title="Blue"></button>
-                <button class="color-dot" style="background-color: #6366F1;" data-color="#6366F1" title="Indigo"></button>
-                <button class="color-dot" style="background-color: #8B5CF6;" data-color="#8B5CF6" title="Violet"></button>
-                <button class="color-dot" style="background-color: #EC4899;" data-color="#EC4899" title="Pink"></button>
-                <button class="color-dot" style="background-color: #6B7280;" data-color="#6B7280" title="Gray"></button>
+                <button class="color-dot" style="background-color: #111827;" data-color="#111827"></button>
+                <button class="color-dot" style="background-color: #EF4444;" data-color="#EF4444"></button>
+                <button class="color-dot" style="background-color: #F97316;" data-color="#F97316"></button>
+                <button class="color-dot" style="background-color: #F59E0B;" data-color="#F59E0B"></button>
+                <button class="color-dot" style="background-color: #10B981;" data-color="#10B981"></button>
+                <button class="color-dot" style="background-color: #3B82F6;" data-color="#3B82F6"></button>
+                <button class="color-dot" style="background-color: #6366F1;" data-color="#6366F1"></button>
+                <button class="color-dot" style="background-color: #8B5CF6;" data-color="#8B5CF6"></button>
+                <button class="color-dot" style="background-color: #EC4899;" data-color="#EC4899"></button>
+                <button class="color-dot" style="background-color: #6B7280;" data-color="#6B7280"></button>
             </div>
         </div>
     </div>
@@ -178,11 +155,7 @@
                     <h2>Faith Log</h2>
                     <p>구글 계정으로 동기화 시작</p>
                 </div>
-                <p style="font-size:14px; color:#666; margin-bottom:30px; line-height:1.6;">
-                    'FaithLog' 폴더에 데이터가 저장됩니다.<br>
-                    다른 기기에서도 구글 로그인만 하면<br>
-                    내 기록을 그대로 볼 수 있습니다.
-                </p>
+                <p style="font-size:14px; color:#666; margin-bottom:30px; line-height:1.6;">'FaithLog' 폴더에 데이터가 저장됩니다.<br>다른 기기에서도 구글 로그인만 하면<br>내 기록을 그대로 볼 수 있습니다.</p>
                 <button id="google-login-btn" class="btn-login-submit" style="background:#4285F4; display:flex; align-items:center; justify-content:center; gap:10px;">
                    <i class="ph ph-google-logo" style="font-size:20px; color:white;"></i> 구글로 계속하기
                 </button>

@@ -7,6 +7,7 @@ let gisInited = false;
 
 // 1. Google API 초기화
 export function initGoogleDrive(callback) {
+    // GAPI 로드
     gapi.load('client', async () => {
         try {
             await gapi.client.init({
@@ -14,13 +15,15 @@ export function initGoogleDrive(callback) {
                 discoveryDocs: [GOOGLE_CONFIG.DISCOVERY_DOC],
             });
             gapiInited = true;
-            // console.log("GAPI Loaded"); // 디버깅용
-            checkAuth(callback);
+            // 초기 로딩 시에는 자동 로그인 시도를 하지 않고 false 반환 (버튼 눌러 로그인 유도)
+            if(callback) callback(false); 
         } catch (err) {
-            alert("Google API 초기화 실패: " + JSON.stringify(err));
+            console.error("GAPI init error:", err);
+            if(callback) callback(false);
         }
     });
 
+    // GIS 로드
     tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: GOOGLE_CONFIG.CLIENT_ID,
         scope: GOOGLE_CONFIG.SCOPES,
@@ -28,7 +31,7 @@ export function initGoogleDrive(callback) {
             if (resp.error !== undefined) {
                 throw (resp);
             }
-            // alert("인증 성공! 데이터를 동기화합니다."); // 모바일 디버깅용 알림
+            // 로그인 성공 시 상태 업데이트
             state.currentUser = { name: "Google User", provider: "google" };
             await syncFromDrive(callback);
         },
@@ -36,21 +39,17 @@ export function initGoogleDrive(callback) {
     gisInited = true;
 }
 
-// 2. 로그인 요청 (안정성 강화)
+// 2. 로그인 요청
 export function handleAuthClick() {
-    if (!gisInited || !gapiInited) {
-        alert("구글 연결 중입니다... 3초 뒤에 다시 시도해주세요.");
+    if(!gisInited || !gapiInited) {
+        alert("구글 연결 준비 중입니다. 1초 뒤에 다시 시도해주세요.");
         return;
     }
-    
-    try {
-        tokenClient.requestAccessToken({prompt: 'consent'});
-    } catch (err) {
-        alert("로그인 창을 여는 중 오류 발생: " + err.message);
-    }
+    // 팝업 트리거
+    tokenClient.requestAccessToken({prompt: 'consent'});
 }
 
-// 3. 로그아웃 (토큰 취소)
+// 3. 로그아웃
 export function handleSignoutClick(callback) {
     const token = gapi.client.getToken();
     if (token !== null) {
@@ -62,12 +61,7 @@ export function handleSignoutClick(callback) {
     }
 }
 
-// 4. 로그인 상태 확인
-function checkAuth(callback) {
-    if(callback) callback(false); 
-}
-
-// 5. 드라이브에서 데이터 동기화 (다운로드)
+// 4. 데이터 동기화 (다운로드)
 export async function syncFromDrive(callback) {
     try {
         const folderId = await ensureAppFolder();
@@ -82,21 +76,20 @@ export async function syncFromDrive(callback) {
             
             state.entries = Array.isArray(cloudData) ? cloudData : [];
             localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-            // alert("동기화 완료!"); // 완료 알림
+            console.log("동기화 완료");
         } else {
             await saveToDrive();
         }
         
-        if(callback) callback(true);
+        if(callback) callback(true); // 로그인 성공 알림
         
     } catch (err) {
         console.error("Sync Error", err);
-        alert("동기화 실패: " + JSON.stringify(err));
         if(callback) callback(false);
     }
 }
 
-// 6. 드라이브에 데이터 저장 (업로드)
+// 5. 데이터 저장 (업로드)
 export async function saveToDrive() {
     if (!state.currentUser) return;
 
@@ -106,13 +99,11 @@ export async function saveToDrive() {
         
         const fileContent = JSON.stringify(state.entries);
         
-        // 메타데이터 설정
         let fileMetadata = {
             name: DB_FILE_NAME,
             mimeType: 'application/json'
         };
 
-        // 파일이 없을 때만(새로 만들 때만) 부모 폴더 지정
         if (!fileId) {
             fileMetadata.parents = [folderId];
         }
@@ -127,7 +118,7 @@ export async function saveToDrive() {
             close_delim;
 
         if (fileId) {
-            // 업데이트 (PATCH)
+            // PATCH
             await gapi.client.request({
                 path: '/upload/drive/v3/files/' + fileId,
                 method: 'PATCH',
@@ -135,9 +126,8 @@ export async function saveToDrive() {
                 headers: { 'Content-Type': 'multipart/related; boundary="' + boundary + '"' },
                 body: multipartRequestBody
             });
-            console.log("구글 드라이브 업데이트 완료 (PATCH)");
         } else {
-            // 새로 생성 (POST)
+            // POST
             await gapi.client.request({
                 path: '/upload/drive/v3/files',
                 method: 'POST',
@@ -145,16 +135,13 @@ export async function saveToDrive() {
                 headers: { 'Content-Type': 'multipart/related; boundary="' + boundary + '"' },
                 body: multipartRequestBody
             });
-            console.log("구글 드라이브 신규 저장 완료 (POST)");
         }
     } catch (err) {
         console.error("Save Error", err);
-        // 저장 실패는 사용자 경험을 위해 alert를 띄우지 않고 콘솔에만 남김
     }
 }
 
-// --- Helper Functions ---
-
+// --- Helpers ---
 const boundary = '-------314159265358979323846';
 const delimiter = "\r\n--" + boundary + "\r\n";
 const close_delim = "\r\n--" + boundary + "--";
