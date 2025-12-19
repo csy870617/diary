@@ -11,19 +11,30 @@ export function initGoogleDrive(callback) {
         try {
             await gapi.client.init({
                 apiKey: GOOGLE_CONFIG.API_KEY,
-                // 명시적인 Discovery URL 사용 (가장 안정적)
                 discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"],
             });
             
             gapiInited = true;
             
-            // 초기화 성공 시 콜백 (로그인 상태는 아직 모름)
-            if(callback) callback(false); 
+            // [추가된 기능] 저장된 토큰이 있고 유효한지 확인
+            const storedToken = localStorage.getItem('faith_token');
+            const storedExp = localStorage.getItem('faith_token_exp');
+            const now = Date.now();
+
+            if (storedToken && storedExp && now < parseInt(storedExp)) {
+                // 토큰이 유효하면 자동으로 로그인 처리
+                gapi.client.setToken({ access_token: storedToken });
+                state.currentUser = { name: "Google User", provider: "google" };
+                console.log("기존 로그인 세션 복구됨");
+                await syncFromDrive(callback);
+            } else {
+                // 토큰이 없거나 만료되었으면 로그아웃 상태 알림
+                if(callback) callback(false); 
+            }
             
         } catch (err) {
             console.error("GAPI init error:", err);
-            // 모바일 디버깅용: 1단계 설정(API키 제한 해제)을 안 하면 여기서 에러가 남
-            alert("구글 연결 실패. API키 설정을 확인하세요.\n" + JSON.stringify(err));
+            // 오류 발생 시 조용히 넘어감 (사용자가 버튼 눌러서 해결하도록)
             if(callback) callback(false);
         }
     });
@@ -35,6 +46,13 @@ export function initGoogleDrive(callback) {
             if (resp.error !== undefined) {
                 throw (resp);
             }
+            
+            // [추가된 기능] 로그인 성공 시 토큰과 만료시간(1시간 뒤) 저장
+            const expiresIn = resp.expires_in || 3599; 
+            const expiryTime = Date.now() + (expiresIn * 1000);
+            localStorage.setItem('faith_token', resp.access_token);
+            localStorage.setItem('faith_token_exp', expiryTime);
+
             state.currentUser = { name: "Google User", provider: "google" };
             await syncFromDrive(callback);
         },
@@ -58,6 +76,11 @@ export function handleSignoutClick(callback) {
         google.accounts.oauth2.revoke(token.access_token, () => {
             gapi.client.setToken('');
             state.currentUser = null;
+            
+            // [추가] 로그아웃 시 저장된 정보 삭제
+            localStorage.removeItem('faith_token');
+            localStorage.removeItem('faith_token_exp');
+            
             if(callback) callback();
         });
     }
@@ -87,6 +110,11 @@ export async function syncFromDrive(callback) {
         
     } catch (err) {
         console.error("Sync Error", err);
+        // 토큰 만료 에러(401)일 경우 저장된 토큰 삭제
+        if(err.status === 401) {
+             localStorage.removeItem('faith_token');
+             localStorage.removeItem('faith_token_exp');
+        }
         alert("동기화 오류: " + JSON.stringify(err));
         if(callback) callback(false);
     }
@@ -139,6 +167,12 @@ export async function saveToDrive() {
         }
     } catch (err) {
         console.error("Save Error", err);
+        if(err.status === 401) {
+            alert("로그인 세션이 만료되었습니다. 다시 로그인해주세요.");
+            localStorage.removeItem('faith_token');
+            localStorage.removeItem('faith_token_exp');
+            location.reload();
+        }
     }
 }
 
