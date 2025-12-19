@@ -5,7 +5,6 @@ import { autoLink } from './utils.js';
 export function makeBookEditButton() {
     const btnBookMode = document.getElementById('btn-bookmode');
     
-    // 이미 버튼이 존재하면 전역 변수에 할당하고 종료
     if (document.getElementById('btn-book-edit')) {
         window.btnBookEdit = document.getElementById('btn-book-edit');
         return;
@@ -16,13 +15,11 @@ export function makeBookEditButton() {
         btn.id = 'btn-book-edit';
         btn.className = 'icon-btn';
         btn.title = "페이지 편집";
-        // 기본 상태: 연필 아이콘
         btn.innerHTML = '<i class="ph ph-pencil-simple" style="font-size: 18px;"></i>';
         btn.style.cssText = "display: none; align-items: center; justify-content: center; gap: 4px; font-family: 'Pretendard'; font-size: 14px; font-weight: 600; color: #4B5563; background: transparent; border: none; cursor: pointer; padding: 8px; margin-left: 4px; border-radius: 6px; width: 36px; height: 36px;";
         
         btn.addEventListener('mouseover', () => btn.style.backgroundColor = '#F3F4F6');
         btn.addEventListener('mouseout', () => btn.style.backgroundColor = 'transparent');
-        // 클릭 시 토글 함수 실행
         btn.addEventListener('click', toggleBookEditing);
 
         if (btnBookMode.nextSibling) btnBookMode.parentElement.insertBefore(btn, btnBookMode.nextSibling);
@@ -75,7 +72,6 @@ export function openEditor(isEdit, entryData) {
     toggleViewMode('default', false);
 }
 
-// [수정] 책 편집 모드 토글 함수
 export function toggleBookEditing() {
     if(state.currentViewMode !== 'book') return;
 
@@ -86,18 +82,17 @@ export function toggleBookEditing() {
     const toolbarToggleBtn = document.getElementById('toolbar-toggle-btn');
     const btn = window.btnBookEdit || document.getElementById('btn-book-edit');
 
-    // 현재 편집 가능 상태인지 확인
     const isEditable = editBody.isContentEditable;
 
     if (!isEditable) {
-        // --- 편집 모드 켜기 ---
+        // 편집 모드 켜기
         editTitle.readOnly = false;
         editSubtitle.readOnly = false;
         editBody.contentEditable = "true";
         editBody.focus();
 
-        // 툴바 펼치기
         if(editorToolbar) {
+            editorToolbar.style.transition = ''; // 애니메이션 켜기
             editorToolbar.classList.remove('collapsed');
             const icon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
             if(icon) {
@@ -106,19 +101,17 @@ export function toggleBookEditing() {
             }
         }
 
-        // 버튼 아이콘 변경 (V 체크 모양)
         if(btn) {
-            btn.innerHTML = '<i class="ph ph-check" style="font-size: 18px; color: #10B981;"></i>'; // 녹색 체크
+            btn.innerHTML = '<i class="ph ph-check" style="font-size: 18px; color: #10B981;"></i>';
             btn.title = "편집 완료";
         }
 
     } else {
-        // --- 편집 모드 끄기 (저장 & 책 모드 복귀) ---
+        // 편집 모드 끄기
         editTitle.readOnly = true;
         editSubtitle.readOnly = true;
         editBody.contentEditable = "false";
 
-        // 툴바 접기
         if(editorToolbar) {
             editorToolbar.classList.add('collapsed');
             const icon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
@@ -128,18 +121,15 @@ export function toggleBookEditing() {
             }
         }
 
-        // 버튼 아이콘 복구 (연필 모양)
         if(btn) {
             btn.innerHTML = '<i class="ph ph-pencil-simple" style="font-size: 18px;"></i>';
             btn.title = "페이지 편집";
         }
         
-        // 변경사항 저장 (디바운스 트리거)
         debouncedSave();
     }
 }
 
-// 기존 호환성을 위해 이름만 남겨둠 (실제 사용은 toggleBookEditing)
 export function enableBookEditing() {
     toggleBookEditing();
 }
@@ -157,6 +147,19 @@ export function toggleViewMode(mode) {
     const editorToolbar = document.getElementById('editor-toolbar');
     const toolbarToggleBtn = document.getElementById('toolbar-toggle-btn');
     const btnBookEdit = window.btnBookEdit || document.getElementById('btn-book-edit');
+    const toolbarIcon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
+
+    // [핵심 수정] 책 모드 진입 시, 화면이 바뀌기(클래스가 제거되기) 전에 
+    // 미리 툴바를 접고 애니메이션을 끕니다.
+    if (mode === 'book' && editorToolbar) {
+        editorToolbar.style.transition = 'none'; // 애니메이션 즉시 제거
+        editorToolbar.classList.add('collapsed'); // 접힌 상태 강제 적용
+        
+        if(toolbarIcon) {
+            toolbarIcon.classList.remove('ph-caret-up');
+            toolbarIcon.classList.add('ph-caret-down');
+        }
+    }
 
     writeModal.classList.remove('mode-read-only', 'mode-book');
     bookNavLeft.classList.add('hidden');
@@ -169,8 +172,6 @@ export function toggleViewMode(mode) {
     if(btnReadOnly) btnReadOnly.classList.remove('active');
     if(btnBookMode) btnBookMode.classList.remove('active');
     
-    const toolbarIcon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
-
     if (mode === 'readOnly') {
         editTitle.readOnly = true;
         editSubtitle.readOnly = true;
@@ -184,7 +185,6 @@ export function toggleViewMode(mode) {
         if(btnBookEdit) btnBookEdit.style.display = 'none';
 
     } else if (mode === 'book') {
-        // 책 모드 진입 시 초기화 (편집 불가능 상태)
         editTitle.readOnly = true; 
         editSubtitle.readOnly = true;
         editBody.contentEditable = "false";
@@ -198,25 +198,23 @@ export function toggleViewMode(mode) {
         if(container) container.scrollLeft = 0; 
         updateBookNav();
         
-        // 툴바 접기
+        // 위에서 애니메이션을 껐으므로, 아주 짧은 시간 뒤에 다시 켜줍니다.
+        // (나중에 사용자가 편집 버튼 눌렀을 때는 부드럽게 열려야 하니까요)
         if(editorToolbar) {
-            editorToolbar.classList.add('collapsed');
-            if(toolbarIcon) {
-                toolbarIcon.classList.remove('ph-caret-up');
-                toolbarIcon.classList.add('ph-caret-down');
-            }
+             setTimeout(() => {
+                editorToolbar.style.transition = '';
+            }, 50);
         }
         
-        // 편집 버튼 보이기 및 초기화
         if(!btnBookEdit) makeBookEditButton();
         const btn = window.btnBookEdit || document.getElementById('btn-book-edit');
         if(btn) {
             btn.style.display = 'inline-flex';
-            btn.innerHTML = '<i class="ph ph-pencil-simple" style="font-size: 18px;"></i>'; // 아이콘 초기화
+            btn.innerHTML = '<i class="ph ph-pencil-simple" style="font-size: 18px;"></i>'; 
         }
 
     } else {
-        // 기본 모드
+        // 기본 모드 (편집)
         editTitle.readOnly = false;
         editSubtitle.readOnly = false;
         editBody.contentEditable = "true";
@@ -226,6 +224,7 @@ export function toggleViewMode(mode) {
         if(btnBookEdit) btnBookEdit.style.display = 'none';
         
         if(editorToolbar) {
+            editorToolbar.style.transition = ''; // 애니메이션 복구
             editorToolbar.classList.remove('collapsed');
             if(toolbarIcon) {
                 toolbarIcon.classList.remove('ph-caret-down');

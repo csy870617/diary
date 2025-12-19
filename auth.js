@@ -1,34 +1,38 @@
-import { auth } from './firebase.js';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence, browserSessionPersistence } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-import { closeAllModals, openModal } from './ui.js';
+import { handleAuthClick, handleSignoutClick } from './drive.js';
+import { openModal, closeAllModals } from './ui.js';
 
 export function setupAuthListeners() {
+    // 헤더의 '구글 로그인' 버튼
     const loginTriggerBtn = document.getElementById('login-trigger-btn');
-    if(loginTriggerBtn) loginTriggerBtn.addEventListener('click', () => openModal(document.getElementById('login-modal')));
+    if(loginTriggerBtn) {
+        loginTriggerBtn.addEventListener('click', () => {
+            openModal(document.getElementById('login-modal'));
+        });
+    }
 
-    const loginForm = document.getElementById('login-form');
-    if(loginForm) loginForm.addEventListener('submit', async (e) => { 
-        e.preventDefault(); 
-        try { 
-            const persistence = document.getElementById('save-id-check').checked ? browserLocalPersistence : browserSessionPersistence;
-            await setPersistence(auth, persistence); 
-            await signInWithEmailAndPassword(auth, document.getElementById('login-email').value, document.getElementById('login-pw').value); 
-            closeAllModals(true); 
-        } catch (error) { alert("로그인 정보를 다시 확인해주세요."); } 
-    });
-    
-    const signupBtn = document.getElementById('signup-btn');
-    if(signupBtn) signupBtn.addEventListener('click', async (e) => { 
-        e.preventDefault(); 
-        try { 
-            await createUserWithEmailAndPassword(auth, document.getElementById('login-email').value, document.getElementById('login-pw').value); 
-            alert('가입 완료되었습니다.'); 
-        } catch (error) { alert("실패: " + error.message); } 
-    });
+    // 모달 내부의 '구글로 계속하기' 버튼
+    const googleLoginBtn = document.getElementById('google-login-btn');
+    if(googleLoginBtn) {
+        googleLoginBtn.addEventListener('click', () => {
+            handleAuthClick(); // drive.js의 로그인 트리거
+            closeAllModals(true);
+        });
+    }
 
+    // 로그아웃 버튼
     const logoutBtn = document.getElementById('logout-btn');
-    if(logoutBtn) logoutBtn.addEventListener('click', () => { if(confirm("로그아웃 하시겠습니까?")) signOut(auth); });
-
-    const forgotPwBtn = document.getElementById('forgot-pw-btn');
-    if(forgotPwBtn) forgotPwBtn.addEventListener('click', (e) => { e.preventDefault(); openModal(document.getElementById('reset-pw-modal')); });
+    if(logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+            if(confirm("로그아웃 하시겠습니까?")) {
+                handleSignoutClick(() => {
+                    alert("로그아웃 되었습니다.");
+                    location.reload(); // 상태 초기화를 위해 새로고침
+                });
+            }
+        });
+    }
+    
+    // 모달 닫기
+    const closeLoginBtn = document.getElementById('close-login-btn');
+    if(closeLoginBtn) closeLoginBtn.addEventListener('click', () => closeAllModals(true));
 }

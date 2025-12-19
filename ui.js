@@ -1,5 +1,5 @@
 import { state, saveCategoriesToLocal } from './state.js';
-import { updateEntryField, emptyTrash, saveEntry, loadDataFromFirestore } from './data.js';
+import { updateEntryField, emptyTrash, saveEntry, restoreEntry, permanentDelete } from './data.js';
 import { openEditor, toggleViewMode, applyFontStyle } from './editor.js';
 
 // DOM 요소 불러오기 Helper
@@ -104,6 +104,7 @@ export function closeAllModals(goBack = true) {
     const stickerPalette = getEl('sticker-palette');
     const colorPalettePopup = getEl('color-palette-popup');
     const contextMenu = getEl('context-menu');
+    const catContextMenu = getEl('category-context-menu'); // [추가] 주제 메뉴도 닫기 대상에 포함
     const moveModal = getEl('move-modal');
     const lockModal = getEl('lock-modal');
     const editorToolbar = getEl('editor-toolbar');
@@ -127,7 +128,10 @@ export function closeAllModals(goBack = true) {
     
     if(stickerPalette) stickerPalette.classList.add('hidden');
     if(colorPalettePopup) colorPalettePopup.classList.add('hidden');
+    
     if(contextMenu) contextMenu.classList.add('hidden');
+    if(catContextMenu) catContextMenu.classList.add('hidden'); // [추가] 주제 메뉴 닫기
+    
     if(moveModal) moveModal.classList.add('hidden');
     if(lockModal) lockModal.classList.add('hidden');
     
@@ -167,6 +171,11 @@ function attachContextMenu(element, entryId) {
 function showContextMenu(x, y, id) {
     const contextMenu = getEl('context-menu');
     if(!contextMenu) return;
+
+    // [수정] 게시글 메뉴 열 때, 주제 메뉴 닫기
+    const catContextMenu = getEl('category-context-menu');
+    if(catContextMenu) catContextMenu.classList.add('hidden');
+
     state.contextTargetId = id;
     const entry = state.entries.find(e => e.id === id);
     if (!entry) return;
@@ -197,6 +206,11 @@ function attachCatContextMenu(element, catId) {
 function showCatContextMenu(x, y, id) {
     const catContextMenu = getEl('category-context-menu');
     if(!catContextMenu) return;
+
+    // [수정] 주제 메뉴 열 때, 게시글 메뉴 닫기
+    const contextMenu = getEl('context-menu');
+    if(contextMenu) contextMenu.classList.add('hidden');
+
     state.contextCatId = id;
     catContextMenu.style.top = `${y}px`;
     catContextMenu.style.left = `${x}px`;

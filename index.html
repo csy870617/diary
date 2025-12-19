@@ -8,6 +8,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://apis.google.com/js/api.js"></script>
 </head>
 <body>
     <div class="layout" id="main-layout">
@@ -23,8 +26,7 @@
                 </div>
                 <div class="auth-area">
                     <div class="login-msg-wrapper hidden" id="login-msg-area">
-                        <span class="login-msg-main">로그인으로 기록을 간직하세요</span>
-                        <span class="login-msg-sub">로그아웃 상태의 기록은 오프라인에만 남습니다</span>
+                        <span class="login-msg-main">구글 동기화로 기록을 간직하세요</span>
                     </div>
                     
                     <button id="login-trigger-btn" class="login-btn-header">로그인</button>
@@ -174,28 +176,16 @@
             <div class="login-content">
                 <div class="login-logo">
                     <h2>Faith Log</h2>
-                    <p>당신의 영적 여정을 기록하세요</p>
+                    <p>구글 계정으로 동기화 시작</p>
                 </div>
-                <form id="login-form">
-                    <div class="input-field">
-                        <input type="email" id="login-email" placeholder="이메일 주소" required>
-                    </div>
-                    <div class="input-field">
-                        <input type="password" id="login-pw" placeholder="비밀번호" required>
-                    </div>
-                    <div class="login-actions">
-                        <label class="check-container">
-                            <input type="checkbox" id="save-id-check">
-                            <span class="checkmark"></span> 자동 로그인
-                        </label>
-                    </div>
-                    <button type="submit" class="btn-login-submit">로그인</button>
-                </form>
-                <div class="login-footer">
-                    <button id="signup-btn">회원가입</button>
-                    <span class="separator">|</span>
-                    <button id="forgot-pw-btn">비밀번호 찾기</button>
-                </div>
+                <p style="font-size:14px; color:#666; margin-bottom:30px; line-height:1.6;">
+                    'FaithLog' 폴더에 데이터가 저장됩니다.<br>
+                    다른 기기에서도 구글 로그인만 하면<br>
+                    내 기록을 그대로 볼 수 있습니다.
+                </p>
+                <button id="google-login-btn" class="btn-login-submit" style="background:#4285F4; display:flex; align-items:center; justify-content:center; gap:10px;">
+                   <i class="ph ph-google-logo" style="font-size:20px; color:white;"></i> 구글로 계속하기
+                </button>
             </div>
         </div>
     </div>
