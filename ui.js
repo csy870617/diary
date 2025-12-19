@@ -2,7 +2,6 @@ import { state, saveCategoriesToLocal } from './state.js';
 import { updateEntryField, emptyTrash, saveEntry, restoreEntry, permanentDelete } from './data.js';
 import { openEditor, toggleViewMode, applyFontStyle } from './editor.js';
 
-// DOM 요소 불러오기 Helper
 const getEl = (id) => document.getElementById(id);
 
 export function renderEntries(keyword = '') {
@@ -10,29 +9,29 @@ export function renderEntries(keyword = '') {
     if(!entryList) return;
     entryList.innerHTML = '';
     
-    // 로딩 중 표시 (동기화 중일 때 유용)
     if(state.isLoading) {
         entryList.innerHTML = `<div style="text-align:center; margin-top:100px; color:#aaa; font-family:'Pretendard';">로딩 중...</div>`;
         return;
     }
 
-    const filtered = state.entries.filter(entry => !entry.isDeleted && entry.category === state.currentCategory && (entry.title.includes(keyword) || entry.body.includes(keyword)));
+    // [수정] !entry.isPurged 조건 추가 (완전 삭제된 글 숨김)
+    const filtered = state.entries.filter(entry => 
+        !entry.isPurged && 
+        !entry.isDeleted && 
+        entry.category === state.currentCategory && 
+        (entry.title.includes(keyword) || entry.body.includes(keyword))
+    );
     
-    // [핵심 수정] 정렬 로직 개선: 날짜 문자열을 시간(숫자)으로 변환하여 비교
     filtered.sort((a, b) => { 
         if (state.currentSortBy === 'title') { 
-            // 제목순 (가나다)
             const valA = (a.title || '').toLowerCase();
             const valB = (b.title || '').toLowerCase();
             if (valA < valB) return state.currentSortOrder === 'asc' ? -1 : 1;
             if (valA > valB) return state.currentSortOrder === 'asc' ? 1 : -1;
             return 0;
         } else {
-            // 최신순 or 수정순 (날짜)
             const timeA = new Date(state.currentSortBy === 'modified' ? (a.modifiedAt || a.timestamp) : a.timestamp).getTime() || 0;
             const timeB = new Date(state.currentSortBy === 'modified' ? (b.modifiedAt || b.timestamp) : b.timestamp).getTime() || 0;
-            
-            // 숫자로 변환해서 비교하므로 정확함
             return state.currentSortOrder === 'asc' ? timeA - timeB : timeB - timeA;
         }
     });
@@ -46,11 +45,9 @@ export function renderEntries(keyword = '') {
             div.innerHTML = `<h3 class="card-title"><i class="ph ph-lock-key"></i> ${entry.title}</h3><p class="card-subtitle" style="color:#aaa;">비공개 글입니다.</p><div class="card-meta"><span>${entry.date}</span></div>`;
             div.onclick = () => { state.contextTargetId = entry.id; openLockModal(); };
         } else {
-            // 수정순일 경우 수정일 표시, 아니면 작성일 표시
             const dateStr = state.currentSortBy === 'modified' 
                 ? `수정: ${new Date(entry.modifiedAt || entry.timestamp).toLocaleDateString()}` 
                 : entry.date;
-                
             div.innerHTML = `<h3 class="card-title">${entry.title}</h3>${entry.subtitle ? `<p class="card-subtitle">${entry.subtitle}</p>` : ''}<div class="card-meta"><span>${dateStr}</span></div>`;
             div.onclick = () => {
                 openEditor(true, entry);
@@ -90,7 +87,10 @@ export function renderTabs() {
 export function renderTrash() { 
     const trashList = getEl('trash-list');
     trashList.innerHTML = `<div style="padding:10px 0; text-align:center; font-size:12px; color:#9CA3AF; font-family:'Pretendard'; margin-bottom:10px;">휴지통에 보관된 글은 30일 후 자동 삭제됩니다.</div>`;
-    const deleted = state.entries.filter(e => e.isDeleted); 
+    
+    // [수정] !e.isPurged 조건 추가 (완전 삭제된 글은 휴지통에서도 숨김)
+    const deleted = state.entries.filter(e => e.isDeleted && !e.isPurged); 
+    
     if(deleted.length === 0) { 
         trashList.innerHTML += `<div style="text-align:center; margin-top:50px; color:#aaa; font-family:'Pretendard';">비어있음</div>`; 
         return; 
@@ -112,6 +112,7 @@ export function renderTrash() {
     }); 
 }
 
+// ... (이하 기존 closeAllModals, openModal 등의 함수는 그대로 유지) ...
 export function closeAllModals(goBack = true) {
     const writeModal = getEl('write-modal');
     const trashModal = getEl('trash-modal');
@@ -168,7 +169,6 @@ export function openTrashModal() {
     openModal(getEl('trash-modal')); 
 }
 
-// Context Menu Helpers
 function attachContextMenu(element, entryId) {
     element.addEventListener('contextmenu', (e) => {
         e.preventDefault();
