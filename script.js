@@ -48,33 +48,28 @@ function init() {
     renderStickers();
     makeBookEditButton();
     
-    // [추가] 팔레트 드래그 기능 적용
+    // 팔레트 드래그 기능 적용
     makeDraggable(document.getElementById('sticker-palette'));
     makeDraggable(document.getElementById('color-palette-popup'), document.querySelector('.palette-header'));
 }
 
-// [추가] 드래그 앤 드롭 함수
+// 드래그 앤 드롭 함수
 function makeDraggable(element, handle) {
     if (!element) return;
-    
-    // 핸들이 지정되지 않으면 요소 전체가 핸들
     const dragHandle = handle || element;
     let isDragging = false;
     let startX, startY, initialLeft, initialTop;
 
     dragHandle.addEventListener('mousedown', (e) => {
-        e.preventDefault(); // 텍스트 선택 방지
+        if(e.target.tagName === 'BUTTON' || e.target.closest('button')) return; // 버튼 클릭 시 드래그 방지
+        e.preventDefault(); 
         isDragging = true;
         startX = e.clientX;
         startY = e.clientY;
-        
-        // 현재 위치 계산 (transform이나 left/top 사용)
         const rect = element.getBoundingClientRect();
         initialLeft = rect.left;
         initialTop = rect.top;
-        
-        // absolute/fixed 위치 보정
-        element.style.transform = 'none'; // 중앙 정렬 해제 (중요)
+        element.style.transform = 'none'; 
         element.style.left = `${initialLeft}px`;
         element.style.top = `${initialTop}px`;
         element.style.bottom = 'auto';
@@ -89,12 +84,10 @@ function makeDraggable(element, handle) {
         element.style.top = `${initialTop + dy}px`;
     });
 
-    window.addEventListener('mouseup', () => {
-        isDragging = false;
-    });
+    window.addEventListener('mouseup', () => isDragging = false);
     
-    // 터치 지원 (모바일)
     dragHandle.addEventListener('touchstart', (e) => {
+        if(e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
         isDragging = true;
         const touch = e.touches[0];
         startX = touch.clientX;
@@ -102,7 +95,6 @@ function makeDraggable(element, handle) {
         const rect = element.getBoundingClientRect();
         initialLeft = rect.left;
         initialTop = rect.top;
-        
         element.style.transform = 'none';
         element.style.left = `${initialLeft}px`;
         element.style.top = `${initialTop}px`;
@@ -110,7 +102,7 @@ function makeDraggable(element, handle) {
 
     window.addEventListener('touchmove', (e) => {
         if (!isDragging) return;
-        e.preventDefault(); // 스크롤 방지
+        e.preventDefault();
         const touch = e.touches[0];
         const dx = touch.clientX - startX;
         const dy = touch.clientY - startY;
@@ -122,7 +114,6 @@ function makeDraggable(element, handle) {
 }
 
 function setupListeners() {
-    // ... (기존 코드 유지) ...
     const tabContainer = document.getElementById('tab-container');
     if (typeof Sortable !== 'undefined' && tabContainer) {
         new Sortable(tabContainer, {
@@ -169,14 +160,12 @@ function setupListeners() {
         }
         const contextMenu = document.getElementById('context-menu');
         const catContextMenu = document.getElementById('category-context-menu');
-        // 팔레트 닫힘 조건 수정: 드래그 중이 아니고 버튼을 누른 게 아니면 닫음
         const colorPalettePopup = document.getElementById('color-palette-popup');
         const stickerPalette = document.getElementById('sticker-palette');
 
         if (contextMenu && !contextMenu.contains(e.target)) contextMenu.classList.add('hidden');
         if (catContextMenu && !catContextMenu.contains(e.target)) catContextMenu.classList.add('hidden');
         
-        // 팔레트 내부 클릭 시 닫히지 않도록 처리
         if(colorPalettePopup && !colorPalettePopup.classList.contains('hidden') && !colorPalettePopup.contains(e.target) && !e.target.closest('#toolbar-color-btn') && !e.target.closest('#toolbar-hilite-btn')) {
             colorPalettePopup.classList.add('hidden');
         }
@@ -190,7 +179,6 @@ function setupListeners() {
 }
 
 function setupUIListeners() {
-    // ... (기존 코드 유지) ...
     const closeLoginBtn = document.getElementById('close-login-btn');
     if(closeLoginBtn) closeLoginBtn.addEventListener('click', () => closeAllModals(true));
     
@@ -252,7 +240,6 @@ function setupUIListeners() {
             const colorPalettePopup = document.getElementById('color-palette-popup');
             if(colorPalettePopup) colorPalettePopup.classList.add('hidden'); 
             
-            // 팔레트 열 때 위치 초기화 (중앙 정렬)
             const palette = document.getElementById('sticker-palette');
             palette.style.transform = 'translateX(-50%)';
             palette.style.left = '50%';
@@ -305,29 +292,30 @@ function setupUIListeners() {
             const editBody = document.getElementById('editor-body');
             if(editBody) editBody.focus(); 
 
-            if(btn.id === 'btn-remove-color' || btn.classList.contains('remove-color')) {
-                 if(state.activeColorMode === 'hiliteColor') {
-                     document.execCommand('hiliteColor', false, 'transparent');
-                 } else {
-                     document.execCommand('foreColor', false, '#111827'); 
-                 }
-            } else {
+            // 일반 색상 선택
+            if(!btn.classList.contains('remove-color') && btn.id !== 'btn-remove-color') {
                  formatDoc(state.activeColorMode, btn.dataset.color); 
             }
-            // 팔레트 닫기 (선택 시)
             document.getElementById('color-palette-popup').classList.add('hidden'); 
         }); 
     });
 
+    // [핵심] 색상 없음 버튼 로직 강화
     const btnRemoveColor = document.getElementById('btn-remove-color');
     if(btnRemoveColor) {
         btnRemoveColor.addEventListener('mousedown', (e) => {
-            e.preventDefault();
+            e.preventDefault(); // 포커스 유지
+            e.stopPropagation();
+            
             const editBody = document.getElementById('editor-body');
             if(editBody) editBody.focus();
+
             if(state.activeColorMode === 'hiliteColor') {
+                 // 형광펜 끄기 (배경 투명) - 명령어 2개 모두 사용하여 호환성 확보
                  document.execCommand('hiliteColor', false, 'transparent');
+                 document.execCommand('backColor', false, 'transparent'); 
             } else {
+                 // 글자색 끄기 (기본 검정색으로 복귀)
                  document.execCommand('foreColor', false, '#111827'); 
             }
             document.getElementById('color-palette-popup').classList.add('hidden'); 
