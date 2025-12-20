@@ -50,16 +50,16 @@ export async function saveEntry() {
 
 export function saveData() {
     localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-    saveToDrive(); 
+    saveToDrive(); // 저장 시 자동 동기화 트리거
 }
 
 export async function updateEntryField(id, fields) {
     const entry = state.entries.find(e => e.id === id);
     if(entry) {
         Object.assign(entry, fields);
-        entry.modifiedAt = new Date().toISOString(); 
+        entry.modifiedAt = new Date().toISOString();
         saveData();
-        renderEntries(); // 메인 리스트 갱신
+        renderEntries();
     }
 }
 
@@ -67,20 +67,33 @@ export async function moveToTrash(id) {
     await updateEntryField(id, { isDeleted: true });
 }
 
-// [핵심] 복구 버튼 클릭 시 실행
+// [수정] 복구 시 휴지통에서 즉시 사라지게 처리
 export async function restoreEntry(id) {
-    // 1. 상태 변경 (삭제 취소)
-    await updateEntryField(id, { isDeleted: false, isPurged: false });
-    // 2. 화면 갱신 (휴지통에서 즉시 사라짐)
-    renderTrash(); 
-    // 3. 메인 목록 갱신 (복구된 글 보임)
-    renderEntries();
+    const entry = state.entries.find(e => e.id === id);
+    if(entry) {
+        entry.isDeleted = false;
+        entry.isPurged = false;
+        // 복구했다는 사실을 서버에 알리기 위해 시간 갱신
+        entry.modifiedAt = new Date().toISOString();
+        saveData();
+        renderTrash();   // 휴지통 화면 갱신 (즉시 사라짐)
+        renderEntries(); // 메인 목록 갱신
+    }
 }
 
-// [핵심] 영구 삭제 버튼 클릭 시 실행
+// [핵심] 영구 삭제 시 '완전 삭제됨' 꼬리표를 확실하게 붙임
 export async function permanentDelete(id) {
-    await updateEntryField(id, { isDeleted: true, isPurged: true });
-    renderTrash();
+    const entry = state.entries.find(e => e.id === id);
+    if(entry) {
+        entry.isDeleted = true;
+        entry.isPurged = true; 
+        // [중요] 동기화 시 서버의 옛날 파일(삭제 안 된 버전)을 이기기 위해
+        // 수정 시간을 현재보다 살짝 미래로 설정하여 '최신'임을 보장함
+        entry.modifiedAt = new Date(Date.now() + 1000).toISOString();
+        
+        saveData();
+        renderTrash(); // 휴지통 화면 갱신 (즉시 사라짐)
+    }
 }
 
 export async function emptyTrash() {
@@ -125,8 +138,9 @@ export async function duplicateEntry(id) {
         date: new Date().toLocaleDateString('ko-KR'),
         timestamp: new Date().toISOString(),
         modifiedAt: new Date().toISOString(),
-        isLocked: false, 
-        lockPassword: null
+        isDeleted: false,
+        isPurged: false
+        // 잠금 속성 복사 제외 (잠금 기능 삭제됨)
     };
     
     state.entries.unshift(newEntry); 

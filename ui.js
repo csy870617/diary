@@ -2,7 +2,6 @@ import { state, saveCategoriesToLocal } from './state.js';
 import { updateEntryField, emptyTrash, saveEntry, restoreEntry, permanentDelete } from './data.js';
 import { openEditor, toggleViewMode, applyFontStyle } from './editor.js';
 
-// DOM 요소 가져오기 헬퍼
 const getEl = (id) => document.getElementById(id);
 
 // 1. 글 목록 렌더링
@@ -16,7 +15,6 @@ export function renderEntries(keyword = '') {
         return;
     }
 
-    // 완전 삭제(isPurged)된 글은 제외
     const filtered = state.entries.filter(entry => 
         !entry.isPurged && 
         !entry.isDeleted && 
@@ -24,7 +22,6 @@ export function renderEntries(keyword = '') {
         (entry.title.includes(keyword) || entry.body.includes(keyword))
     );
     
-    // 정렬 로직
     filtered.sort((a, b) => { 
         if (state.currentSortBy === 'title') { 
             const valA = (a.title || '').toLowerCase();
@@ -39,28 +36,24 @@ export function renderEntries(keyword = '') {
         }
     });
 
-    if (filtered.length === 0) { 
-        entryList.innerHTML = `<div style="text-align:center; margin-top:100px; color:#aaa; font-family:'Pretendard';">기록이 없습니다.</div>`; 
-        return; 
-    }
+    if (filtered.length === 0) { entryList.innerHTML = `<div style="text-align:center; margin-top:100px; color:#aaa; font-family:'Pretendard';">기록이 없습니다.</div>`; return; }
     
     filtered.forEach(entry => {
         const div = document.createElement('article');
         div.className = 'entry-card';
-        if (entry.isLocked) {
-            div.innerHTML = `<h3 class="card-title"><i class="ph ph-lock-key"></i> ${entry.title}</h3><p class="card-subtitle" style="color:#aaa;">비공개 글입니다.</p><div class="card-meta"><span>${entry.date}</span></div>`;
-            div.onclick = () => { state.contextTargetId = entry.id; openLockModal(); };
-        } else {
-            const dateStr = state.currentSortBy === 'modified' 
-                ? `수정: ${new Date(entry.modifiedAt || entry.timestamp).toLocaleDateString()}` 
-                : entry.date;
-            div.innerHTML = `<h3 class="card-title">${entry.title}</h3>${entry.subtitle ? `<p class="card-subtitle">${entry.subtitle}</p>` : ''}<div class="card-meta"><span>${dateStr}</span></div>`;
-            div.onclick = () => {
-                openEditor(true, entry);
-                toggleViewMode('readOnly');
-            };
-        }
-        // 컨텍스트 메뉴 연결
+        
+        // 잠금 로직 제거됨
+        const dateStr = state.currentSortBy === 'modified' 
+            ? `수정: ${new Date(entry.modifiedAt || entry.timestamp).toLocaleDateString()}` 
+            : entry.date;
+            
+        div.innerHTML = `<h3 class="card-title">${entry.title}</h3>${entry.subtitle ? `<p class="card-subtitle">${entry.subtitle}</p>` : ''}<div class="card-meta"><span>${dateStr}</span></div>`;
+        
+        div.onclick = () => {
+            openEditor(true, entry);
+            toggleViewMode('readOnly');
+        };
+        
         attachContextMenu(div, entry.id);
         entryList.appendChild(div);
     });
@@ -82,7 +75,6 @@ export function renderTabs() {
         btn.dataset.id = cat.id; 
         btn.innerHTML = `<span>${cat.name}</span>`;
         btn.onclick = () => { state.currentCategory = cat.id; renderTabs(); renderEntries(); };
-        // 카테고리 메뉴 연결
         attachCatContextMenu(btn, cat.id);
         tabContainer.appendChild(btn);
     });
@@ -116,26 +108,25 @@ export function renderTrash() {
                 <p>${entry.date}</p>
             </div>
             <div class="trash-btn-group"></div>
-        `; 
+        `;
         
-        // 버튼 동적 생성 및 이벤트 연결
         const btnGroup = div.querySelector('.trash-btn-group');
         
         const btnRestore = document.createElement('button');
         btnRestore.className = 'btn-restore';
         btnRestore.innerText = '복구';
-        btnRestore.onclick = (e) => {
+        btnRestore.addEventListener('click', (e) => {
             e.stopPropagation();
             restoreEntry(entry.id);
-        };
+        });
         
         const btnDelete = document.createElement('button');
         btnDelete.className = 'btn-perm-delete';
         btnDelete.innerText = '삭제';
-        btnDelete.onclick = (e) => {
+        btnDelete.addEventListener('click', (e) => {
             e.stopPropagation();
             permanentDelete(entry.id);
-        };
+        });
         
         btnGroup.appendChild(btnRestore);
         btnGroup.appendChild(btnDelete);
@@ -146,7 +137,7 @@ export function renderTrash() {
 
 // 4. 모달 닫기
 export function closeAllModals(goBack = true) {
-    const ids = ['write-modal', 'trash-modal', 'login-modal', 'reset-pw-modal', 'sticker-palette', 'color-palette-popup', 'context-menu', 'category-context-menu', 'move-modal', 'lock-modal'];
+    const ids = ['write-modal', 'trash-modal', 'login-modal', 'reset-pw-modal', 'sticker-palette', 'color-palette-popup', 'context-menu', 'category-context-menu', 'move-modal'];
     ids.forEach(id => {
         const el = getEl(id);
         if(el) el.classList.add('hidden');
@@ -183,15 +174,13 @@ export function openTrashModal() {
     openModal(getEl('trash-modal')); 
 }
 
-// --- 컨텍스트 메뉴 관련 함수들 (누락되었던 부분) ---
+// --- 컨텍스트 메뉴 관련 함수들 ---
 
 function attachContextMenu(element, entryId) {
-    // 우클릭
     element.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         showContextMenu(e.clientX, e.clientY, entryId);
     });
-    // 모바일 롱프레스
     element.addEventListener('touchstart', (e) => {
         state.longPressTimer = setTimeout(() => {
             const touch = e.touches[0];
@@ -210,16 +199,10 @@ function showContextMenu(x, y, id) {
     if(catContextMenu) catContextMenu.classList.add('hidden');
 
     state.contextTargetId = id;
-    const entry = state.entries.find(e => e.id === id);
-    if (!entry) return;
-    
-    const lockBtn = getEl('ctx-lock');
-    if(lockBtn) lockBtn.innerHTML = entry.isLocked ? '<i class="ph ph-lock-open"></i> 잠금 해제' : '<i class="ph ph-lock"></i> 잠그기';
     
     contextMenu.style.top = `${y}px`;
     contextMenu.style.left = `${x}px`;
     
-    // 화면 밖으로 나가는 것 방지
     if (x + 160 > window.innerWidth) contextMenu.style.left = `${window.innerWidth - 170}px`;
     if (y + 160 > window.innerHeight) contextMenu.style.top = `${y - 160}px`;
     
@@ -251,7 +234,6 @@ function showCatContextMenu(x, y, id) {
     state.contextCatId = id;
     catContextMenu.style.top = `${y}px`;
     catContextMenu.style.left = `${x}px`;
-    
     if (x + 160 > window.innerWidth) catContextMenu.style.left = `${window.innerWidth - 170}px`;
     
     catContextMenu.classList.remove('hidden');
@@ -324,54 +306,4 @@ export function openMoveModal() {
         }
         moveCategoryList.appendChild(div);
     });
-}
-
-export function openLockModal() {
-    const contextMenu = getEl('context-menu');
-    const lockModal = getEl('lock-modal');
-    const lockModalTitle = getEl('lock-modal-title');
-    const lockModalDesc = getEl('lock-modal-desc');
-    const lockPwInput = getEl('lock-pw-input');
-    
-    if(!contextMenu || !lockModal) return;
-    
-    contextMenu.classList.add('hidden');
-    
-    const entry = state.entries.find(e => e.id === state.contextTargetId);
-    if (!entry) return;
-    
-    if (entry.isLocked) {
-        lockModalTitle.innerText = "잠금 해제";
-        lockModalDesc.innerText = "비밀번호를 입력하여 잠금을 해제합니다.";
-    } else {
-        lockModalTitle.innerText = "비밀번호 설정";
-        lockModalDesc.innerText = "이 글을 열 때 사용할 비밀번호를 입력하세요.";
-    }
-    
-    lockPwInput.value = '';
-    lockModal.classList.remove('hidden');
-    lockPwInput.focus();
-}
-
-export async function confirmLock() {
-    const lockPwInput = getEl('lock-pw-input');
-    const lockModal = getEl('lock-modal');
-    const pw = lockPwInput.value;
-    const entry = state.entries.find(e => e.id === state.contextTargetId);
-    
-    if (!entry || !pw) return alert("비밀번호를 입력해주세요.");
-    
-    if (entry.isLocked) {
-        if (entry.lockPassword === pw) {
-            await updateEntryField(state.contextTargetId, { isLocked: false, lockPassword: null });
-            alert("잠금이 해제되었습니다.");
-            lockModal.classList.add('hidden');
-            renderEntries();
-        } else { alert("비밀번호가 일치하지 않습니다."); }
-    } else {
-        await updateEntryField(state.contextTargetId, { isLocked: true, lockPassword: pw });
-        alert("글이 잠겼습니다.");
-        lockModal.classList.add('hidden');
-        renderEntries();
-    }
 }

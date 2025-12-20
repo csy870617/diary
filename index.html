@@ -4,13 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="referrer" content="origin"> 
-    
     <title>신앙일지 | Faith Log</title>
     <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
-    
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://apis.google.com/js/api.js"></script>
 </head>
@@ -30,11 +28,9 @@
                     <div class="login-msg-wrapper" id="login-msg-area">
                         <span class="login-msg-main">구글 동기화로 기록을 간직하세요</span>
                     </div>
-                    
                     <button id="refresh-btn" class="icon-nav-btn hidden" title="지금 동기화" style="margin-right: 4px;">
                         <i class="ph ph-arrows-clockwise"></i>
                     </button>
-
                     <button id="login-trigger-btn" class="login-btn-header">동기화</button>
                     <button id="logout-btn" class="login-btn-header hidden">로그아웃</button>
                 </div>
@@ -192,7 +188,6 @@
 
     <div id="context-menu" class="context-menu hidden">
         <button id="ctx-move" class="ctx-item"><i class="ph ph-folder-notch"></i> 주제 이동</button>
-        <button id="ctx-lock" class="ctx-item"><i class="ph ph-lock"></i> 잠그기</button>
         <button id="ctx-copy" class="ctx-item"><i class="ph ph-copy"></i> 복제</button>
         <div style="height:1px; background:#eee; margin:4px 0;"></div>
         <button id="ctx-delete" class="ctx-item danger"><i class="ph ph-trash"></i> 삭제</button>
@@ -206,17 +201,6 @@
             <h3>주제 이동</h3>
             <div id="move-category-list" class="category-select-list"></div>
             <button id="close-move-btn" class="cancel-btn" style="width:100%;">취소</button>
-        </div>
-    </div>
-    <div id="lock-modal" class="modal-overlay hidden">
-        <div class="simple-modal">
-            <h3 id="lock-modal-title">비밀번호 설정</h3>
-            <p id="lock-modal-desc" style="font-size:13px; color:#888;">이 글을 열 때 사용할 비밀번호</p>
-            <input type="password" id="lock-pw-input" placeholder="비밀번호 4자리" maxlength="4" style="text-align:center; letter-spacing:4px; font-size:18px;">
-            <div class="modal-btns">
-                <button id="confirm-lock-btn" class="primary-btn">확인</button>
-                <button id="close-lock-btn" class="cancel-btn">취소</button>
-            </div>
         </div>
     </div>
 

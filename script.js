@@ -1,15 +1,14 @@
 import { state } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
-import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, openLockModal, confirmLock, renameCategoryAction, deleteCategoryAction, addNewCategory } from './ui.js';
+import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameCategoryAction, deleteCategoryAction, addNewCategory } from './ui.js'; // [수정] lock 관련 import 제거
 import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, makeBookEditButton } from './editor.js';
 import { setupAuthListeners } from './auth.js';
-import { initGoogleDrive, saveToDrive } from './drive.js'; // [수정] saveToDrive 임포트
+import { initGoogleDrive, saveToDrive } from './drive.js';
 
-// 전역 함수 연결 (필요 시)
 window.addNewCategory = addNewCategory;
-window.restoreEntry = restoreEntry;       
-window.permanentDelete = permanentDelete; 
-window.duplicateEntry = duplicateEntry;   
+window.restoreEntry = restoreEntry;
+window.permanentDelete = permanentDelete;
+window.duplicateEntry = duplicateEntry;
 window.changeGlobalFontSize = changeGlobalFontSize;
 window.insertSticker = insertSticker;
 
@@ -34,14 +33,14 @@ function init() {
             if(loginTriggerBtn) loginTriggerBtn.classList.add('hidden');
             if(loginModal) loginModal.classList.add('hidden');
             if(loginMsg) loginMsg.classList.add('hidden');
-            if(refreshBtn) refreshBtn.classList.remove('hidden'); // 로그인 시 새로고침 버튼 표시
+            if(refreshBtn) refreshBtn.classList.remove('hidden');
             renderEntries(); 
         } else {
             state.currentUser = null;
             if(logoutBtn) logoutBtn.classList.add('hidden');
             if(loginTriggerBtn) loginTriggerBtn.classList.remove('hidden');
             if(loginMsg) loginMsg.classList.remove('hidden');
-            if(refreshBtn) refreshBtn.classList.add('hidden'); // 비로그인 시 숨김
+            if(refreshBtn) refreshBtn.classList.add('hidden');
         }
     });
 
@@ -51,7 +50,6 @@ function init() {
 }
 
 function setupListeners() {
-    // ... (기존 Sortable 및 이벤트 리스너 코드 그대로 유지) ...
     const tabContainer = document.getElementById('tab-container');
     if (typeof Sortable !== 'undefined' && tabContainer) {
         new Sortable(tabContainer, {
@@ -112,7 +110,6 @@ function setupListeners() {
 }
 
 function setupUIListeners() {
-    // ... (기존 UI 리스너 코드 그대로 유지) ...
     const closeLoginBtn = document.getElementById('close-login-btn');
     if(closeLoginBtn) closeLoginBtn.addEventListener('click', () => closeAllModals(true));
     
@@ -142,13 +139,12 @@ function setupUIListeners() {
         });
     }
 
-    // [추가] 새로고침 버튼 기능 연결
     const refreshBtn = document.getElementById('refresh-btn');
     if(refreshBtn) {
         refreshBtn.addEventListener('click', async () => {
-            refreshBtn.classList.add('rotating'); // 회전 시작
-            await saveToDrive(); // 강제 동기화 (다운->병합->업로드)
-            refreshBtn.classList.remove('rotating'); // 회전 끝
+            refreshBtn.classList.add('rotating');
+            await saveToDrive();
+            refreshBtn.classList.remove('rotating');
         });
     }
 
@@ -364,8 +360,7 @@ function setupUIListeners() {
     const ctxMove = document.getElementById('ctx-move');
     if(ctxMove) ctxMove.addEventListener('click', () => openMoveModal());
     
-    const ctxLock = document.getElementById('ctx-lock');
-    if(ctxLock) ctxLock.addEventListener('click', () => openLockModal());
+    // [수정] 잠금 버튼 리스너 제거됨
     
     const ctxCopy = document.getElementById('ctx-copy');
     if(ctxCopy) ctxCopy.addEventListener('click', () => {
@@ -383,10 +378,8 @@ function setupUIListeners() {
     
     const closeMoveBtn = document.getElementById('close-move-btn');
     if(closeMoveBtn) closeMoveBtn.addEventListener('click', () => document.getElementById('move-modal').classList.add('hidden'));
-    const closeLockBtn = document.getElementById('close-lock-btn');
-    if(closeLockBtn) closeLockBtn.addEventListener('click', () => document.getElementById('lock-modal').classList.add('hidden'));
-    const confirmLockBtn = document.getElementById('confirm-lock-btn');
-    if(confirmLockBtn) confirmLockBtn.addEventListener('click', confirmLock);
+    
+    // [수정] 잠금 모달 리스너 제거됨
 
     const trashHeader = document.querySelector('#trash-modal .write-header');
     if(trashHeader) {
