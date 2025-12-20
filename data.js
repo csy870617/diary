@@ -17,23 +17,27 @@ export async function saveEntry() {
     if(!titleEl || !bodyEl) return;
     
     const title = titleEl.value;
-    
-    // [핵심 수정 1] innerText 대신 innerHTML을 사용해야 서식(태그)이 저장됨
-    const body = bodyEl.innerHTML; 
-    
+    const body = bodyEl.innerHTML; // 서식(태그) 포함 저장
     const subtitle = subtitleEl ? subtitleEl.value : '';
     
-    // 제목과 본문이 모두 비어있으면 저장 안 함 (빈 글 방지)
+    // [핵심 수정] 현재 적용된 폰트와 크기 정보를 가져옴 (없으면 기본값)
+    const currentFont = state.currentFontFamily || 'Pretendard';
+    const currentSize = state.currentFontSize || 16;
+    
     if(!title.trim() && !bodyEl.innerText.trim()) return;
 
     if(!state.editingId) {
         // --- 새 글 작성 ---
-        const newId = Date.now().toString(); // ID 미리 생성
+        const newId = Date.now().toString();
         const newEntry = {
             id: newId,
             title: title || '제목 없음',
             subtitle: subtitle,
             body: body,
+            // [추가] 폰트 정보 저장
+            fontFamily: currentFont,
+            fontSize: currentSize,
+            
             date: new Date().toLocaleDateString('ko-KR'),
             timestamp: new Date().toISOString(),
             modifiedAt: new Date().toISOString(),
@@ -42,9 +46,6 @@ export async function saveEntry() {
             isPurged: false
         };
         state.entries.unshift(newEntry);
-        
-        // [핵심 수정 2] 저장 직후, 현재 에디터가 이 글을 보고 있다고 알려줌
-        // 그래야 연속으로 저장해도 새 글이 또 생기지 않고 이 글을 수정함
         state.editingId = newId; 
         
     } else {
@@ -54,18 +55,22 @@ export async function saveEntry() {
             entry.title = title;
             entry.subtitle = subtitle;
             entry.body = body;
-            entry.modifiedAt = new Date().toISOString(); // 수정 시간 갱신
+            
+            // [추가] 폰트 정보 업데이트
+            entry.fontFamily = currentFont;
+            entry.fontSize = currentSize;
+            
+            entry.modifiedAt = new Date().toISOString(); 
         }
     }
     
-    // 저장 후 즉시 목록 갱신 및 동기화
     renderEntries();
     saveData();
 }
 
 export function saveData() {
     localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-    saveToDrive(); // 클라우드 동기화 트리거
+    saveToDrive(); 
 }
 
 export async function updateEntryField(id, fields) {
@@ -99,7 +104,6 @@ export async function permanentDelete(id) {
     if(entry) {
         entry.isDeleted = true;
         entry.isPurged = true; 
-        // 동기화 시 삭제 상태가 이기도록 미래 시간 설정
         entry.modifiedAt = new Date(Date.now() + 1000).toISOString();
         saveData();
         renderTrash();
