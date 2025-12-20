@@ -1,11 +1,10 @@
 import { state } from './state.js';
-import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash } from './data.js';
+import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js'; // [수정] duplicateEntry 추가
 import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, openLockModal, confirmLock, renameCategoryAction, deleteCategoryAction, addNewCategory } from './ui.js';
 import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, makeBookEditButton } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive } from './drive.js';
 
-// --- Global Scope Functions ---
 window.addNewCategory = addNewCategory;
 window.restoreEntry = restoreEntry;
 window.permanentDelete = permanentDelete;
@@ -15,14 +14,12 @@ window.insertSticker = insertSticker;
 const stickers = [ '✝️','🙏','📖','🕊️','🕯️','💒','🍞','🍷','🩸','🔥','☁️','☀️','🌙','⭐','✨','🌧️','🌈','❄️','🌿','🌷','🌻','🍂','🌱','🌲','🕊️','🦋','🐾','🧸','🎀','🎈','🎁','🔔','💡','🗝️','📝','📌','📎','✂️','🖍️','🖌️','💌','📅','☕','🍵','🥪','🍎','🤍','💛','🧡','❤️','💜','💙','💚','🤎','🖤','😊','😭','🥰','🤔','💪' ];
 
 function init() {
-    // 1. 로컬 데이터 로드
     loadDataFromLocal();
     checkOldTrash();
     renderTabs();
     state.isLoading = false;
     renderEntries();
 
-    // 2. Google Drive API 초기화 및 연동 체크
     initGoogleDrive((isLoggedIn) => {
         const loginMsg = document.getElementById('login-msg-area');
         const logoutBtn = document.getElementById('logout-btn');
@@ -30,18 +27,16 @@ function init() {
         const loginModal = document.getElementById('login-modal');
 
         if (isLoggedIn) {
-            // 로그인 성공 시: 로그아웃 버튼 표시, 로그인 버튼/문구 숨김
             if(logoutBtn) logoutBtn.classList.remove('hidden');
             if(loginTriggerBtn) loginTriggerBtn.classList.add('hidden');
             if(loginModal) loginModal.classList.add('hidden');
-            if(loginMsg) loginMsg.classList.add('hidden'); // 문구 숨기기
+            if(loginMsg) loginMsg.classList.add('hidden'); 
             renderEntries(); 
         } else {
-            // 비로그인 상태: 로그인 버튼/문구 표시
             state.currentUser = null;
             if(logoutBtn) logoutBtn.classList.add('hidden');
             if(loginTriggerBtn) loginTriggerBtn.classList.remove('hidden');
-            if(loginMsg) loginMsg.classList.remove('hidden'); // 문구 보이기 (혹시 가려졌다면)
+            if(loginMsg) loginMsg.classList.remove('hidden');
         }
     });
 
@@ -351,13 +346,17 @@ function setupUIListeners() {
 
     const ctxMove = document.getElementById('ctx-move');
     if(ctxMove) ctxMove.addEventListener('click', () => openMoveModal());
+    
     const ctxLock = document.getElementById('ctx-lock');
     if(ctxLock) ctxLock.addEventListener('click', () => openLockModal());
+    
+    // [수정] 복제 기능 연결
     const ctxCopy = document.getElementById('ctx-copy');
     if(ctxCopy) ctxCopy.addEventListener('click', () => {
+         duplicateEntry(state.contextTargetId);
          document.getElementById('context-menu').classList.add('hidden');
-         alert('복제 기능은 현재 구글 드라이브 버전에서 단순화를 위해 제외되었습니다.');
     });
+
     const ctxDelete = document.getElementById('ctx-delete');
     if(ctxDelete) ctxDelete.addEventListener('click', () => { moveToTrash(state.contextTargetId); document.getElementById('context-menu').classList.add('hidden'); });
     

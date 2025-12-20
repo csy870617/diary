@@ -144,7 +144,7 @@ body {
 .font-select { border: 1px solid var(--gray-200); border-radius: 6px; padding: 6px; font-size: 13px; outline: none; background: white; width: 70px; }
 .font-size-controls { display: flex; gap: 4px; }
 
-/* 팔레트 및 모달 */
+/* 팔레트 */
 .sticker-palette { 
     position: fixed; top: 110px; bottom: auto; left: 50%; transform: translateX(-50%); 
     background: white; border: 1px solid var(--gray-200); padding: 15px; 
@@ -180,7 +180,137 @@ body {
 .card-subtitle { font-size: 13px; color: var(--gray-500); font-weight: 300; margin-bottom: 10px; }
 .card-meta { font-family: var(--text-sans); font-size: 12px; color: var(--gray-500); }
 .hidden { display: none !important; }
+
+/* --- 팝업 (모달) 디자인 수정 --- */
 .full-screen-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: white; z-index: 1000; overflow-y: auto; display: flex; flex-direction: column; padding-top: var(--safe-top); padding-bottom: var(--safe-bottom); }
+
+/* 모달 오버레이 (Z-index 높게) */
+.modal-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 4000;
+    display: flex; justify-content: center; align-items: center;
+    backdrop-filter: blur(2px);
+    opacity: 1; transition: opacity 0.2s;
+}
+.modal-overlay.hidden { opacity: 0; pointer-events: none; }
+
+/* 팝업 박스 공통 */
+.simple-modal {
+    background: white;
+    padding: 24px;
+    border-radius: 16px;
+    width: 85%;
+    max-width: 320px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+    text-align: center;
+    position: relative;
+    font-family: var(--text-sans);
+    animation: popupScale 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+@keyframes popupScale {
+    from { transform: scale(0.9); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+}
+
+.simple-modal h3 { 
+    margin: 0 0 6px 0; 
+    font-size: 18px; 
+    font-family: var(--text-serif); 
+    font-weight: 700; 
+    color: var(--gray-900); 
+}
+.simple-modal p {
+    font-size: 13px;
+    color: var(--gray-500);
+    margin-bottom: 20px;
+}
+
+/* 잠금 비밀번호 입력창 */
+#lock-pw-input {
+    width: 100%; 
+    padding: 14px; 
+    margin: 0 0 24px 0;
+    background: var(--gray-100);
+    border: 1px solid transparent; 
+    border-radius: 12px; 
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: 8px; /* PIN 번호 느낌 */
+    text-align: center;
+    color: var(--gray-900);
+    transition: all 0.2s;
+}
+#lock-pw-input:focus {
+    background: white;
+    border-color: var(--gray-900);
+    box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.1);
+}
+
+/* 주제 이동 리스트 */
+#move-category-list {
+    max-height: 200px;
+    overflow-y: auto;
+    margin: 10px 0 20px;
+    text-align: left;
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+    padding: 4px;
+}
+.cat-select-item {
+    padding: 10px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--gray-900);
+    transition: background 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.cat-select-item:hover { background-color: var(--gray-100); }
+.cat-select-item.current {
+    color: var(--gray-400);
+    cursor: default;
+    background: none;
+    font-weight: 500;
+}
+.cat-select-item.current::after {
+    content: '(현재)';
+    font-size: 11px;
+    margin-left: auto;
+}
+
+/* 버튼 그룹 */
+.modal-btns { display: flex; gap: 8px; justify-content: center; width: 100%; }
+.modal-btns button { flex: 1; }
+.primary-btn { 
+    background: var(--gray-900); 
+    color: white; 
+    border: none; 
+    padding: 12px 0; 
+    border-radius: 10px; 
+    cursor: pointer; 
+    font-weight: 600; 
+    font-size: 14px;
+    transition: opacity 0.2s;
+}
+.primary-btn:hover { opacity: 0.9; }
+.cancel-btn { 
+    background: var(--gray-100); 
+    color: var(--gray-900); 
+    border: none; 
+    padding: 12px 0; 
+    border-radius: 10px; 
+    cursor: pointer; 
+    font-size: 14px;
+    font-weight: 500;
+    transition: background 0.2s;
+}
+.cancel-btn:hover { background: var(--gray-200); }
+
+
+/* 나머지 기존 스타일 */
 .floating-pen { position: fixed; bottom: 30px; right: calc(50% - 260px); width: 56px; height: 56px; border-radius: 50%; background: var(--gray-900); color: white; box-shadow: 0 4px 12px rgba(0,0,0,0.3); cursor: pointer; display: flex; justify-content: center; align-items: center; font-size: 24px; z-index: 100; transition: transform 0.2s; }
 .floating-pen:hover { transform: scale(1.1); }
 .editor-container { max-width: 700px; margin: 0 auto; padding: 30px 40px 100px; width: 100%; height: auto; }
@@ -243,13 +373,11 @@ body {
         margin-top: 50px; 
         margin-bottom: 20px;
         flex-direction: row; 
-        align-items: flex-end; /* 가로 배치 유지 */
+        align-items: flex-end; 
     }
     
     .header-left { flex-shrink: 0; }
     .logo-area h1 { font-size: 24px; }
-    
-    /* 서브 로고 항상 보이기 */
     .sub-logo { display: block; font-size: 10px; margin-top: 2px; }
 
     .header-right { 

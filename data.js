@@ -17,11 +17,10 @@ export async function saveEntry() {
     if(!titleEl || !bodyEl) return;
     
     const title = titleEl.value;
-    const body = bodyEl.innerText; // or innerHTML depending on your usage
+    const body = bodyEl.innerText; 
     const subtitle = subtitleEl ? subtitleEl.value : '';
     
     if(!state.editingId) {
-        // 새 글 작성
         if(!title.trim() && !body.trim()) return;
         const newEntry = {
             id: Date.now().toString(),
@@ -30,20 +29,19 @@ export async function saveEntry() {
             body: body,
             date: new Date().toLocaleDateString('ko-KR'),
             timestamp: new Date().toISOString(),
-            modifiedAt: new Date().toISOString(), // 수정 시간
+            modifiedAt: new Date().toISOString(),
             category: state.currentCategory,
             isDeleted: false,
-            isPurged: false // [추가] 완전 삭제 여부
+            isPurged: false
         };
         state.entries.unshift(newEntry);
     } else {
-        // 글 수정
         const entry = state.entries.find(e => e.id === state.editingId);
         if(entry) {
             entry.title = title;
             entry.subtitle = subtitle;
             entry.body = body;
-            entry.modifiedAt = new Date().toISOString(); // 수정 시간 갱신
+            entry.modifiedAt = new Date().toISOString();
         }
     }
     
@@ -52,16 +50,16 @@ export async function saveEntry() {
 
 export function saveData() {
     localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-    saveToDrive(); // 클라우드 동기화 트리거
+    saveToDrive(); 
 }
 
 export async function updateEntryField(id, fields) {
     const entry = state.entries.find(e => e.id === id);
     if(entry) {
         Object.assign(entry, fields);
-        entry.modifiedAt = new Date().toISOString(); // 상태 변경 시 반드시 시간 갱신
+        entry.modifiedAt = new Date().toISOString(); 
         saveData();
-        renderEntries();
+        renderEntries(); // 메인 리스트 갱신
     }
 }
 
@@ -70,11 +68,12 @@ export async function moveToTrash(id) {
 }
 
 export async function restoreEntry(id) {
+    // [핵심 수정] 복구 시 상태 변경 후, 즉시 휴지통 화면(renderTrash)을 갱신
     await updateEntryField(id, { isDeleted: false, isPurged: false });
+    renderTrash(); // 이 한 줄이 있어야 휴지통에서 바로 사라짐
 }
 
 export async function permanentDelete(id) {
-    // [핵심 수정] 배열에서 제거(splice)하지 않고 '완전 삭제됨(isPurged)' 표시만 함
     await updateEntryField(id, { isDeleted: true, isPurged: true });
     renderTrash();
 }
@@ -85,7 +84,7 @@ export async function emptyTrash() {
     
     if(confirm('휴지통을 비우시겠습니까? 복구할 수 없습니다.')) {
         trashItems.forEach(e => {
-            e.isPurged = true; // 완전 삭제 표시
+            e.isPurged = true;
             e.modifiedAt = new Date().toISOString();
         });
         saveData();
@@ -108,4 +107,24 @@ export function checkOldTrash() {
         }
     });
     if(changed) saveData();
+}
+
+export async function duplicateEntry(id) {
+    const original = state.entries.find(e => e.id === id);
+    if (!original) return;
+
+    const newEntry = {
+        ...original, 
+        id: Date.now().toString(), 
+        title: (original.title || '제목 없음') + " (복사본)",
+        date: new Date().toLocaleDateString('ko-KR'),
+        timestamp: new Date().toISOString(),
+        modifiedAt: new Date().toISOString(),
+        isLocked: false, 
+        lockPassword: null
+    };
+    
+    state.entries.unshift(newEntry); 
+    saveData();
+    renderEntries();
 }
