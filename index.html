@@ -4,11 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="referrer" content="origin"> 
+    
     <title>신앙일지 | Faith Log</title>
     <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://apis.google.com/js/api.js"></script>
 </head>
@@ -28,9 +30,11 @@
                     <div class="login-msg-wrapper" id="login-msg-area">
                         <span class="login-msg-main">구글 동기화로 기록을 간직하세요</span>
                     </div>
+                    
                     <button id="refresh-btn" class="icon-nav-btn hidden" title="지금 동기화" style="margin-right: 4px;">
                         <i class="ph ph-arrows-clockwise"></i>
                     </button>
+
                     <button id="login-trigger-btn" class="login-btn-header">동기화</button>
                     <button id="logout-btn" class="login-btn-header hidden">로그아웃</button>
                 </div>
@@ -132,6 +136,7 @@
         <div id="book-nav-right" class="book-nav next hidden"><i class="ph ph-caret-right"></i></div>
         <div id="page-indicator" class="page-indicator hidden"></div>
         <div id="sticker-palette" class="sticker-palette hidden"><div id="sticker-grid" class="sticker-grid"></div></div>
+        
         <div id="color-palette-popup" class="color-palette-popup hidden">
             <div class="palette-header"><button class="color-remove-btn" id="btn-remove-color"><i class="ph ph-prohibit"></i> 색상 없음</button></div>
             <div class="color-grid">
@@ -140,12 +145,14 @@
                 <button class="color-dot" style="background-color: #F97316;" data-color="#F97316"></button>
                 <button class="color-dot" style="background-color: #F59E0B;" data-color="#F59E0B"></button>
                 <button class="color-dot" style="background-color: #10B981;" data-color="#10B981"></button>
+                
                 <button class="color-dot" style="background-color: #3B82F6;" data-color="#3B82F6"></button>
                 <button class="color-dot" style="background-color: #6366F1;" data-color="#6366F1"></button>
                 <button class="color-dot" style="background-color: #8B5CF6;" data-color="#8B5CF6"></button>
                 <button class="color-dot" style="background-color: #EC4899;" data-color="#EC4899"></button>
                 <button class="color-dot" style="background-color: #6B7280;" data-color="#6B7280"></button>
-            </div>
+
+                <button class="color-dot" style="background-color: #FEF08A;" data-color="#FEF08A"></button> <button class="color-dot" style="background-color: #BBF7D0;" data-color="#BBF7D0"></button> <button class="color-dot" style="background-color: #BFDBFE;" data-color="#BFDBFE"></button> <button class="color-dot" style="background-color: #E9D5FF;" data-color="#E9D5FF"></button> <button class="color-dot" style="background-color: #FBCFE8;" data-color="#FBCFE8"></button> </div>
         </div>
     </div>
 

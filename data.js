@@ -17,13 +17,20 @@ export async function saveEntry() {
     if(!titleEl || !bodyEl) return;
     
     const title = titleEl.value;
-    const body = bodyEl.innerText; 
+    
+    // [핵심 수정 1] innerText 대신 innerHTML을 사용해야 서식(태그)이 저장됨
+    const body = bodyEl.innerHTML; 
+    
     const subtitle = subtitleEl ? subtitleEl.value : '';
     
+    // 제목과 본문이 모두 비어있으면 저장 안 함 (빈 글 방지)
+    if(!title.trim() && !bodyEl.innerText.trim()) return;
+
     if(!state.editingId) {
-        if(!title.trim() && !body.trim()) return;
+        // --- 새 글 작성 ---
+        const newId = Date.now().toString(); // ID 미리 생성
         const newEntry = {
-            id: Date.now().toString(),
+            id: newId,
             title: title || '제목 없음',
             subtitle: subtitle,
             body: body,
@@ -35,22 +42,30 @@ export async function saveEntry() {
             isPurged: false
         };
         state.entries.unshift(newEntry);
+        
+        // [핵심 수정 2] 저장 직후, 현재 에디터가 이 글을 보고 있다고 알려줌
+        // 그래야 연속으로 저장해도 새 글이 또 생기지 않고 이 글을 수정함
+        state.editingId = newId; 
+        
     } else {
+        // --- 기존 글 수정 ---
         const entry = state.entries.find(e => e.id === state.editingId);
         if(entry) {
             entry.title = title;
             entry.subtitle = subtitle;
             entry.body = body;
-            entry.modifiedAt = new Date().toISOString();
+            entry.modifiedAt = new Date().toISOString(); // 수정 시간 갱신
         }
     }
     
+    // 저장 후 즉시 목록 갱신 및 동기화
+    renderEntries();
     saveData();
 }
 
 export function saveData() {
     localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-    saveToDrive(); // 저장 시 자동 동기화 트리거
+    saveToDrive(); // 클라우드 동기화 트리거
 }
 
 export async function updateEntryField(id, fields) {
@@ -67,32 +82,27 @@ export async function moveToTrash(id) {
     await updateEntryField(id, { isDeleted: true });
 }
 
-// [수정] 복구 시 휴지통에서 즉시 사라지게 처리
 export async function restoreEntry(id) {
     const entry = state.entries.find(e => e.id === id);
     if(entry) {
         entry.isDeleted = false;
         entry.isPurged = false;
-        // 복구했다는 사실을 서버에 알리기 위해 시간 갱신
         entry.modifiedAt = new Date().toISOString();
         saveData();
-        renderTrash();   // 휴지통 화면 갱신 (즉시 사라짐)
-        renderEntries(); // 메인 목록 갱신
+        renderTrash();
+        renderEntries();
     }
 }
 
-// [핵심] 영구 삭제 시 '완전 삭제됨' 꼬리표를 확실하게 붙임
 export async function permanentDelete(id) {
     const entry = state.entries.find(e => e.id === id);
     if(entry) {
         entry.isDeleted = true;
         entry.isPurged = true; 
-        // [중요] 동기화 시 서버의 옛날 파일(삭제 안 된 버전)을 이기기 위해
-        // 수정 시간을 현재보다 살짝 미래로 설정하여 '최신'임을 보장함
+        // 동기화 시 삭제 상태가 이기도록 미래 시간 설정
         entry.modifiedAt = new Date(Date.now() + 1000).toISOString();
-        
         saveData();
-        renderTrash(); // 휴지통 화면 갱신 (즉시 사라짐)
+        renderTrash();
     }
 }
 
@@ -140,7 +150,6 @@ export async function duplicateEntry(id) {
         modifiedAt: new Date().toISOString(),
         isDeleted: false,
         isPurged: false
-        // 잠금 속성 복사 제외 (잠금 기능 삭제됨)
     };
     
     state.entries.unshift(newEntry); 
