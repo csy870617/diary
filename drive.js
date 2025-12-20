@@ -6,7 +6,7 @@ let tokenClient;
 let gapiInited = false;
 let gisInited = false;
 
-// 1. Google API 초기화 (안전장치 포함)
+// 1. Google API 초기화 (로딩 대기 기능 포함)
 export function initGoogleDrive(callback) {
     if (typeof gapi === 'undefined' || typeof google === 'undefined' || !google.accounts) {
         setTimeout(() => initGoogleDrive(callback), 100);
@@ -77,7 +77,7 @@ export function handleSignoutClick(callback) {
     }
 }
 
-// 4. 데이터 동기화 (로드: 클라우드 + 로컬 병합)
+// 4. 데이터 동기화 (로드)
 export async function syncFromDrive(callback) {
     try {
         const folderId = await ensureAppFolder();
@@ -86,17 +86,15 @@ export async function syncFromDrive(callback) {
         if (fileId) {
             const cloudData = await downloadFile(fileId);
             if (Array.isArray(cloudData)) {
-                // 내 기기의 데이터와 클라우드 데이터를 합칩니다.
+                // 불러올 때 내 기기의 최신 데이터가 사라지지 않도록 병합
                 const merged = mergeData(cloudData, state.entries);
                 
-                // 합친 결과로 갱신
                 state.entries = merged;
                 localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
                 renderEntries(); 
                 console.log("동기화(로드&병합) 완료");
             }
         } else {
-            // 파일이 없으면 내 데이터를 올림
             await saveToDrive(); 
         }
         if(callback) callback(true);
@@ -105,7 +103,7 @@ export async function syncFromDrive(callback) {
     }
 }
 
-// 5. 저장 (업로드: 최신 데이터 확인 후 병합하여 저장)
+// 5. 저장 (업로드)
 export async function saveToDrive() {
     if (!state.currentUser) return;
 
@@ -113,24 +111,22 @@ export async function saveToDrive() {
         const folderId = await ensureAppFolder();
         const fileId = await findDbFile(folderId);
         
-        // 현재 내 기기의 최신 상태
         let entriesToSave = state.entries;
 
         if (fileId) {
             try {
-                // [중요] 저장하기 직전에 클라우드에서 최신본을 한 번 더 가져옴
+                // 저장 직전 클라우드 데이터 확인 (충돌 방지)
                 const cloudData = await downloadFile(fileId);
                 if (Array.isArray(cloudData)) {
-                    // 클라우드 데이터와 내 데이터를 다시 병합 (충돌 방지)
+                    // 병합하여 최신 상태 생성
                     entriesToSave = mergeData(cloudData, state.entries);
                     
-                    // 병합된 최신 상태를 내 기기에도 반영
                     state.entries = entriesToSave;
                     localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
                     renderEntries();
                 }
             } catch (e) {
-                console.warn("병합 전 읽기 실패, 강제 저장 시도", e);
+                console.warn("병합 전 읽기 실패, 강제 저장", e);
             }
         }
 
@@ -158,43 +154,39 @@ export async function saveToDrive() {
             body: multipartRequestBody
         });
         
-        console.log("안전하게 저장됨 (병합 완료)");
+        console.log("저장 완료");
 
     } catch (err) {
         handleDriveError(err);
     }
 }
 
-// --- Helper Functions ---
-
-// [강력한 병합 로직]
+// --- 병합 로직 (최신 데이터 우선) ---
 function mergeData(cloud, local) {
     const map = new Map();
 
-    // 1. 클라우드 데이터를 기준점으로 잡음
+    // 1. 클라우드 데이터를 기준으로 삼음
     cloud.forEach(item => map.set(item.id, item));
 
-    // 2. 로컬 데이터를 순회하며 비교
+    // 2. 로컬 데이터를 비교하며 덮어쓰기
     local.forEach(localItem => {
         const cloudItem = map.get(localItem.id);
         
         if (!cloudItem) {
-            // 클라우드엔 없는데 내 폰엔 있다? -> 내가 새로 쓴 글이므로 추가
+            // 새 글이면 추가
             map.set(localItem.id, localItem);
         } else {
-            // 둘 다 있다 -> 수정 시간을 비교 (밀리초 단위)
+            // 둘 다 있으면 수정 시간 비교
             const localTime = new Date(localItem.modifiedAt || localItem.timestamp).getTime();
             const cloudTime = new Date(cloudItem.modifiedAt || cloudItem.timestamp).getTime();
 
-            // 내 폰의 수정 시간이 더 미래(최신)라면 내 걸로 덮어씀
-            // (같거나 과거라면 클라우드 데이터 유지)
+            // 내 기기가 더 최신이면 덮어씀
             if (localTime > cloudTime) {
                 map.set(localItem.id, localItem);
             }
         }
     });
 
-    // 3. Map을 배열로 변환하여 반환
     return Array.from(map.values());
 }
 
@@ -203,13 +195,10 @@ async function downloadFile(fileId) {
         fileId: fileId,
         alt: 'media'
     });
-    // JSON 파싱 시 오류 방지
     try {
         if(typeof response.result === 'string') return JSON.parse(response.result);
         return response.result;
-    } catch(e) {
-        return [];
-    }
+    } catch(e) { return []; }
 }
 
 function handleDriveError(err, callback) {

@@ -67,12 +67,17 @@ export async function moveToTrash(id) {
     await updateEntryField(id, { isDeleted: true });
 }
 
+// [핵심] 복구 버튼 클릭 시 실행
 export async function restoreEntry(id) {
-    // [핵심 수정] 복구 시 상태 변경 후, 즉시 휴지통 화면(renderTrash)을 갱신
+    // 1. 상태 변경 (삭제 취소)
     await updateEntryField(id, { isDeleted: false, isPurged: false });
-    renderTrash(); // 이 한 줄이 있어야 휴지통에서 바로 사라짐
+    // 2. 화면 갱신 (휴지통에서 즉시 사라짐)
+    renderTrash(); 
+    // 3. 메인 목록 갱신 (복구된 글 보임)
+    renderEntries();
 }
 
+// [핵심] 영구 삭제 버튼 클릭 시 실행
 export async function permanentDelete(id) {
     await updateEntryField(id, { isDeleted: true, isPurged: true });
     renderTrash();

@@ -1,3 +1,13 @@
+/* [추가] 회전 애니메이션 */
+@keyframes spin { 
+    from { transform: rotate(0deg); } 
+    to { transform: rotate(360deg); } 
+}
+.rotating i { 
+    animation: spin 1s linear infinite; 
+    color: var(--accent); /* 회전 시 포인트 컬러 */
+}
+
 :root {
     --bg-color: #FFFFFF;
     --text-serif: 'Noto Serif KR', serif;

@@ -2,8 +2,10 @@ import { state, saveCategoriesToLocal } from './state.js';
 import { updateEntryField, emptyTrash, saveEntry, restoreEntry, permanentDelete } from './data.js';
 import { openEditor, toggleViewMode, applyFontStyle } from './editor.js';
 
+// DOM 요소 가져오기 헬퍼
 const getEl = (id) => document.getElementById(id);
 
+// 1. 글 목록 렌더링
 export function renderEntries(keyword = '') {
     const entryList = getEl('entry-list');
     if(!entryList) return;
@@ -14,7 +16,7 @@ export function renderEntries(keyword = '') {
         return;
     }
 
-    // [수정] !entry.isPurged 조건 추가 (완전 삭제된 글 숨김)
+    // 완전 삭제(isPurged)된 글은 제외
     const filtered = state.entries.filter(entry => 
         !entry.isPurged && 
         !entry.isDeleted && 
@@ -22,6 +24,7 @@ export function renderEntries(keyword = '') {
         (entry.title.includes(keyword) || entry.body.includes(keyword))
     );
     
+    // 정렬 로직
     filtered.sort((a, b) => { 
         if (state.currentSortBy === 'title') { 
             const valA = (a.title || '').toLowerCase();
@@ -36,7 +39,10 @@ export function renderEntries(keyword = '') {
         }
     });
 
-    if (filtered.length === 0) { entryList.innerHTML = `<div style="text-align:center; margin-top:100px; color:#aaa; font-family:'Pretendard';">기록이 없습니다.</div>`; return; }
+    if (filtered.length === 0) { 
+        entryList.innerHTML = `<div style="text-align:center; margin-top:100px; color:#aaa; font-family:'Pretendard';">기록이 없습니다.</div>`; 
+        return; 
+    }
     
     filtered.forEach(entry => {
         const div = document.createElement('article');
@@ -54,15 +60,18 @@ export function renderEntries(keyword = '') {
                 toggleViewMode('readOnly');
             };
         }
+        // 컨텍스트 메뉴 연결
         attachContextMenu(div, entry.id);
         entryList.appendChild(div);
     });
 }
 
+// 2. 탭(카테고리) 렌더링
 export function renderTabs() {
     const tabContainer = getEl('tab-container');
     if(!tabContainer) return;
     tabContainer.innerHTML = '';
+    
     const sortedCats = [];
     state.categoryOrder.forEach(id => { const found = state.allCategories.find(c => c.id === id); if(found) sortedCats.push(found); });
     state.allCategories.forEach(c => { if(!state.categoryOrder.includes(c.id)) { sortedCats.push(c); state.categoryOrder.push(c.id); } });
@@ -73,6 +82,7 @@ export function renderTabs() {
         btn.dataset.id = cat.id; 
         btn.innerHTML = `<span>${cat.name}</span>`;
         btn.onclick = () => { state.currentCategory = cat.id; renderTabs(); renderEntries(); };
+        // 카테고리 메뉴 연결
         attachCatContextMenu(btn, cat.id);
         tabContainer.appendChild(btn);
     });
@@ -84,78 +94,82 @@ export function renderTabs() {
     tabContainer.appendChild(addBtn);
 }
 
+// 3. 휴지통 렌더링 (버튼 이벤트 직접 연결)
 export function renderTrash() { 
     const trashList = getEl('trash-list');
     trashList.innerHTML = `<div style="padding:10px 0; text-align:center; font-size:12px; color:#9CA3AF; font-family:'Pretendard'; margin-bottom:10px;">휴지통에 보관된 글은 30일 후 자동 삭제됩니다.</div>`;
     
-    // [수정] !e.isPurged 조건 추가 (완전 삭제된 글은 휴지통에서도 숨김)
     const deleted = state.entries.filter(e => e.isDeleted && !e.isPurged); 
     
     if(deleted.length === 0) { 
         trashList.innerHTML += `<div style="text-align:center; margin-top:50px; color:#aaa; font-family:'Pretendard';">비어있음</div>`; 
         return; 
     } 
+    
     deleted.forEach(entry => { 
         const div = document.createElement('div'); 
         div.className = 'trash-item'; 
+        
         div.innerHTML = `
             <div class="trash-info">
                 <h4>${entry.title}</h4>
                 <p>${entry.date}</p>
             </div>
-            <div class="trash-btn-group">
-                <button class="btn-restore" onclick="restoreEntry('${entry.id}')">복구</button>
-                <button class="btn-perm-delete" onclick="permanentDelete('${entry.id}')">삭제</button>
-            </div>
+            <div class="trash-btn-group"></div>
         `; 
+        
+        // 버튼 동적 생성 및 이벤트 연결
+        const btnGroup = div.querySelector('.trash-btn-group');
+        
+        const btnRestore = document.createElement('button');
+        btnRestore.className = 'btn-restore';
+        btnRestore.innerText = '복구';
+        btnRestore.onclick = (e) => {
+            e.stopPropagation();
+            restoreEntry(entry.id);
+        };
+        
+        const btnDelete = document.createElement('button');
+        btnDelete.className = 'btn-perm-delete';
+        btnDelete.innerText = '삭제';
+        btnDelete.onclick = (e) => {
+            e.stopPropagation();
+            permanentDelete(entry.id);
+        };
+        
+        btnGroup.appendChild(btnRestore);
+        btnGroup.appendChild(btnDelete);
+
         trashList.appendChild(div); 
     }); 
 }
 
-// ... (이하 기존 closeAllModals, openModal 등의 함수는 그대로 유지) ...
+// 4. 모달 닫기
 export function closeAllModals(goBack = true) {
-    const writeModal = getEl('write-modal');
-    const trashModal = getEl('trash-modal');
-    const loginModal = getEl('login-modal');
-    const resetPwModal = getEl('reset-pw-modal');
-    const stickerPalette = getEl('sticker-palette');
-    const colorPalettePopup = getEl('color-palette-popup');
-    const contextMenu = getEl('context-menu');
-    const catContextMenu = getEl('category-context-menu');
-    const moveModal = getEl('move-modal');
-    const lockModal = getEl('lock-modal');
+    const ids = ['write-modal', 'trash-modal', 'login-modal', 'reset-pw-modal', 'sticker-palette', 'color-palette-popup', 'context-menu', 'category-context-menu', 'move-modal', 'lock-modal'];
+    ids.forEach(id => {
+        const el = getEl(id);
+        if(el) el.classList.add('hidden');
+    });
+
+    toggleViewMode('default'); 
+    
     const editorToolbar = getEl('editor-toolbar');
     const toolbarToggleBtn = getEl('toolbar-toggle-btn');
-
-    if(writeModal) {
-        writeModal.classList.add('hidden');
-        toggleViewMode('default'); 
-        if(editorToolbar) {
-            editorToolbar.classList.remove('collapsed');
-            const icon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
-            if(icon) {
-                icon.classList.remove('ph-caret-down');
-                icon.classList.add('ph-caret-up');
-            }
+    if(editorToolbar) {
+        editorToolbar.classList.remove('collapsed');
+        const icon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
+        if(icon) {
+            icon.classList.remove('ph-caret-down');
+            icon.classList.add('ph-caret-up');
         }
     }
-    if(trashModal) trashModal.classList.add('hidden');
-    if(loginModal) loginModal.classList.add('hidden');
-    if(resetPwModal) resetPwModal.classList.add('hidden');
-    
-    if(stickerPalette) stickerPalette.classList.add('hidden');
-    if(colorPalettePopup) colorPalettePopup.classList.add('hidden');
-    
-    if(contextMenu) contextMenu.classList.add('hidden');
-    if(catContextMenu) catContextMenu.classList.add('hidden');
-    
-    if(moveModal) moveModal.classList.add('hidden');
-    if(lockModal) lockModal.classList.add('hidden');
     
     if(goBack && history.state && history.state.modal === 'open') history.back();
     renderEntries();
 }
 
+// 5. 모달 열기
 export function openModal(modal) {
     if(!modal) return;
     if (!history.state || history.state.modal !== 'open') {
@@ -169,11 +183,15 @@ export function openTrashModal() {
     openModal(getEl('trash-modal')); 
 }
 
+// --- 컨텍스트 메뉴 관련 함수들 (누락되었던 부분) ---
+
 function attachContextMenu(element, entryId) {
+    // 우클릭
     element.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         showContextMenu(e.clientX, e.clientY, entryId);
     });
+    // 모바일 롱프레스
     element.addEventListener('touchstart', (e) => {
         state.longPressTimer = setTimeout(() => {
             const touch = e.touches[0];
@@ -194,12 +212,17 @@ function showContextMenu(x, y, id) {
     state.contextTargetId = id;
     const entry = state.entries.find(e => e.id === id);
     if (!entry) return;
+    
     const lockBtn = getEl('ctx-lock');
     if(lockBtn) lockBtn.innerHTML = entry.isLocked ? '<i class="ph ph-lock-open"></i> 잠금 해제' : '<i class="ph ph-lock"></i> 잠그기';
+    
     contextMenu.style.top = `${y}px`;
     contextMenu.style.left = `${x}px`;
-    if (x + 160 > window.innerWidth) contextMenu.style.left = `${x - 160}px`;
+    
+    // 화면 밖으로 나가는 것 방지
+    if (x + 160 > window.innerWidth) contextMenu.style.left = `${window.innerWidth - 170}px`;
     if (y + 160 > window.innerHeight) contextMenu.style.top = `${y - 160}px`;
+    
     contextMenu.classList.remove('hidden');
 }
 
@@ -228,9 +251,13 @@ function showCatContextMenu(x, y, id) {
     state.contextCatId = id;
     catContextMenu.style.top = `${y}px`;
     catContextMenu.style.left = `${x}px`;
-    if (x + 160 > window.innerWidth) catContextMenu.style.left = `${x - 160}px`;
+    
+    if (x + 160 > window.innerWidth) catContextMenu.style.left = `${window.innerWidth - 170}px`;
+    
     catContextMenu.classList.remove('hidden');
 }
+
+// --- 카테고리 관리 함수들 ---
 
 export function addNewCategory() {
     const name = prompt("새 주제 이름");
@@ -272,14 +299,18 @@ export function deleteCategoryAction() {
     }
 }
 
+// --- 팝업 기능 함수들 ---
+
 export function openMoveModal() {
     const contextMenu = getEl('context-menu');
     const moveModal = getEl('move-modal');
     const moveCategoryList = getEl('move-category-list');
     if(!contextMenu || !moveModal) return;
+    
     contextMenu.classList.add('hidden');
     moveModal.classList.remove('hidden');
     moveCategoryList.innerHTML = '';
+    
     state.allCategories.forEach(cat => {
         const div = document.createElement('div');
         div.className = `cat-select-item ${state.currentCategory === cat.id ? 'current' : ''}`;
@@ -303,9 +334,12 @@ export function openLockModal() {
     const lockPwInput = getEl('lock-pw-input');
     
     if(!contextMenu || !lockModal) return;
+    
     contextMenu.classList.add('hidden');
+    
     const entry = state.entries.find(e => e.id === state.contextTargetId);
     if (!entry) return;
+    
     if (entry.isLocked) {
         lockModalTitle.innerText = "잠금 해제";
         lockModalDesc.innerText = "비밀번호를 입력하여 잠금을 해제합니다.";
@@ -313,6 +347,7 @@ export function openLockModal() {
         lockModalTitle.innerText = "비밀번호 설정";
         lockModalDesc.innerText = "이 글을 열 때 사용할 비밀번호를 입력하세요.";
     }
+    
     lockPwInput.value = '';
     lockModal.classList.remove('hidden');
     lockPwInput.focus();
@@ -323,7 +358,9 @@ export async function confirmLock() {
     const lockModal = getEl('lock-modal');
     const pw = lockPwInput.value;
     const entry = state.entries.find(e => e.id === state.contextTargetId);
+    
     if (!entry || !pw) return alert("비밀번호를 입력해주세요.");
+    
     if (entry.isLocked) {
         if (entry.lockPassword === pw) {
             await updateEntryField(state.contextTargetId, { isLocked: false, lockPassword: null });
