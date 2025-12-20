@@ -8,6 +8,9 @@
     color: var(--accent);
 }
 
+.sticker-palette { cursor: move; }
+.palette-header { cursor: move; }
+
 :root {
     --bg-color: #FFFFFF;
     --text-serif: 'Noto Serif KR', serif;

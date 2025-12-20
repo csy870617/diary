@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
-import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameCategoryAction, deleteCategoryAction, addNewCategory } from './ui.js'; // [수정] lock 관련 import 제거
+import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameCategoryAction, deleteCategoryAction, addNewCategory } from './ui.js';
 import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, makeBookEditButton } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, saveToDrive } from './drive.js';
@@ -47,9 +47,82 @@ function init() {
     setupListeners();
     renderStickers();
     makeBookEditButton();
+    
+    // [추가] 팔레트 드래그 기능 적용
+    makeDraggable(document.getElementById('sticker-palette'));
+    makeDraggable(document.getElementById('color-palette-popup'), document.querySelector('.palette-header'));
+}
+
+// [추가] 드래그 앤 드롭 함수
+function makeDraggable(element, handle) {
+    if (!element) return;
+    
+    // 핸들이 지정되지 않으면 요소 전체가 핸들
+    const dragHandle = handle || element;
+    let isDragging = false;
+    let startX, startY, initialLeft, initialTop;
+
+    dragHandle.addEventListener('mousedown', (e) => {
+        e.preventDefault(); // 텍스트 선택 방지
+        isDragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        
+        // 현재 위치 계산 (transform이나 left/top 사용)
+        const rect = element.getBoundingClientRect();
+        initialLeft = rect.left;
+        initialTop = rect.top;
+        
+        // absolute/fixed 위치 보정
+        element.style.transform = 'none'; // 중앙 정렬 해제 (중요)
+        element.style.left = `${initialLeft}px`;
+        element.style.top = `${initialTop}px`;
+        element.style.bottom = 'auto';
+        element.style.right = 'auto';
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        element.style.left = `${initialLeft + dx}px`;
+        element.style.top = `${initialTop + dy}px`;
+    });
+
+    window.addEventListener('mouseup', () => {
+        isDragging = false;
+    });
+    
+    // 터치 지원 (모바일)
+    dragHandle.addEventListener('touchstart', (e) => {
+        isDragging = true;
+        const touch = e.touches[0];
+        startX = touch.clientX;
+        startY = touch.clientY;
+        const rect = element.getBoundingClientRect();
+        initialLeft = rect.left;
+        initialTop = rect.top;
+        
+        element.style.transform = 'none';
+        element.style.left = `${initialLeft}px`;
+        element.style.top = `${initialTop}px`;
+    }, {passive: false});
+
+    window.addEventListener('touchmove', (e) => {
+        if (!isDragging) return;
+        e.preventDefault(); // 스크롤 방지
+        const touch = e.touches[0];
+        const dx = touch.clientX - startX;
+        const dy = touch.clientY - startY;
+        element.style.left = `${initialLeft + dx}px`;
+        element.style.top = `${initialTop + dy}px`;
+    }, {passive: false});
+
+    window.addEventListener('touchend', () => isDragging = false);
 }
 
 function setupListeners() {
+    // ... (기존 코드 유지) ...
     const tabContainer = document.getElementById('tab-container');
     if (typeof Sortable !== 'undefined' && tabContainer) {
         new Sortable(tabContainer, {
@@ -96,13 +169,20 @@ function setupListeners() {
         }
         const contextMenu = document.getElementById('context-menu');
         const catContextMenu = document.getElementById('category-context-menu');
+        // 팔레트 닫힘 조건 수정: 드래그 중이 아니고 버튼을 누른 게 아니면 닫음
         const colorPalettePopup = document.getElementById('color-palette-popup');
         const stickerPalette = document.getElementById('sticker-palette');
 
         if (contextMenu && !contextMenu.contains(e.target)) contextMenu.classList.add('hidden');
         if (catContextMenu && !catContextMenu.contains(e.target)) catContextMenu.classList.add('hidden');
-        if(colorPalettePopup && !colorPalettePopup.classList.contains('hidden') && !e.target.closest('#toolbar-color-btn') && !e.target.closest('#toolbar-hilite-btn')) colorPalettePopup.classList.add('hidden');
-        if(stickerPalette && !stickerPalette.classList.contains('hidden') && !e.target.closest('#sticker-btn')) stickerPalette.classList.add('hidden');
+        
+        // 팔레트 내부 클릭 시 닫히지 않도록 처리
+        if(colorPalettePopup && !colorPalettePopup.classList.contains('hidden') && !colorPalettePopup.contains(e.target) && !e.target.closest('#toolbar-color-btn') && !e.target.closest('#toolbar-hilite-btn')) {
+            colorPalettePopup.classList.add('hidden');
+        }
+        if(stickerPalette && !stickerPalette.classList.contains('hidden') && !stickerPalette.contains(e.target) && !e.target.closest('#sticker-btn')) {
+            stickerPalette.classList.add('hidden');
+        }
     }, true);
 
     setupAuthListeners();
@@ -110,6 +190,7 @@ function setupListeners() {
 }
 
 function setupUIListeners() {
+    // ... (기존 코드 유지) ...
     const closeLoginBtn = document.getElementById('close-login-btn');
     if(closeLoginBtn) closeLoginBtn.addEventListener('click', () => closeAllModals(true));
     
@@ -170,7 +251,13 @@ function setupUIListeners() {
             e.stopPropagation(); 
             const colorPalettePopup = document.getElementById('color-palette-popup');
             if(colorPalettePopup) colorPalettePopup.classList.add('hidden'); 
-            document.getElementById('sticker-palette').classList.toggle('hidden');
+            
+            // 팔레트 열 때 위치 초기화 (중앙 정렬)
+            const palette = document.getElementById('sticker-palette');
+            palette.style.transform = 'translateX(-50%)';
+            palette.style.left = '50%';
+            palette.style.top = '110px';
+            palette.classList.toggle('hidden');
         });
     }
     
@@ -227,6 +314,7 @@ function setupUIListeners() {
             } else {
                  formatDoc(state.activeColorMode, btn.dataset.color); 
             }
+            // 팔레트 닫기 (선택 시)
             document.getElementById('color-palette-popup').classList.add('hidden'); 
         }); 
     });
@@ -360,8 +448,6 @@ function setupUIListeners() {
     const ctxMove = document.getElementById('ctx-move');
     if(ctxMove) ctxMove.addEventListener('click', () => openMoveModal());
     
-    // [수정] 잠금 버튼 리스너 제거됨
-    
     const ctxCopy = document.getElementById('ctx-copy');
     if(ctxCopy) ctxCopy.addEventListener('click', () => {
          duplicateEntry(state.contextTargetId);
@@ -378,8 +464,6 @@ function setupUIListeners() {
     
     const closeMoveBtn = document.getElementById('close-move-btn');
     if(closeMoveBtn) closeMoveBtn.addEventListener('click', () => document.getElementById('move-modal').classList.add('hidden'));
-    
-    // [수정] 잠금 모달 리스너 제거됨
 
     const trashHeader = document.querySelector('#trash-modal .write-header');
     if(trashHeader) {
@@ -396,10 +480,10 @@ function openColorPalette() {
     const colorPalettePopup = document.getElementById('color-palette-popup');
     if(stickerPalette) stickerPalette.classList.add('hidden');
     if(colorPalettePopup) {
-        colorPalettePopup.style.top = '110px';
-        colorPalettePopup.style.bottom = 'auto';
-        colorPalettePopup.style.left = '50%';
+        // 열 때 초기화 (중앙)
         colorPalettePopup.style.transform = 'translateX(-50%)';
+        colorPalettePopup.style.left = '50%';
+        colorPalettePopup.style.top = '110px';
         colorPalettePopup.classList.toggle('hidden');
     }
 }
