@@ -1,9 +1,9 @@
-import { state, loadCategoriesFromLocal } from './state.js'; // [수정] loadCategoriesFromLocal 추가
+import { state, loadCategoriesFromLocal } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
 import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameCategoryAction, deleteCategoryAction, addNewCategory } from './ui.js';
 import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, makeBookEditButton } from './editor.js';
 import { setupAuthListeners } from './auth.js';
-import { initGoogleDrive, saveToDrive } from './drive.js';
+import { initGoogleDrive, saveToDrive, syncFromDrive } from './drive.js'; // syncFromDrive 추가
 
 window.addNewCategory = addNewCategory;
 window.restoreEntry = restoreEntry;
@@ -15,39 +15,34 @@ window.insertSticker = insertSticker;
 const stickers = [ '✝️','🙏','📖','🕊️','🕯️','💒','🍞','🍷','🩸','🔥','☁️','☀️','🌙','⭐','✨','🌧️','🌈','❄️','🌿','🌷','🌻','🍂','🌱','🌲','🕊️','🦋','🐾','🧸','🎀','🎈','🎁','🔔','💡','🗝️','📝','📌','📎','✂️','🖍️','🖌️','💌','📅','☕','🍵','🥪','🍎','🤍','💛','🧡','❤️','💜','💙','💚','🤎','🖤','😊','😭','🥰','🤔','💪' ];
 
 function init() {
-    // 1. [핵심] 로컬 데이터(글, 카테고리) 먼저 로드 -> 로그아웃 상태에서도 데이터 유지됨
+    // 1. 로컬 데이터 로드 (오프라인/비로그인 대응)
     loadCategoriesFromLocal(); 
     loadDataFromLocal();
     checkOldTrash();
     
-    // 2. 화면 그리기
+    // 2. 화면 렌더링
     renderTabs();
     state.isLoading = false;
     renderEntries();
 
-    // 3. 구글 드라이브 연결 (로그인 된 경우에만 병합)
+    // 3. 구글 드라이브 연결 및 로그인 체크
     initGoogleDrive((isLoggedIn) => {
-        const loginMsg = document.getElementById('login-msg-area');
-        const logoutBtn = document.getElementById('logout-btn');
-        const loginTriggerBtn = document.getElementById('login-trigger-btn');
-        const loginModal = document.getElementById('login-modal');
-        const refreshBtn = document.getElementById('refresh-btn');
-
+        updateAuthUI(isLoggedIn);
         if (isLoggedIn) {
-            if(logoutBtn) logoutBtn.classList.remove('hidden');
-            if(loginTriggerBtn) loginTriggerBtn.classList.add('hidden');
-            if(loginModal) loginModal.classList.add('hidden');
-            if(loginMsg) loginMsg.classList.add('hidden');
-            if(refreshBtn) refreshBtn.classList.remove('hidden');
-            // 로그인 후 데이터 갱신되면 다시 그리기
             renderTabs();
             renderEntries(); 
-        } else {
-            state.currentUser = null;
-            if(logoutBtn) logoutBtn.classList.add('hidden');
-            if(loginTriggerBtn) loginTriggerBtn.classList.remove('hidden');
-            if(loginMsg) loginMsg.classList.remove('hidden');
-            if(refreshBtn) refreshBtn.classList.add('hidden');
+        }
+    });
+
+    // 4. [추가] 네트워크 상태 감지 (오프라인 -> 온라인 자동 동기화)
+    window.addEventListener('online', () => {
+        console.log("인터넷 연결됨. 자동 동기화 시도...");
+        const refreshBtn = document.getElementById('refresh-btn');
+        if(refreshBtn && !refreshBtn.classList.contains('hidden')) {
+            refreshBtn.classList.add('rotating');
+            syncFromDrive(() => {
+                refreshBtn.classList.remove('rotating');
+            });
         }
     });
 
@@ -59,7 +54,28 @@ function init() {
     makeDraggable(document.getElementById('color-palette-popup'), document.querySelector('.palette-header'));
 }
 
-// ... (이하 makeDraggable, setupListeners 등 기존 코드와 동일) ...
+function updateAuthUI(isLoggedIn) {
+    const loginMsg = document.getElementById('login-msg-area');
+    const logoutBtn = document.getElementById('logout-btn');
+    const loginTriggerBtn = document.getElementById('login-trigger-btn');
+    const loginModal = document.getElementById('login-modal');
+    const refreshBtn = document.getElementById('refresh-btn');
+
+    if (isLoggedIn) {
+        if(logoutBtn) logoutBtn.classList.remove('hidden');
+        if(loginTriggerBtn) loginTriggerBtn.classList.add('hidden');
+        if(loginModal) loginModal.classList.add('hidden');
+        if(loginMsg) loginMsg.classList.add('hidden');
+        if(refreshBtn) refreshBtn.classList.remove('hidden');
+    } else {
+        state.currentUser = null;
+        if(logoutBtn) logoutBtn.classList.add('hidden');
+        if(loginTriggerBtn) loginTriggerBtn.classList.remove('hidden');
+        if(loginMsg) loginMsg.classList.remove('hidden');
+        if(refreshBtn) refreshBtn.classList.add('hidden');
+    }
+}
+
 function makeDraggable(element, handle) {
     if (!element) return;
     const dragHandle = handle || element;
@@ -219,8 +235,9 @@ function setupUIListeners() {
     if(refreshBtn) {
         refreshBtn.addEventListener('click', async () => {
             refreshBtn.classList.add('rotating');
-            await saveToDrive();
-            refreshBtn.classList.remove('rotating');
+            await syncFromDrive(() => {
+                refreshBtn.classList.remove('rotating');
+            });
         });
     }
 
