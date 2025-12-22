@@ -1,11 +1,13 @@
 import { state, saveCategoriesToLocal } from './state.js';
 import { updateEntryField, emptyTrash, saveEntry, restoreEntry, permanentDelete } from './data.js';
 import { openEditor, toggleViewMode, applyFontStyle } from './editor.js';
-import { saveToDrive } from './drive.js'; // [추가] 동기화 함수 임포트
+import { saveToDrive } from './drive.js';
 
 const getEl = (id) => document.getElementById(id);
 
-// 1. 글 목록 렌더링
+// ... (renderEntries, renderTrash 등 기존 함수 그대로 유지) ...
+// (긴 코드를 생략합니다. 기존 ui.js의 상단 부분은 동일합니다.)
+
 export function renderEntries(keyword = '') {
     const entryList = getEl('entry-list');
     if(!entryList) return;
@@ -42,24 +44,19 @@ export function renderEntries(keyword = '') {
     filtered.forEach(entry => {
         const div = document.createElement('article');
         div.className = 'entry-card';
-        
         const dateStr = state.currentSortBy === 'modified' 
             ? `수정: ${new Date(entry.modifiedAt || entry.timestamp).toLocaleDateString()}` 
             : entry.date;
-            
         div.innerHTML = `<h3 class="card-title">${entry.title}</h3>${entry.subtitle ? `<p class="card-subtitle">${entry.subtitle}</p>` : ''}<div class="card-meta"><span>${dateStr}</span></div>`;
-        
         div.onclick = () => {
             openEditor(true, entry);
             toggleViewMode('readOnly');
         };
-        
         attachContextMenu(div, entry.id);
         entryList.appendChild(div);
     });
 }
 
-// 2. 탭(카테고리) 렌더링
 export function renderTabs() {
     const tabContainer = getEl('tab-container');
     if(!tabContainer) return;
@@ -86,7 +83,6 @@ export function renderTabs() {
     tabContainer.appendChild(addBtn);
 }
 
-// 3. 휴지통 렌더링
 export function renderTrash() { 
     const trashList = getEl('trash-list');
     trashList.innerHTML = `<div style="padding:10px 0; text-align:center; font-size:12px; color:#9CA3AF; font-family:'Pretendard'; margin-bottom:10px;">휴지통에 보관된 글은 30일 후 자동 삭제됩니다.</div>`;
@@ -111,7 +107,6 @@ export function renderTrash() {
         `;
         
         const btnGroup = div.querySelector('.trash-btn-group');
-        
         const btnRestore = document.createElement('button');
         btnRestore.className = 'btn-restore';
         btnRestore.innerText = '복구';
@@ -130,12 +125,10 @@ export function renderTrash() {
         
         btnGroup.appendChild(btnRestore);
         btnGroup.appendChild(btnDelete);
-
         trashList.appendChild(div); 
     }); 
 }
 
-// 4. 모달 닫기
 export function closeAllModals(goBack = true) {
     const ids = ['write-modal', 'trash-modal', 'login-modal', 'reset-pw-modal', 'sticker-palette', 'color-palette-popup', 'context-menu', 'category-context-menu', 'move-modal'];
     ids.forEach(id => {
@@ -160,7 +153,6 @@ export function closeAllModals(goBack = true) {
     renderEntries();
 }
 
-// 5. 모달 열기
 export function openModal(modal) {
     if(!modal) return;
     if (!history.state || history.state.modal !== 'open') {
@@ -173,8 +165,6 @@ export function openTrashModal() {
     renderTrash(); 
     openModal(getEl('trash-modal')); 
 }
-
-// --- 컨텍스트 메뉴 관련 함수들 ---
 
 function attachContextMenu(element, entryId) {
     element.addEventListener('contextmenu', (e) => {
@@ -194,18 +184,13 @@ function attachContextMenu(element, entryId) {
 function showContextMenu(x, y, id) {
     const contextMenu = getEl('context-menu');
     if(!contextMenu) return;
-
     const catContextMenu = getEl('category-context-menu');
     if(catContextMenu) catContextMenu.classList.add('hidden');
-
     state.contextTargetId = id;
-    
     contextMenu.style.top = `${y}px`;
     contextMenu.style.left = `${x}px`;
-    
     if (x + 160 > window.innerWidth) contextMenu.style.left = `${window.innerWidth - 170}px`;
     if (y + 160 > window.innerHeight) contextMenu.style.top = `${y - 160}px`;
-    
     contextMenu.classList.remove('hidden');
 }
 
@@ -227,19 +212,16 @@ function attachCatContextMenu(element, catId) {
 function showCatContextMenu(x, y, id) {
     const catContextMenu = getEl('category-context-menu');
     if(!catContextMenu) return;
-
     const contextMenu = getEl('context-menu');
     if(contextMenu) contextMenu.classList.add('hidden');
-
     state.contextCatId = id;
     catContextMenu.style.top = `${y}px`;
     catContextMenu.style.left = `${x}px`;
     if (x + 160 > window.innerWidth) catContextMenu.style.left = `${window.innerWidth - 170}px`;
-    
     catContextMenu.classList.remove('hidden');
 }
 
-// --- 카테고리 관리 함수들 ---
+// [핵심] 카테고리 관리 함수들 (시간 갱신 로직 추가)
 
 export function addNewCategory() {
     const name = prompt("새 주제 이름");
@@ -247,9 +229,13 @@ export function addNewCategory() {
         const id = 'custom_' + Date.now();
         state.allCategories.push({id, name});
         state.categoryOrder.push(id);
+        
+        // [수정] 변경 시간 갱신
+        state.categoryUpdatedAt = new Date().toISOString();
+        
         saveCategoriesToLocal();
         renderTabs();
-        saveToDrive(); // [추가] 동기화 트리거
+        saveToDrive(); 
     }
 }
 
@@ -261,9 +247,13 @@ export function renameCategoryAction() {
     const newName = prompt(`'${cat.name}'의 새로운 이름:`, cat.name);
     if (newName && newName.trim() !== "") {
         cat.name = newName.trim();
+        
+        // [수정] 변경 시간 갱신
+        state.categoryUpdatedAt = new Date().toISOString();
+        
         saveCategoriesToLocal();
         renderTabs();
-        saveToDrive(); // [추가] 동기화 트리거
+        saveToDrive(); 
     }
 }
 
@@ -277,14 +267,16 @@ export function deleteCategoryAction() {
         state.allCategories = state.allCategories.filter(c => c.id !== state.contextCatId);
         state.categoryOrder = state.categoryOrder.filter(id => id !== state.contextCatId);
         if (state.currentCategory === state.contextCatId) state.currentCategory = state.allCategories[0].id;
+        
+        // [수정] 변경 시간 갱신
+        state.categoryUpdatedAt = new Date().toISOString();
+        
         saveCategoriesToLocal();
         renderTabs();
         renderEntries();
-        saveToDrive(); // [추가] 동기화 트리거
+        saveToDrive(); 
     }
 }
-
-// --- 팝업 기능 함수들 ---
 
 export function openMoveModal() {
     const contextMenu = getEl('context-menu');
