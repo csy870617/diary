@@ -1,14 +1,19 @@
 export const state = {
     entries: [],
+    // [수정] 요청하신 기본 카테고리 4개로 설정
     allCategories: [
-        { id: 'cat_default', name: '기본' },
-        { id: 'cat_thanks', name: '감사' },
-        { id: 'cat_meditation', name: '묵상' }
+        { id: 'cat_sermon', name: '설교' },
+        { id: 'cat_meditation', name: '묵상' },
+        { id: 'cat_prayer', name: '기도' },
+        { id: 'cat_thanks', name: '감사' }
     ],
-    categoryOrder: ['cat_default', 'cat_thanks', 'cat_meditation'],
-    currentCategory: 'cat_default',
+    // 순서도 이에 맞춰 설정
+    categoryOrder: ['cat_sermon', 'cat_meditation', 'cat_prayer', 'cat_thanks'],
     
-    // [추가] 주제가 수정된 시간을 기록 (초기값: 아주 옛날)
+    // [수정] 첫 번째 탭(설교)을 기본 선택
+    currentCategory: 'cat_sermon',
+    
+    // 카테고리 수정 시간 (동기화용)
     categoryUpdatedAt: new Date(0).toISOString(),
     
     currentSortBy: 'created',
@@ -35,18 +40,17 @@ export const state = {
     autoSaveTimer: null
 };
 
-// [수정] 카테고리 저장 시 '수정 시간'도 함께 저장
+// 카테고리 로컬 저장
 export function saveCategoriesToLocal() {
     const data = {
         categories: state.allCategories,
         order: state.categoryOrder,
-        // 현재 시간을 수정 시간으로 기록
         updatedAt: state.categoryUpdatedAt || new Date().toISOString()
     };
     localStorage.setItem('faithCatData', JSON.stringify(data));
 }
 
-// [추가] 로컬에서 카테고리 불러오기
+// 카테고리 로컬 불러오기
 export function loadCategoriesFromLocal() {
     const localData = localStorage.getItem('faithCatData');
     if (localData) {
@@ -56,6 +60,12 @@ export function loadCategoriesFromLocal() {
                 state.allCategories = parsed.categories;
                 state.categoryOrder = parsed.order;
                 state.categoryUpdatedAt = parsed.updatedAt || new Date(0).toISOString();
+                
+                // 불러온 뒤 현재 카테고리가 유효한지 확인하고, 없으면 첫번째로 설정
+                const exists = state.allCategories.find(c => c.id === state.currentCategory);
+                if (!exists && state.categoryOrder.length > 0) {
+                    state.currentCategory = state.categoryOrder[0];
+                }
             }
         } catch (e) {
             console.error("카테고리 로드 실패", e);
