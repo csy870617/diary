@@ -1,4 +1,4 @@
-import { state } from './state.js';
+import { state, loadCategoriesFromLocal } from './state.js'; // [수정] loadCategoriesFromLocal 추가
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
 import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameCategoryAction, deleteCategoryAction, addNewCategory } from './ui.js';
 import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, makeBookEditButton } from './editor.js';
@@ -15,12 +15,17 @@ window.insertSticker = insertSticker;
 const stickers = [ '✝️','🙏','📖','🕊️','🕯️','💒','🍞','🍷','🩸','🔥','☁️','☀️','🌙','⭐','✨','🌧️','🌈','❄️','🌿','🌷','🌻','🍂','🌱','🌲','🕊️','🦋','🐾','🧸','🎀','🎈','🎁','🔔','💡','🗝️','📝','📌','📎','✂️','🖍️','🖌️','💌','📅','☕','🍵','🥪','🍎','🤍','💛','🧡','❤️','💜','💙','💚','🤎','🖤','😊','😭','🥰','🤔','💪' ];
 
 function init() {
+    // 1. [핵심] 로컬 데이터(글, 카테고리) 먼저 로드 -> 로그아웃 상태에서도 데이터 유지됨
+    loadCategoriesFromLocal(); 
     loadDataFromLocal();
     checkOldTrash();
+    
+    // 2. 화면 그리기
     renderTabs();
     state.isLoading = false;
     renderEntries();
 
+    // 3. 구글 드라이브 연결 (로그인 된 경우에만 병합)
     initGoogleDrive((isLoggedIn) => {
         const loginMsg = document.getElementById('login-msg-area');
         const logoutBtn = document.getElementById('logout-btn');
@@ -34,6 +39,8 @@ function init() {
             if(loginModal) loginModal.classList.add('hidden');
             if(loginMsg) loginMsg.classList.add('hidden');
             if(refreshBtn) refreshBtn.classList.remove('hidden');
+            // 로그인 후 데이터 갱신되면 다시 그리기
+            renderTabs();
             renderEntries(); 
         } else {
             state.currentUser = null;
@@ -52,6 +59,7 @@ function init() {
     makeDraggable(document.getElementById('color-palette-popup'), document.querySelector('.palette-header'));
 }
 
+// ... (이하 makeDraggable, setupListeners 등 기존 코드와 동일) ...
 function makeDraggable(element, handle) {
     if (!element) return;
     const dragHandle = handle || element;
@@ -143,13 +151,11 @@ function setupListeners() {
         }
     });
 
-    // [핵심] 링크 클릭 리스너 강화
     window.addEventListener('click', (e) => {
         const link = e.target.closest('#editor-body a');
         const editBody = document.getElementById('editor-body');
         
         if (link && link.href) {
-            // contentEditable이 꺼져있을 때(읽기전용/책모드)만 링크 이동
             if (editBody && !editBody.isContentEditable) {
                 e.preventDefault(); 
                 e.stopPropagation();

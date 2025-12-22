@@ -1,5 +1,5 @@
 import { GOOGLE_CONFIG, APP_FOLDER_NAME, DB_FILE_NAME } from './config.js';
-import { state, saveCategoriesToLocal } from './state.js'; // saveCategoriesToLocal 추가
+import { state, saveCategoriesToLocal } from './state.js';
 import { renderEntries, renderTabs } from './ui.js';
 
 let tokenClient;
@@ -57,13 +57,11 @@ export function initGoogleDrive(callback) {
     gisInited = true;
 }
 
-// 2. 로그인 요청
 export function handleAuthClick() {
     if(!gisInited || !gapiInited) return alert("연결 준비 중입니다. 잠시만 기다려주세요.");
     tokenClient.requestAccessToken({prompt: 'consent'});
 }
 
-// 3. 로그아웃
 export function handleSignoutClick(callback) {
     const token = gapi.client.getToken();
     if (token !== null) {
@@ -77,7 +75,7 @@ export function handleSignoutClick(callback) {
     }
 }
 
-// 4. 데이터 동기화 (로드 & 병합)
+// 4. 데이터 동기화 (로드)
 export async function syncFromDrive(callback) {
     try {
         const folderId = await ensureAppFolder();
@@ -86,19 +84,19 @@ export async function syncFromDrive(callback) {
         if (fileId) {
             const cloudRawData = await downloadFile(fileId);
             
-            // [핵심] 데이터 구조 확인 및 처리
             let cloudEntries = [];
             let cloudCategories = null;
             let cloudOrder = null;
+            let cloudCatTime = null;
 
+            // 데이터 구조 확인 (구버전 Array vs 신버전 Object)
             if (Array.isArray(cloudRawData)) {
-                // 구버전 데이터 (배열만 있음)
                 cloudEntries = cloudRawData;
             } else if (cloudRawData && cloudRawData.entries) {
-                // 신버전 데이터 (객체 형태)
                 cloudEntries = cloudRawData.entries;
                 cloudCategories = cloudRawData.categories;
                 cloudOrder = cloudRawData.categoryOrder;
+                cloudCatTime = cloudRawData.categoryUpdatedAt;
             }
 
             // 1. 글 병합
@@ -106,16 +104,24 @@ export async function syncFromDrive(callback) {
             state.entries = merged;
             localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
 
-            // 2. 카테고리 동기화 (클라우드에 설정이 있다면 내 기기에 반영)
+            // 2. 카테고리 동기화 (시간 비교)
             if (cloudCategories && cloudOrder) {
-                state.allCategories = cloudCategories;
-                state.categoryOrder = cloudOrder;
-                saveCategoriesToLocal(); // 로컬 스토리지 저장
-                renderTabs(); // 탭 다시 그리기
+                const localTime = new Date(state.categoryUpdatedAt || 0).getTime();
+                const serverTime = new Date(cloudCatTime || 0).getTime();
+
+                // 서버가 더 최신이면 덮어씀
+                if (serverTime > localTime) {
+                    state.allCategories = cloudCategories;
+                    state.categoryOrder = cloudOrder;
+                    state.categoryUpdatedAt = cloudCatTime;
+                    saveCategoriesToLocal(); // 로컬에도 저장
+                    renderTabs(); // 탭 갱신
+                    console.log("카테고리 업데이트 완료 (서버 > 로컬)");
+                }
             }
 
             renderEntries(); 
-            console.log("동기화(로드&병합) 완료");
+            console.log("동기화 완료");
         } else {
             await saveToDrive(); 
         }
@@ -135,7 +141,7 @@ export async function saveToDrive() {
         
         let entriesToSave = state.entries;
 
-        // 병합 과정 (글 데이터 보호)
+        // 병합 먼저 (데이터 보호)
         if (fileId) {
             try {
                 const cloudRawData = await downloadFile(fileId);
@@ -157,11 +163,12 @@ export async function saveToDrive() {
             }
         }
 
-        // [핵심] 저장할 전체 데이터 패키지 생성
+        // [핵심] 전체 데이터 패키지 생성
         const fullData = {
             entries: entriesToSave,
-            categories: state.allCategories,
+            categories: state.allCategories, // 카테고리 포함
             categoryOrder: state.categoryOrder,
+            categoryUpdatedAt: state.categoryUpdatedAt || new Date().toISOString(), // 시간 포함
             lastUpdated: new Date().toISOString()
         };
 
@@ -196,7 +203,6 @@ export async function saveToDrive() {
     }
 }
 
-// --- Helper Functions ---
 function mergeData(cloud, local) {
     const map = new Map();
     cloud.forEach(item => map.set(item.id, item));
