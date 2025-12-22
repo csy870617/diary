@@ -1,3 +1,13 @@
+/* ✨ 스크롤바 숨기기 (기능은 유지됨) */
+::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Opera */
+}
+body {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+}
+
+
 /* ... 상단 회전 애니메이션 등 기존 스타일 유지 ... */
 @keyframes spin { 
     from { transform: rotate(0deg); } 
@@ -208,4 +218,5 @@ body {
     .editor-container { padding: 20px 20px 100px; }
     .full-screen-modal { padding-top: var(--safe-top); padding-bottom: var(--safe-bottom); }
     #write-modal.mode-book .editor-container { padding: 20px 20px; }
+
 }
