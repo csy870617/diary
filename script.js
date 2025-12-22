@@ -48,12 +48,10 @@ function init() {
     renderStickers();
     makeBookEditButton();
     
-    // 팔레트 드래그 기능 적용
     makeDraggable(document.getElementById('sticker-palette'));
     makeDraggable(document.getElementById('color-palette-popup'), document.querySelector('.palette-header'));
 }
 
-// 드래그 앤 드롭 함수
 function makeDraggable(element, handle) {
     if (!element) return;
     const dragHandle = handle || element;
@@ -61,7 +59,7 @@ function makeDraggable(element, handle) {
     let startX, startY, initialLeft, initialTop;
 
     dragHandle.addEventListener('mousedown', (e) => {
-        if(e.target.tagName === 'BUTTON' || e.target.closest('button')) return; // 버튼 클릭 시 드래그 방지
+        if(e.target.tagName === 'BUTTON' || e.target.closest('button')) return; 
         e.preventDefault(); 
         isDragging = true;
         startX = e.clientX;
@@ -145,12 +143,14 @@ function setupListeners() {
         }
     });
 
+    // [핵심] 링크 클릭 리스너 강화
     window.addEventListener('click', (e) => {
         const link = e.target.closest('#editor-body a');
         const editBody = document.getElementById('editor-body');
         
         if (link && link.href) {
-            if (editBody && editBody.getAttribute('contenteditable') === "false") {
+            // contentEditable이 꺼져있을 때(읽기전용/책모드)만 링크 이동
+            if (editBody && !editBody.isContentEditable) {
                 e.preventDefault(); 
                 e.stopPropagation();
                 const win = window.open(link.href, '_blank');
@@ -158,6 +158,7 @@ function setupListeners() {
                 return;
             }
         }
+        
         const contextMenu = document.getElementById('context-menu');
         const catContextMenu = document.getElementById('category-context-menu');
         const colorPalettePopup = document.getElementById('color-palette-popup');
@@ -292,7 +293,6 @@ function setupUIListeners() {
             const editBody = document.getElementById('editor-body');
             if(editBody) editBody.focus(); 
 
-            // 일반 색상 선택
             if(!btn.classList.contains('remove-color') && btn.id !== 'btn-remove-color') {
                  formatDoc(state.activeColorMode, btn.dataset.color); 
             }
@@ -300,22 +300,16 @@ function setupUIListeners() {
         }); 
     });
 
-    // [핵심] 색상 없음 버튼 로직 강화
     const btnRemoveColor = document.getElementById('btn-remove-color');
     if(btnRemoveColor) {
         btnRemoveColor.addEventListener('mousedown', (e) => {
-            e.preventDefault(); // 포커스 유지
-            e.stopPropagation();
-            
+            e.preventDefault();
             const editBody = document.getElementById('editor-body');
             if(editBody) editBody.focus();
-
             if(state.activeColorMode === 'hiliteColor') {
-                 // 형광펜 끄기 (배경 투명) - 명령어 2개 모두 사용하여 호환성 확보
                  document.execCommand('hiliteColor', false, 'transparent');
                  document.execCommand('backColor', false, 'transparent'); 
             } else {
-                 // 글자색 끄기 (기본 검정색으로 복귀)
                  document.execCommand('foreColor', false, '#111827'); 
             }
             document.getElementById('color-palette-popup').classList.add('hidden'); 
@@ -468,7 +462,6 @@ function openColorPalette() {
     const colorPalettePopup = document.getElementById('color-palette-popup');
     if(stickerPalette) stickerPalette.classList.add('hidden');
     if(colorPalettePopup) {
-        // 열 때 초기화 (중앙)
         colorPalettePopup.style.transform = 'translateX(-50%)';
         colorPalettePopup.style.left = '50%';
         colorPalettePopup.style.top = '110px';

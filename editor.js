@@ -1,11 +1,44 @@
 import { state } from './state.js';
 import { saveEntry } from './data.js';
 
-// 책 모드에서 '수정' 버튼(연필 아이콘)을 만드는 함수
+// 텍스트 내 URL을 찾아 링크로 변환 (기존 서식 보존)
+function linkifyContents(element) {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
+    const nodes = [];
+    while(walker.nextNode()) nodes.push(walker.currentNode);
+    
+    const urlRegex = /((https?:\/\/|www\.)[^\s]+)/g;
+    
+    nodes.forEach(node => {
+        // 이미 링크거나 버튼, 편집 가능한 상태면 건너뜀
+        if (node.parentNode.tagName === 'A' || node.parentNode.tagName === 'BUTTON' || node.parentNode.isContentEditable) return;
+        
+        const text = node.nodeValue;
+        if (text.match(urlRegex)) {
+            const fragment = document.createDocumentFragment();
+            let lastIdx = 0;
+            text.replace(urlRegex, (match, url, protocol, offset) => {
+                fragment.appendChild(document.createTextNode(text.slice(lastIdx, offset)));
+                const a = document.createElement('a');
+                a.href = protocol === 'www.' ? 'http://' + url : url;
+                a.target = '_blank';
+                a.textContent = url;
+                a.style.textDecoration = 'underline';
+                a.style.color = '#2563EB'; 
+                a.style.cursor = 'pointer';
+                a.style.pointerEvents = 'auto'; // 확실하게 클릭 허용
+                fragment.appendChild(a);
+                lastIdx = offset + match.length;
+            });
+            fragment.appendChild(document.createTextNode(text.slice(lastIdx)));
+            node.parentNode.replaceChild(fragment, node);
+        }
+    });
+}
+
 export function makeBookEditButton() {
     const btnBookMode = document.getElementById('btn-bookmode');
     
-    // 이미 버튼이 있으면 전역 변수만 갱신하고 종료
     if (document.getElementById('btn-book-edit')) {
         window.btnBookEdit = document.getElementById('btn-book-edit');
         return;
@@ -17,21 +50,18 @@ export function makeBookEditButton() {
         btn.className = 'icon-btn';
         btn.title = "페이지 편집";
         btn.innerHTML = '<i class="ph ph-pencil-simple" style="font-size: 18px;"></i>';
-        // 원래 코드의 스타일 적용
         btn.style.cssText = "display: none; align-items: center; justify-content: center; gap: 4px; font-family: 'Pretendard'; font-size: 14px; font-weight: 600; color: #4B5563; background: transparent; border: none; cursor: pointer; padding: 8px; margin-left: 4px; border-radius: 6px; width: 36px; height: 36px;";
         
         btn.addEventListener('mouseover', () => btn.style.backgroundColor = '#F3F4F6');
         btn.addEventListener('mouseout', () => btn.style.backgroundColor = 'transparent');
         btn.addEventListener('click', toggleBookEditing);
 
-        // 책 모드 버튼 옆에 삽입
         if (btnBookMode.nextSibling) btnBookMode.parentElement.insertBefore(btn, btnBookMode.nextSibling);
         else btnBookMode.parentElement.appendChild(btn);
         
         window.btnBookEdit = btn;
     }
     
-    // 닫기 버튼 위치 조정 (UI 디테일)
     const closeWriteBtn = document.getElementById('close-write-btn');
     const headerLeft = document.querySelector('.write-header .header-left');
     if (headerLeft && closeWriteBtn && !headerLeft.contains(closeWriteBtn)) {
@@ -39,7 +69,6 @@ export function makeBookEditButton() {
     }
 }
 
-// 에디터 열기 (서식 적용 핵심 수정 포함)
 export function openEditor(isEdit, entryData) { 
     state.isEditMode = isEdit; 
     const writeModal = document.getElementById('write-modal');
@@ -51,7 +80,6 @@ export function openEditor(isEdit, entryData) {
 
     makeBookEditButton();
     
-    // 카테고리/날짜 표시
     const catName = state.allCategories.find(c => c.id === state.currentCategory)?.name || '기록';
     const displayCat = document.getElementById('display-category');
     if(displayCat) displayCat.innerText = catName;
@@ -67,11 +95,10 @@ export function openEditor(isEdit, entryData) {
         editTitle.value = entryData.title || ''; 
         editSubtitle.value = entryData.subtitle || ''; 
         
-        // [핵심 수정] autoLink 함수 제거 후 HTML 직접 주입
-        // (저장된 서식을 그대로 불러오기 위함)
         editBody.innerHTML = entryData.body || ''; 
-        
-        // 저장된 폰트/사이즈 적용 (없으면 기본값)
+        // [중요] 열 때 링크 변환
+        linkifyContents(editBody);
+
         applyFontStyle(entryData.fontFamily || 'Pretendard', entryData.fontSize || 16); 
     } else { 
         state.editingId = null; 
@@ -79,15 +106,12 @@ export function openEditor(isEdit, entryData) {
         editSubtitle.value = ''; 
         editBody.innerHTML = ''; 
         applyFontStyle('Pretendard', 16); 
-        
-        // 새 글일 때 제목에 포커스
         setTimeout(() => editTitle.focus(), 100);
     } 
     state.lastFocusedEdit = editBody;
     toggleViewMode('default', false);
 }
 
-// 책 모드에서 편집/보기 전환
 export function toggleBookEditing() {
     if(state.currentViewMode !== 'book') return;
 
@@ -101,13 +125,11 @@ export function toggleBookEditing() {
     const isEditable = editBody.isContentEditable;
 
     if (!isEditable) {
-        // 편집 모드 켜기
         editTitle.readOnly = false;
         editSubtitle.readOnly = false;
         editBody.contentEditable = "true";
         editBody.focus();
 
-        // 툴바 보이기
         if(editorToolbar) {
             editorToolbar.style.transition = ''; 
             editorToolbar.classList.remove('collapsed');
@@ -118,19 +140,19 @@ export function toggleBookEditing() {
             }
         }
 
-        // 버튼 아이콘 변경 (체크 모양)
         if(btn) {
             btn.innerHTML = '<i class="ph ph-check" style="font-size: 18px; color: #10B981;"></i>';
             btn.title = "편집 완료";
         }
 
     } else {
-        // 편집 모드 끄기 (저장)
         editTitle.readOnly = true;
         editSubtitle.readOnly = true;
         editBody.contentEditable = "false";
 
-        // 툴바 숨기기
+        // [중요] 편집 끝날 때 다시 링크 변환
+        linkifyContents(editBody);
+
         if(editorToolbar) {
             editorToolbar.classList.add('collapsed');
             const icon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
@@ -140,13 +162,12 @@ export function toggleBookEditing() {
             }
         }
 
-        // 버튼 아이콘 복구 (연필 모양)
         if(btn) {
             btn.innerHTML = '<i class="ph ph-pencil-simple" style="font-size: 18px;"></i>';
             btn.title = "페이지 편집";
         }
         
-        debouncedSave(); // 편집 종료 시 자동 저장
+        debouncedSave(); 
     }
 }
 
@@ -154,7 +175,6 @@ export function enableBookEditing() {
     toggleBookEditing();
 }
 
-// 뷰 모드 전환 (기본 / 읽기전용 / 책모드)
 export function toggleViewMode(mode) {
     state.currentViewMode = mode;
     const writeModal = document.getElementById('write-modal');
@@ -170,7 +190,6 @@ export function toggleViewMode(mode) {
     const btnBookEdit = window.btnBookEdit || document.getElementById('btn-book-edit');
     const toolbarIcon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
 
-    // 책 모드 진입 시 툴바 미리 접기
     if (mode === 'book' && editorToolbar) {
         editorToolbar.style.transition = 'none'; 
         editorToolbar.classList.add('collapsed'); 
@@ -192,10 +211,12 @@ export function toggleViewMode(mode) {
     if(btnBookMode) btnBookMode.classList.remove('active');
     
     if (mode === 'readOnly') {
-        // 읽기 전용 모드
         editTitle.readOnly = true;
         editSubtitle.readOnly = true;
         editBody.contentEditable = "false";
+        
+        // [중요] 읽기 전용 진입 시 링크 변환
+        linkifyContents(editBody);
         
         writeModal.classList.add('mode-read-only');
         if(exitFocusBtn) exitFocusBtn.classList.remove('hidden');
@@ -203,10 +224,12 @@ export function toggleViewMode(mode) {
         if(btnBookEdit) btnBookEdit.style.display = 'none';
 
     } else if (mode === 'book') {
-        // 책 모드
         editTitle.readOnly = true; 
         editSubtitle.readOnly = true;
         editBody.contentEditable = "false";
+        
+        // [중요] 책 모드 진입 시 링크 변환
+        linkifyContents(editBody);
         
         writeModal.classList.add('mode-book');
         if(exitFocusBtn) exitFocusBtn.classList.remove('hidden');
@@ -214,9 +237,8 @@ export function toggleViewMode(mode) {
         
         const container = document.getElementById('editor-container');
         if(container) container.scrollLeft = 0; 
-        updateBookNav(); // 네비게이션 화살표 업데이트
+        updateBookNav(); 
         
-        // 애니메이션 다시 켜기 (부드러운 전환 위해)
         if(editorToolbar) {
              setTimeout(() => {
                 editorToolbar.style.transition = '';
@@ -231,7 +253,6 @@ export function toggleViewMode(mode) {
         }
 
     } else {
-        // 기본 편집 모드
         editTitle.readOnly = false;
         editSubtitle.readOnly = false;
         editBody.contentEditable = "true";
@@ -249,35 +270,30 @@ export function toggleViewMode(mode) {
     }
 }
 
-// 서식 적용 (굵게, 기울임 등)
 export function formatDoc(cmd, value = null) {
     const editBody = document.getElementById('editor-body');
     if (!editBody) return;
     
-    // 제목/소제목에서는 실행 안 함
     if (document.activeElement === document.getElementById('edit-title') || 
         document.activeElement === document.getElementById('edit-subtitle')) return;
         
     editBody.focus();
     document.execCommand(cmd, false, value);
-    debouncedSave(); // 서식 적용 시 자동 저장
+    debouncedSave(); 
 }
 
-// 폰트 스타일 적용
 export function applyFontStyle(f, s) { 
     state.currentFontFamily = f; 
     state.currentFontSize = s; 
     const editBody = document.getElementById('editor-body');
     if(editBody) {
         editBody.style.fontFamily = f; 
-        // 나눔손글씨는 조금 작아 보여서 보정
         editBody.style.fontSize = (f==='Nanum Pen Script' ? s+4 : s) + 'px'; 
     }
     const fontSelector = document.getElementById('font-selector');
     if(fontSelector) fontSelector.value = f; 
 }
 
-// 글자 크기 조절
 export function changeGlobalFontSize(delta) { 
     const editBody = document.getElementById('editor-body');
     if(!editBody) return;
@@ -291,7 +307,6 @@ export function changeGlobalFontSize(delta) {
     state.currentFontSize = newSize; 
     applyFontStyle(state.currentFontFamily, newSize);
     
-    // 개별적으로 크기가 지정된 span들도 같이 조절
     const spans = editBody.querySelectorAll('span[style*="font-size"]');
     spans.forEach(span => {
         let spanCurrentStyle = window.getComputedStyle(span);
@@ -305,12 +320,9 @@ export function changeGlobalFontSize(delta) {
     debouncedSave();
 }
 
-// 책 모드 페이지 넘김
 export function turnPage(direction) { 
     if (state.currentViewMode !== 'book') return; 
     const container = document.getElementById('editor-container');
-    
-    // 페이지 너비 + gap(80) 고려
     const pageWidth = container.clientWidth + 80; 
     const currentScroll = container.scrollLeft; 
     
@@ -322,7 +334,6 @@ export function turnPage(direction) {
     setTimeout(updateBookNav, 300); 
 }
 
-// 책 모드 네비게이션(화살표, 쪽수) 업데이트
 export function updateBookNav() { 
     if (state.currentViewMode !== 'book') return; 
     const container = document.getElementById('editor-container');
@@ -333,8 +344,6 @@ export function updateBookNav() {
     const scrollLeft = container.scrollLeft; 
     const scrollWidth = container.scrollWidth; 
     const clientWidth = container.clientWidth; 
-    
-    // 갭 포함한 페이지 너비
     const effectivePageWidth = clientWidth + 80;
 
     if (scrollLeft > 10) bookNavLeft.classList.remove('hidden'); else bookNavLeft.classList.add('hidden'); 
@@ -347,7 +356,6 @@ export function updateBookNav() {
     pageIndicator.classList.remove('hidden'); 
 }
 
-// 스티커 삽입
 export function insertSticker(emoji) { 
     const editBody = document.getElementById('editor-body');
     const editTitle = document.getElementById('edit-title');
@@ -368,7 +376,6 @@ export function insertSticker(emoji) {
     debouncedSave();
 }
 
-// 자동 저장 (1초 딜레이)
 function debouncedSave() {
     if(state.autoSaveTimer) clearTimeout(state.autoSaveTimer);
     state.autoSaveTimer = setTimeout(saveEntry, 1000); 

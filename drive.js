@@ -1,12 +1,12 @@
 import { GOOGLE_CONFIG, APP_FOLDER_NAME, DB_FILE_NAME } from './config.js';
-import { state } from './state.js';
-import { renderEntries } from './ui.js';
+import { state, saveCategoriesToLocal } from './state.js'; // saveCategoriesToLocal 추가
+import { renderEntries, renderTabs } from './ui.js';
 
 let tokenClient;
 let gapiInited = false;
 let gisInited = false;
 
-// 1. Google API 초기화 (로딩 대기 기능 포함)
+// 1. Google API 초기화
 export function initGoogleDrive(callback) {
     if (typeof gapi === 'undefined' || typeof google === 'undefined' || !google.accounts) {
         setTimeout(() => initGoogleDrive(callback), 100);
@@ -77,23 +77,45 @@ export function handleSignoutClick(callback) {
     }
 }
 
-// 4. 데이터 동기화 (로드)
+// 4. 데이터 동기화 (로드 & 병합)
 export async function syncFromDrive(callback) {
     try {
         const folderId = await ensureAppFolder();
         const fileId = await findDbFile(folderId);
         
         if (fileId) {
-            const cloudData = await downloadFile(fileId);
-            if (Array.isArray(cloudData)) {
-                // 불러올 때 내 기기의 최신 데이터가 사라지지 않도록 병합
-                const merged = mergeData(cloudData, state.entries);
-                
-                state.entries = merged;
-                localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-                renderEntries(); 
-                console.log("동기화(로드&병합) 완료");
+            const cloudRawData = await downloadFile(fileId);
+            
+            // [핵심] 데이터 구조 확인 및 처리
+            let cloudEntries = [];
+            let cloudCategories = null;
+            let cloudOrder = null;
+
+            if (Array.isArray(cloudRawData)) {
+                // 구버전 데이터 (배열만 있음)
+                cloudEntries = cloudRawData;
+            } else if (cloudRawData && cloudRawData.entries) {
+                // 신버전 데이터 (객체 형태)
+                cloudEntries = cloudRawData.entries;
+                cloudCategories = cloudRawData.categories;
+                cloudOrder = cloudRawData.categoryOrder;
             }
+
+            // 1. 글 병합
+            const merged = mergeData(cloudEntries, state.entries);
+            state.entries = merged;
+            localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+
+            // 2. 카테고리 동기화 (클라우드에 설정이 있다면 내 기기에 반영)
+            if (cloudCategories && cloudOrder) {
+                state.allCategories = cloudCategories;
+                state.categoryOrder = cloudOrder;
+                saveCategoriesToLocal(); // 로컬 스토리지 저장
+                renderTabs(); // 탭 다시 그리기
+            }
+
+            renderEntries(); 
+            console.log("동기화(로드&병합) 완료");
         } else {
             await saveToDrive(); 
         }
@@ -103,7 +125,7 @@ export async function syncFromDrive(callback) {
     }
 }
 
-// 5. 저장 (업로드)
+// 5. 저장 (업로드) - 카테고리 포함
 export async function saveToDrive() {
     if (!state.currentUser) return;
 
@@ -113,24 +135,37 @@ export async function saveToDrive() {
         
         let entriesToSave = state.entries;
 
+        // 병합 과정 (글 데이터 보호)
         if (fileId) {
             try {
-                // 저장 직전 클라우드 데이터 확인 (충돌 방지)
-                const cloudData = await downloadFile(fileId);
-                if (Array.isArray(cloudData)) {
-                    // 병합하여 최신 상태 생성
-                    entriesToSave = mergeData(cloudData, state.entries);
-                    
+                const cloudRawData = await downloadFile(fileId);
+                let cloudEntries = [];
+                if (Array.isArray(cloudRawData)) {
+                    cloudEntries = cloudRawData;
+                } else if (cloudRawData && cloudRawData.entries) {
+                    cloudEntries = cloudRawData.entries;
+                }
+                
+                if (Array.isArray(cloudEntries)) {
+                    entriesToSave = mergeData(cloudEntries, state.entries);
                     state.entries = entriesToSave;
                     localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
                     renderEntries();
                 }
             } catch (e) {
-                console.warn("병합 전 읽기 실패, 강제 저장", e);
+                console.warn("병합 전 읽기 실패", e);
             }
         }
 
-        const fileContent = JSON.stringify(entriesToSave);
+        // [핵심] 저장할 전체 데이터 패키지 생성
+        const fullData = {
+            entries: entriesToSave,
+            categories: state.allCategories,
+            categoryOrder: state.categoryOrder,
+            lastUpdated: new Date().toISOString()
+        };
+
+        const fileContent = JSON.stringify(fullData);
         const fileMetadata = { name: DB_FILE_NAME, mimeType: 'application/json' };
         if (!fileId) fileMetadata.parents = [folderId];
 
@@ -154,39 +189,29 @@ export async function saveToDrive() {
             body: multipartRequestBody
         });
         
-        console.log("저장 완료");
+        console.log("저장 완료 (카테고리 포함)");
 
     } catch (err) {
         handleDriveError(err);
     }
 }
 
-// --- 병합 로직 (최신 데이터 우선) ---
+// --- Helper Functions ---
 function mergeData(cloud, local) {
     const map = new Map();
-
-    // 1. 클라우드 데이터를 기준으로 삼음
     cloud.forEach(item => map.set(item.id, item));
-
-    // 2. 로컬 데이터를 비교하며 덮어쓰기
     local.forEach(localItem => {
         const cloudItem = map.get(localItem.id);
-        
         if (!cloudItem) {
-            // 새 글이면 추가
             map.set(localItem.id, localItem);
         } else {
-            // 둘 다 있으면 수정 시간 비교
             const localTime = new Date(localItem.modifiedAt || localItem.timestamp).getTime();
             const cloudTime = new Date(cloudItem.modifiedAt || cloudItem.timestamp).getTime();
-
-            // 내 기기가 더 최신이면 덮어씀
-            if (localTime > cloudTime) {
+            if (localTime >= cloudTime || (localItem.isPurged && !cloudItem.isPurged)) {
                 map.set(localItem.id, localItem);
             }
         }
     });
-
     return Array.from(map.values());
 }
 

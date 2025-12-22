@@ -1,6 +1,7 @@
 import { state, saveCategoriesToLocal } from './state.js';
 import { updateEntryField, emptyTrash, saveEntry, restoreEntry, permanentDelete } from './data.js';
 import { openEditor, toggleViewMode, applyFontStyle } from './editor.js';
+import { saveToDrive } from './drive.js'; // [추가] 동기화 함수 임포트
 
 const getEl = (id) => document.getElementById(id);
 
@@ -42,7 +43,6 @@ export function renderEntries(keyword = '') {
         const div = document.createElement('article');
         div.className = 'entry-card';
         
-        // 잠금 로직 제거됨
         const dateStr = state.currentSortBy === 'modified' 
             ? `수정: ${new Date(entry.modifiedAt || entry.timestamp).toLocaleDateString()}` 
             : entry.date;
@@ -86,7 +86,7 @@ export function renderTabs() {
     tabContainer.appendChild(addBtn);
 }
 
-// 3. 휴지통 렌더링 (버튼 이벤트 직접 연결)
+// 3. 휴지통 렌더링
 export function renderTrash() { 
     const trashList = getEl('trash-list');
     trashList.innerHTML = `<div style="padding:10px 0; text-align:center; font-size:12px; color:#9CA3AF; font-family:'Pretendard'; margin-bottom:10px;">휴지통에 보관된 글은 30일 후 자동 삭제됩니다.</div>`;
@@ -249,6 +249,7 @@ export function addNewCategory() {
         state.categoryOrder.push(id);
         saveCategoriesToLocal();
         renderTabs();
+        saveToDrive(); // [추가] 동기화 트리거
     }
 }
 
@@ -262,6 +263,7 @@ export function renameCategoryAction() {
         cat.name = newName.trim();
         saveCategoriesToLocal();
         renderTabs();
+        saveToDrive(); // [추가] 동기화 트리거
     }
 }
 
@@ -278,6 +280,7 @@ export function deleteCategoryAction() {
         saveCategoriesToLocal();
         renderTabs();
         renderEntries();
+        saveToDrive(); // [추가] 동기화 트리거
     }
 }
 
