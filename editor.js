@@ -35,7 +35,7 @@ function linkifyContents(element) {
 }
 
 // ============================================
-// [핵심] 이미지 조작 로직 (버튼, 선택, 삭제)
+// 이미지 조작 로직
 // ============================================
 let currentSelectedImg = null;
 let selectionBox = null;
@@ -114,7 +114,7 @@ function createSelectionUI() {
             btn.className = 'img-resize-btn';
             btn.innerText = size + '%';
             btn.onclick = (e) => {
-                e.stopPropagation(); 
+                e.stopPropagation();
                 if (currentSelectedImg) {
                     currentSelectedImg.style.width = size + '%';
                     currentSelectedImg.style.height = 'auto';
@@ -286,8 +286,9 @@ export function openEditor(isEdit, entryData) {
     toggleViewMode('default', false);
 }
 
-// [핵심 수정] 책 모드 -> 편집 전환 시 위치 보존 (Anchor Element 방식)
+// [핵심 수정] 책 모드 상태 유지 + 편집 모드 전환
 export function toggleBookEditing() {
+    // 책 모드가 아닐 때는 동작 안 함
     if(state.currentViewMode !== 'book') return;
 
     const editTitle = document.getElementById('edit-title');
@@ -296,38 +297,28 @@ export function toggleBookEditing() {
     const editorToolbar = document.getElementById('editor-toolbar');
     const toolbarToggleBtn = document.getElementById('toolbar-toggle-btn');
     const btn = window.btnBookEdit || document.getElementById('btn-book-edit');
-    const container = document.getElementById('editor-container');
+    const writeModal = document.getElementById('write-modal');
 
     const isEditable = editBody.isContentEditable;
 
     if (!isEditable) {
-        // [Anchor Logic] 현재 화면 중앙에 보이는 실제 요소를 찾음
-        // 가로 중앙, 세로 상단 1/3 지점 (가장 자연스러운 시선 위치)
-        const centerX = window.innerWidth / 2;
-        const centerY = window.innerHeight / 3 + 60; // 헤더 고려
+        // [편집 시작]
         
-        let anchorElement = document.elementFromPoint(centerX, centerY);
+        // 1. 책 모드 클래스(.mode-book) 제거하지 않음! (레이아웃 유지)
+        // writeModal.classList.remove('mode-book'); // <-- 이 줄 삭제됨
         
-        // 찾은 요소가 에디터 내용물인지 확인 (배경이나 컨테이너면 무효)
-        if (anchorElement && !editBody.contains(anchorElement)) {
-            anchorElement = null;
-        }
-
-        // 백업용 비율 계산 (요소를 못 찾았을 경우)
-        const currentScroll = container.scrollLeft;
-        const totalScroll = container.scrollWidth - container.clientWidth;
-        const scrollRatio = totalScroll > 0 ? currentScroll / totalScroll : 0;
-
+        // 2. 입력 가능 상태로 변경
         editTitle.readOnly = false;
         editSubtitle.readOnly = false;
         editBody.contentEditable = "true";
         
-        // [중요] preventScroll로 튐 방지
+        // 3. 포커스 주되 스크롤 이동 방지 (제자리 편집)
         editBody.focus({ preventScroll: true });
 
+        // 4. 툴바를 접힌 상태로 설정
         if(editorToolbar) {
             editorToolbar.style.transition = ''; 
-            editorToolbar.classList.add('collapsed'); // 접힌 상태 유지
+            editorToolbar.classList.add('collapsed'); // 무조건 접음
             const icon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
             if(icon) {
                 icon.classList.remove('ph-caret-up');
@@ -335,34 +326,23 @@ export function toggleBookEditing() {
             }
         }
 
+        // 5. 버튼 아이콘 변경 (체크 모양)
         if(btn) {
             btn.innerHTML = '<i class="ph ph-check" style="font-size: 18px; color: #10B981;"></i>';
             btn.title = "편집 완료";
         }
-        
-        // [이동 실행] 모바일 렌더링 시간을 고려해 150ms 딜레이
-        setTimeout(() => {
-            if (anchorElement && anchorElement.scrollIntoView) {
-                // 찾은 요소를 화면 중앙으로 가져옴
-                anchorElement.scrollIntoView({ block: 'center', behavior: 'auto' });
-            } else {
-                // 못 찾았으면 비율대로 이동
-                const writeModal = document.getElementById('write-modal');
-                const totalHeight = writeModal.scrollHeight - writeModal.clientHeight;
-                if (totalHeight > 0) {
-                    writeModal.scrollTo({ top: totalHeight * scrollRatio, behavior: 'auto' });
-                }
-            }
-        }, 150);
 
     } else {
+        // [편집 완료]
         editTitle.readOnly = true;
         editSubtitle.readOnly = true;
         editBody.contentEditable = "false";
         hideImageSelection(); 
 
+        // 링크 처리
         linkifyContents(editBody);
-
+        
+        // 툴바 유지 (접힌 상태)
         if(editorToolbar) {
             editorToolbar.classList.add('collapsed');
             const icon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
@@ -372,6 +352,7 @@ export function toggleBookEditing() {
             }
         }
 
+        // 버튼 아이콘 원복 (연필 모양)
         if(btn) {
             btn.innerHTML = '<i class="ph ph-pencil-simple" style="font-size: 18px;"></i>';
             btn.title = "페이지 편집";
