@@ -1,7 +1,6 @@
 import { state } from './state.js';
 import { saveEntry } from './data.js';
 
-// 텍스트 내 URL을 찾아 링크로 변환 (기존 서식 보존)
 function linkifyContents(element) {
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
     const nodes = [];
@@ -10,7 +9,6 @@ function linkifyContents(element) {
     const urlRegex = /((https?:\/\/|www\.)[^\s]+)/g;
     
     nodes.forEach(node => {
-        // 이미 링크거나 버튼, 편집 가능한 상태면 건너뜀
         if (node.parentNode.tagName === 'A' || node.parentNode.tagName === 'BUTTON' || node.parentNode.isContentEditable) return;
         
         const text = node.nodeValue;
@@ -26,7 +24,7 @@ function linkifyContents(element) {
                 a.style.textDecoration = 'underline';
                 a.style.color = '#2563EB'; 
                 a.style.cursor = 'pointer';
-                a.style.pointerEvents = 'auto'; // 확실하게 클릭 허용
+                a.style.pointerEvents = 'auto'; 
                 fragment.appendChild(a);
                 lastIdx = offset + match.length;
             });
@@ -34,6 +32,153 @@ function linkifyContents(element) {
             node.parentNode.replaceChild(fragment, node);
         }
     });
+}
+
+let currentSelectedImg = null;
+let selectionBox = null;
+let resizeHandle = null;
+let deleteBtn = null;
+
+function setupImageHandling() {
+    const editorBody = document.getElementById('editor-body');
+    const writeModal = document.getElementById('write-modal');
+    
+    if (!editorBody) return;
+
+    editorBody.addEventListener('click', (e) => {
+        if (!editorBody.isContentEditable) return;
+
+        if (e.target.tagName === 'IMG') {
+            e.stopPropagation(); 
+            e.preventDefault(); 
+            selectImage(e.target);
+        } else {
+            hideImageSelection();
+        }
+    });
+
+    if(writeModal) writeModal.addEventListener('scroll', updateSelectionBox);
+    window.addEventListener('resize', updateSelectionBox);
+    editorBody.addEventListener('input', updateSelectionBox);
+
+    document.addEventListener('keydown', (e) => {
+        if (currentSelectedImg && (e.key === 'Delete' || e.key === 'Backspace')) {
+            deleteSelectedImage(e);
+        }
+    });
+}
+
+function selectImage(img) {
+    if (currentSelectedImg === img) return;
+    currentSelectedImg = img;
+    createSelectionUI();
+    updateSelectionBox();
+}
+
+function hideImageSelection() {
+    currentSelectedImg = null;
+    if (selectionBox) selectionBox.style.display = 'none';
+    if (resizeHandle) resizeHandle.style.display = 'none';
+    if (deleteBtn) deleteBtn.style.display = 'none';
+}
+
+function createSelectionUI() {
+    if (!selectionBox) {
+        selectionBox = document.createElement('div');
+        selectionBox.className = 'img-selection-box';
+        document.body.appendChild(selectionBox);
+
+        resizeHandle = document.createElement('div');
+        resizeHandle.className = 'resize-handle se';
+        document.body.appendChild(resizeHandle);
+        
+        resizeHandle.addEventListener('mousedown', startResize);
+        resizeHandle.addEventListener('touchstart', startResize, {passive: false});
+
+        deleteBtn = document.createElement('button');
+        deleteBtn.className = 'img-delete-btn';
+        deleteBtn.innerHTML = '<i class="ph ph-trash"></i> 삭제';
+        document.body.appendChild(deleteBtn);
+        
+        deleteBtn.addEventListener('click', deleteSelectedImage);
+    }
+
+    selectionBox.style.display = 'block';
+    resizeHandle.style.display = 'block';
+    deleteBtn.style.display = 'flex';
+}
+
+function updateSelectionBox() {
+    if (!currentSelectedImg || !selectionBox) return;
+
+    const rect = currentSelectedImg.getBoundingClientRect();
+    const scrollTop = window.scrollY || document.documentElement.scrollTop;
+    const scrollLeft = window.scrollX || document.documentElement.scrollLeft;
+
+    selectionBox.style.top = (rect.top + scrollTop) + 'px';
+    selectionBox.style.left = (rect.left + scrollLeft) + 'px';
+    selectionBox.style.width = rect.width + 'px';
+    selectionBox.style.height = rect.height + 'px';
+
+    resizeHandle.style.top = (rect.bottom + scrollTop - 10) + 'px';
+    resizeHandle.style.left = (rect.right + scrollLeft - 10) + 'px';
+
+    deleteBtn.style.top = (rect.top + scrollTop - 40) + 'px';
+    deleteBtn.style.left = (rect.left + scrollLeft + rect.width / 2) + 'px';
+}
+
+function deleteSelectedImage(e) {
+    if(e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+    if (currentSelectedImg) {
+        currentSelectedImg.remove();
+        hideImageSelection();
+        debouncedSave();
+    }
+}
+
+let isResizing = false;
+let startX, startWidth;
+
+function startResize(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    isResizing = true;
+    
+    const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+    startX = clientX;
+    startWidth = currentSelectedImg.clientWidth;
+
+    document.addEventListener('mousemove', resizing);
+    document.addEventListener('touchmove', resizing, {passive: false});
+    document.addEventListener('mouseup', stopResize);
+    document.addEventListener('touchend', stopResize);
+}
+
+function resizing(e) {
+    if (!isResizing || !currentSelectedImg) return;
+    
+    const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+    const dx = clientX - startX;
+    const newWidth = startWidth + dx;
+
+    const containerWidth = document.getElementById('editor-body').clientWidth;
+    if (newWidth > 50 && newWidth <= containerWidth) {
+        currentSelectedImg.style.width = newWidth + 'px';
+        currentSelectedImg.style.height = 'auto'; 
+        updateSelectionBox(); 
+    }
+}
+
+function stopResize() {
+    isResizing = false;
+    document.removeEventListener('mousemove', resizing);
+    document.removeEventListener('touchmove', resizing);
+    document.removeEventListener('mouseup', stopResize);
+    document.removeEventListener('touchend', stopResize);
+    debouncedSave();
 }
 
 export function makeBookEditButton() {
@@ -79,6 +224,7 @@ export function openEditor(isEdit, entryData) {
     }
 
     makeBookEditButton();
+    setupImageHandling(); 
     
     const catName = state.allCategories.find(c => c.id === state.currentCategory)?.name || '기록';
     const displayCat = document.getElementById('display-category');
@@ -96,7 +242,6 @@ export function openEditor(isEdit, entryData) {
         editSubtitle.value = entryData.subtitle || ''; 
         
         editBody.innerHTML = entryData.body || ''; 
-        // [중요] 열 때 링크 변환
         linkifyContents(editBody);
 
         applyFontStyle(entryData.fontFamily || 'Pretendard', entryData.fontSize || 16); 
@@ -149,8 +294,8 @@ export function toggleBookEditing() {
         editTitle.readOnly = true;
         editSubtitle.readOnly = true;
         editBody.contentEditable = "false";
+        hideImageSelection(); 
 
-        // [중요] 편집 끝날 때 다시 링크 변환
         linkifyContents(editBody);
 
         if(editorToolbar) {
@@ -210,12 +355,13 @@ export function toggleViewMode(mode) {
     if(btnReadOnly) btnReadOnly.classList.remove('active');
     if(btnBookMode) btnBookMode.classList.remove('active');
     
+    hideImageSelection();
+
     if (mode === 'readOnly') {
         editTitle.readOnly = true;
         editSubtitle.readOnly = true;
         editBody.contentEditable = "false";
         
-        // [중요] 읽기 전용 진입 시 링크 변환
         linkifyContents(editBody);
         
         writeModal.classList.add('mode-read-only');
@@ -228,7 +374,6 @@ export function toggleViewMode(mode) {
         editSubtitle.readOnly = true;
         editBody.contentEditable = "false";
         
-        // [중요] 책 모드 진입 시 링크 변환
         linkifyContents(editBody);
         
         writeModal.classList.add('mode-book');
@@ -320,18 +465,24 @@ export function changeGlobalFontSize(delta) {
     debouncedSave();
 }
 
+// [수정] 페이지 넘김 단순화 (애니메이션 제거)
 export function turnPage(direction) { 
     if (state.currentViewMode !== 'book') return; 
     const container = document.getElementById('editor-container');
-    const pageWidth = container.clientWidth + 80; 
+    
+    // CSS에서 100vw로 맞췄으므로, 화면 너비가 곧 한 페이지 너비
+    const pageWidth = window.innerWidth;
+    
     const currentScroll = container.scrollLeft; 
     
+    // 현재 스크롤 위치에서 가장 가까운 페이지 인덱스 계산
     const currentPageIndex = Math.round(currentScroll / pageWidth);
     const nextPageIndex = currentPageIndex + direction;
     const newScroll = nextPageIndex * pageWidth;
     
-    container.scrollTo({ left: newScroll, behavior: 'smooth' }); 
-    setTimeout(updateBookNav, 300); 
+    // behavior: 'auto' (즉시 이동)
+    container.scrollTo({ left: newScroll, behavior: 'auto' }); 
+    setTimeout(updateBookNav, 50); 
 }
 
 export function updateBookNav() { 
@@ -344,13 +495,16 @@ export function updateBookNav() {
     const scrollLeft = container.scrollLeft; 
     const scrollWidth = container.scrollWidth; 
     const clientWidth = container.clientWidth; 
-    const effectivePageWidth = clientWidth + 80;
+    
+    // 여기서도 window.innerWidth를 기준으로 페이지 계산
+    const pageWidth = window.innerWidth;
 
     if (scrollLeft > 10) bookNavLeft.classList.remove('hidden'); else bookNavLeft.classList.add('hidden'); 
     if (scrollLeft + clientWidth < scrollWidth - 10) bookNavRight.classList.remove('hidden'); else bookNavRight.classList.add('hidden'); 
     
-    const currentPage = Math.round(scrollLeft / effectivePageWidth) + 1; 
-    const totalPages = Math.ceil(scrollWidth / effectivePageWidth) || 1; 
+    // 현재 페이지 번호 계산
+    const currentPage = Math.round(scrollLeft / pageWidth) + 1; 
+    const totalPages = Math.ceil(scrollWidth / pageWidth) || 1; 
     
     pageIndicator.innerText = `${currentPage} / ${totalPages}`; 
     pageIndicator.classList.remove('hidden'); 
@@ -374,6 +528,17 @@ export function insertSticker(emoji) {
         document.execCommand('insertText', false, emoji); 
     } 
     debouncedSave();
+}
+
+export function insertImage(src) {
+    const editBody = document.getElementById('editor-body');
+    const target = state.lastFocusedEdit || editBody;
+    
+    if (target === editBody) {
+        target.focus();
+        document.execCommand('insertImage', false, src);
+        debouncedSave();
+    }
 }
 
 function debouncedSave() {

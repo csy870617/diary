@@ -1,9 +1,9 @@
 import { state, loadCategoriesFromLocal } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
 import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameCategoryAction, deleteCategoryAction, addNewCategory } from './ui.js';
-import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, makeBookEditButton } from './editor.js';
+import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, makeBookEditButton, insertImage } from './editor.js';
 import { setupAuthListeners } from './auth.js';
-import { initGoogleDrive, saveToDrive, syncFromDrive } from './drive.js'; // syncFromDrive 추가
+import { initGoogleDrive, saveToDrive, syncFromDrive } from './drive.js';
 
 window.addNewCategory = addNewCategory;
 window.restoreEntry = restoreEntry;
@@ -15,17 +15,13 @@ window.insertSticker = insertSticker;
 const stickers = [ '✝️','🙏','📖','🕊️','🕯️','💒','🍞','🍷','🩸','🔥','☁️','☀️','🌙','⭐','✨','🌧️','🌈','❄️','🌿','🌷','🌻','🍂','🌱','🌲','🕊️','🦋','🐾','🧸','🎀','🎈','🎁','🔔','💡','🗝️','📝','📌','📎','✂️','🖍️','🖌️','💌','📅','☕','🍵','🥪','🍎','🤍','💛','🧡','❤️','💜','💙','💚','🤎','🖤','😊','😭','🥰','🤔','💪' ];
 
 function init() {
-    // 1. 로컬 데이터 로드 (오프라인/비로그인 대응)
     loadCategoriesFromLocal(); 
     loadDataFromLocal();
     checkOldTrash();
-    
-    // 2. 화면 렌더링
     renderTabs();
     state.isLoading = false;
     renderEntries();
 
-    // 3. 구글 드라이브 연결 및 로그인 체크
     initGoogleDrive((isLoggedIn) => {
         updateAuthUI(isLoggedIn);
         if (isLoggedIn) {
@@ -34,7 +30,6 @@ function init() {
         }
     });
 
-    // 4. [추가] 네트워크 상태 감지 (오프라인 -> 온라인 자동 동기화)
     window.addEventListener('online', () => {
         console.log("인터넷 연결됨. 자동 동기화 시도...");
         const refreshBtn = document.getElementById('refresh-btn');
@@ -50,7 +45,8 @@ function init() {
     renderStickers();
     makeBookEditButton();
     
-    makeDraggable(document.getElementById('sticker-palette'));
+    // [수정] 이모티콘 팔레트 드래그 코드 제거됨
+    // makeDraggable(document.getElementById('sticker-palette'));
     makeDraggable(document.getElementById('color-palette-popup'), document.querySelector('.palette-header'));
 }
 
@@ -161,18 +157,38 @@ function setupListeners() {
         });
     }
 
-    window.addEventListener('popstate', (event) => {
+    window.addEventListener('popstate', async (event) => {
+        const writeModal = document.getElementById('write-modal');
+        if (writeModal && !writeModal.classList.contains('hidden')) {
+             await saveEntry();
+        }
+
         if (!event.state || event.state.modal !== 'open') {
             closeAllModals(false); 
         }
     });
+
+    const editorBody = document.getElementById('editor-body');
+    if (editorBody) {
+        editorBody.addEventListener('dragover', (e) => {
+            e.preventDefault();
+        });
+        
+        editorBody.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const files = e.dataTransfer.files;
+            if (files.length > 0 && files[0].type.startsWith('image/')) {
+                processImage(files[0]);
+            }
+        });
+    }
 
     window.addEventListener('click', (e) => {
         const link = e.target.closest('#editor-body a');
         const editBody = document.getElementById('editor-body');
         
         if (link && link.href) {
-            if (editBody && !editBody.isContentEditable) {
+            if (editBody && editBody.getAttribute('contenteditable') === "false") {
                 e.preventDefault(); 
                 e.stopPropagation();
                 const win = window.open(link.href, '_blank');
@@ -180,7 +196,6 @@ function setupListeners() {
                 return;
             }
         }
-        
         const contextMenu = document.getElementById('context-menu');
         const catContextMenu = document.getElementById('category-context-menu');
         const colorPalettePopup = document.getElementById('color-palette-popup');
@@ -235,9 +250,8 @@ function setupUIListeners() {
     if(refreshBtn) {
         refreshBtn.addEventListener('click', async () => {
             refreshBtn.classList.add('rotating');
-            await syncFromDrive(() => {
-                refreshBtn.classList.remove('rotating');
-            });
+            await saveToDrive();
+            refreshBtn.classList.remove('rotating');
         });
     }
 
@@ -272,6 +286,26 @@ function setupUIListeners() {
         });
     }
     
+    const imageBtn = document.getElementById('toolbar-image-btn');
+    const imageInput = document.getElementById('image-upload-input');
+    
+    if (imageBtn && imageInput) {
+        imageBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            const editBody = document.getElementById('editor-body');
+            if (editBody) editBody.focus();
+            imageInput.click();
+        });
+
+        imageInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                processImage(file);
+            }
+            e.target.value = '';
+        });
+    }
+
     const toolbarToggleBtn = document.getElementById('toolbar-toggle-btn');
     if(toolbarToggleBtn) {
         toolbarToggleBtn.addEventListener('click', () => {
@@ -495,6 +529,34 @@ function openColorPalette() {
 function renderStickers() { 
     const stickerGrid = document.getElementById('sticker-grid');
     if(stickerGrid) stickerGrid.innerHTML = stickers.map(s => `<span class="sticker-item" onmousedown="event.preventDefault(); insertSticker('${s}')">${s}</span>`).join(''); 
+}
+
+function processImage(file) {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+            const maxWidth = 800;
+            let width = img.width;
+            let height = img.height;
+
+            if (width > maxWidth) {
+                height = (height * maxWidth) / width;
+                width = maxWidth;
+            }
+
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+            insertImage(dataUrl);
+        };
+        img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
 }
 
 if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', init); } else { init(); }

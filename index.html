@@ -6,7 +6,7 @@
     <meta name="referrer" content="origin"> 
     
     <title>신앙일지 | Faith Log</title>
-    <link rel="stylesheet" href="style.css?v=2.0">
+    <link rel="stylesheet" href="style.css?v=2.1">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
@@ -104,6 +104,10 @@
                 <div class="tool-group">
                     <button class="tool-btn" id="toolbar-color-btn"><i class="ph ph-palette" style="color:#F59E0B;"></i></button>
                     <button class="tool-btn" id="toolbar-hilite-btn"><i class="ph ph-highlighter" style="color:#FDE047;"></i></button>
+                    
+                    <button class="tool-btn" id="toolbar-image-btn"><i class="ph ph-image"></i></button>
+                    <input type="file" id="image-upload-input" accept="image/*" style="display: none;">
+                    
                     <button class="tool-btn" id="sticker-btn"><i class="ph ph-smiley"></i></button>
                 </div>
                 <div class="toolbar-divider"></div>
@@ -214,6 +218,6 @@
         </div>
     </div>
 
-    <script type="module" src="script.js?v=2.0"></script>
+    <script type="module" src="script.js?v=2.1"></script>
 </body>
 </html>
