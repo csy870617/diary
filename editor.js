@@ -34,10 +34,14 @@ function linkifyContents(element) {
     });
 }
 
+// ============================================
+// 이미지 조작 로직
+// ============================================
 let currentSelectedImg = null;
 let selectionBox = null;
 let resizeHandle = null;
 let deleteBtn = null;
+let resizeBtnGroup = null;
 
 function setupImageHandling() {
     const editorBody = document.getElementById('editor-body');
@@ -80,6 +84,7 @@ function hideImageSelection() {
     if (selectionBox) selectionBox.style.display = 'none';
     if (resizeHandle) resizeHandle.style.display = 'none';
     if (deleteBtn) deleteBtn.style.display = 'none';
+    if (resizeBtnGroup) resizeBtnGroup.style.display = 'none';
 }
 
 function createSelectionUI() {
@@ -91,7 +96,6 @@ function createSelectionUI() {
         resizeHandle = document.createElement('div');
         resizeHandle.className = 'resize-handle se';
         document.body.appendChild(resizeHandle);
-        
         resizeHandle.addEventListener('mousedown', startResize);
         resizeHandle.addEventListener('touchstart', startResize, {passive: false});
 
@@ -99,13 +103,34 @@ function createSelectionUI() {
         deleteBtn.className = 'img-delete-btn';
         deleteBtn.innerHTML = '<i class="ph ph-trash"></i> 삭제';
         document.body.appendChild(deleteBtn);
-        
         deleteBtn.addEventListener('click', deleteSelectedImage);
+
+        resizeBtnGroup = document.createElement('div');
+        resizeBtnGroup.className = 'img-resize-group';
+        
+        const sizes = [25, 50, 75, 100];
+        sizes.forEach(size => {
+            const btn = document.createElement('button');
+            btn.className = 'img-resize-btn';
+            btn.innerText = size + '%';
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                if (currentSelectedImg) {
+                    currentSelectedImg.style.width = size + '%';
+                    currentSelectedImg.style.height = 'auto';
+                    updateSelectionBox();
+                    debouncedSave();
+                }
+            };
+            resizeBtnGroup.appendChild(btn);
+        });
+        document.body.appendChild(resizeBtnGroup);
     }
 
     selectionBox.style.display = 'block';
     resizeHandle.style.display = 'block';
     deleteBtn.style.display = 'flex';
+    resizeBtnGroup.style.display = 'flex';
 }
 
 function updateSelectionBox() {
@@ -125,6 +150,9 @@ function updateSelectionBox() {
 
     deleteBtn.style.top = (rect.top + scrollTop - 40) + 'px';
     deleteBtn.style.left = (rect.left + scrollLeft + rect.width / 2) + 'px';
+    
+    resizeBtnGroup.style.top = (rect.bottom + scrollTop + 10) + 'px';
+    resizeBtnGroup.style.left = (rect.left + scrollLeft + rect.width / 2) + 'px';
 }
 
 function deleteSelectedImage(e) {
@@ -180,6 +208,7 @@ function stopResize() {
     document.removeEventListener('touchend', stopResize);
     debouncedSave();
 }
+// ============================================
 
 export function makeBookEditButton() {
     const btnBookMode = document.getElementById('btn-bookmode');
@@ -257,6 +286,7 @@ export function openEditor(isEdit, entryData) {
     toggleViewMode('default', false);
 }
 
+// [수정] 책 모드 -> 편집 전환 시 툴바 접힘 유지
 export function toggleBookEditing() {
     if(state.currentViewMode !== 'book') return;
 
@@ -266,22 +296,29 @@ export function toggleBookEditing() {
     const editorToolbar = document.getElementById('editor-toolbar');
     const toolbarToggleBtn = document.getElementById('toolbar-toggle-btn');
     const btn = window.btnBookEdit || document.getElementById('btn-book-edit');
+    const container = document.getElementById('editor-container');
 
     const isEditable = editBody.isContentEditable;
 
     if (!isEditable) {
+        const pageWidth = window.innerWidth;
+        const currentScroll = container.scrollLeft;
+        const totalScrollWidth = container.scrollWidth;
+        const scrollRatio = totalScrollWidth > 0 ? currentScroll / (totalScrollWidth - pageWidth || 1) : 0;
+
         editTitle.readOnly = false;
         editSubtitle.readOnly = false;
         editBody.contentEditable = "true";
-        editBody.focus();
+        editBody.focus({ preventScroll: true });
 
         if(editorToolbar) {
             editorToolbar.style.transition = ''; 
-            editorToolbar.classList.remove('collapsed');
+            // [수정] 열지 않고 접힌 상태 유지 (add collapsed)
+            editorToolbar.classList.add('collapsed');
             const icon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
             if(icon) {
-                icon.classList.remove('ph-caret-down');
-                icon.classList.add('ph-caret-up');
+                icon.classList.remove('ph-caret-up');
+                icon.classList.add('ph-caret-down'); // 아이콘도 접힘 상태로
             }
         }
 
@@ -289,6 +326,14 @@ export function toggleBookEditing() {
             btn.innerHTML = '<i class="ph ph-check" style="font-size: 18px; color: #10B981;"></i>';
             btn.title = "편집 완료";
         }
+        
+        setTimeout(() => {
+            const writeModal = document.getElementById('write-modal');
+            const totalHeight = writeModal.scrollHeight - writeModal.clientHeight;
+            if (totalHeight > 0) {
+                writeModal.scrollTo({ top: totalHeight * scrollRatio, behavior: 'auto' });
+            }
+        }, 50);
 
     } else {
         editTitle.readOnly = true;
@@ -465,22 +510,16 @@ export function changeGlobalFontSize(delta) {
     debouncedSave();
 }
 
-// [수정] 페이지 넘김 단순화 (애니메이션 제거)
 export function turnPage(direction) { 
     if (state.currentViewMode !== 'book') return; 
     const container = document.getElementById('editor-container');
-    
-    // CSS에서 100vw로 맞췄으므로, 화면 너비가 곧 한 페이지 너비
     const pageWidth = window.innerWidth;
-    
     const currentScroll = container.scrollLeft; 
     
-    // 현재 스크롤 위치에서 가장 가까운 페이지 인덱스 계산
     const currentPageIndex = Math.round(currentScroll / pageWidth);
     const nextPageIndex = currentPageIndex + direction;
     const newScroll = nextPageIndex * pageWidth;
     
-    // behavior: 'auto' (즉시 이동)
     container.scrollTo({ left: newScroll, behavior: 'auto' }); 
     setTimeout(updateBookNav, 50); 
 }
@@ -494,15 +533,11 @@ export function updateBookNav() {
 
     const scrollLeft = container.scrollLeft; 
     const scrollWidth = container.scrollWidth; 
-    const clientWidth = container.clientWidth; 
-    
-    // 여기서도 window.innerWidth를 기준으로 페이지 계산
     const pageWidth = window.innerWidth;
 
     if (scrollLeft > 10) bookNavLeft.classList.remove('hidden'); else bookNavLeft.classList.add('hidden'); 
-    if (scrollLeft + clientWidth < scrollWidth - 10) bookNavRight.classList.remove('hidden'); else bookNavRight.classList.add('hidden'); 
+    if (scrollLeft + pageWidth < scrollWidth - 10) bookNavRight.classList.remove('hidden'); else bookNavRight.classList.add('hidden'); 
     
-    // 현재 페이지 번호 계산
     const currentPage = Math.round(scrollLeft / pageWidth) + 1; 
     const totalPages = Math.ceil(scrollWidth / pageWidth) || 1; 
     

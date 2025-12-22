@@ -77,10 +77,42 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .font-select { border: 1px solid var(--gray-200); border-radius: 6px; padding: 6px; font-size: 13px; outline: none; background: white; width: 70px; }
 .font-size-controls { display: flex; gap: 4px; }
 
-.sticker-palette { position: fixed; top: 110px; bottom: auto; left: 50%; transform: translateX(-50%); background: white; border: 1px solid var(--gray-200); padding: 15px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); width: 90%; max-width: 360px; z-index: 2003; max-height: 250px; overflow-y: auto; }
+.sticker-palette { 
+    position: fixed; 
+    top: 110px; 
+    bottom: auto; 
+    left: 50%; 
+    transform: translateX(-50%); 
+    background: white; 
+    border: 1px solid var(--gray-200); 
+    padding: 10px; 
+    border-radius: 12px; 
+    box-shadow: 0 4px 15px rgba(0,0,0,0.15); 
+    width: fit-content; 
+    max-width: 90%; 
+    z-index: 2003; 
+    max-height: 250px; 
+    overflow-y: auto; 
+}
 .sticker-palette.hidden { display: none; }
-.sticker-grid { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-start; }
-.sticker-item { font-size: 26px; cursor: pointer; padding: 4px; transition: transform 0.2s; }
+
+.sticker-grid { 
+    display: grid; 
+    grid-template-columns: repeat(7, 1fr); 
+    gap: 2px; 
+    justify-items: center;
+}
+.sticker-item { 
+    font-size: 24px; 
+    cursor: pointer; 
+    padding: 2px; 
+    transition: transform 0.2s; 
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+}
+.sticker-item:hover { background-color: var(--gray-100); }
 
 .palette-header { cursor: move; width: 100%; display: flex; justify-content: center; padding-bottom: 8px; border-bottom: 1px solid #f0f0f0; }
 .color-palette-popup { position: fixed; top: 110px !important; bottom: auto; left: 50% !important; transform: translateX(-50%); background: white; border: 1px solid var(--gray-200); padding: 16px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); z-index: 2006; width: 250px; display: flex; flex-direction: column; gap: 10px; }
@@ -158,26 +190,62 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .resize-handle { position: absolute; width: 20px; height: 20px; background-color: white; border: 2px solid var(--selection-color); border-radius: 50%; pointer-events: auto; z-index: 3001; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
 .resize-handle.se { bottom: -10px; right: -10px; cursor: nwse-resize; }
 
+/* [수정] 박스 및 버튼 높이 강제 고정 */
+.img-resize-group {
+    position: absolute;
+    bottom: -50px; 
+    left: 50%;
+    transform: translateX(-50%);
+    display: inline-flex; /* 콘텐츠 크기만큼만 */
+    flex-direction: row; /* 가로 정렬 강제 */
+    align-items: center; /* 세로 중앙 정렬 */
+    justify-content: center;
+    gap: 6px; 
+    z-index: 3002;
+    background: white;
+    padding: 0 6px; /* 위아래 패딩 0 */
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    border: 1px solid var(--gray-200);
+    height: 38px; /* 박스 높이 고정 */
+    box-sizing: border-box;
+    white-space: nowrap;
+}
+
+.img-resize-btn {
+    appearance: none;
+    -webkit-appearance: none;
+    border: 1px solid var(--gray-200);
+    background: white;
+    font-size: 12px;
+    font-family: var(--text-sans);
+    padding: 0 8px; /* 좌우 패딩만 */
+    margin: 0;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--gray-900);
+    line-height: 28px; /* 버튼 높이와 일치시켜 텍스트 수직 정렬 */
+    height: 28px; /* 버튼 높이 고정 */
+    min-width: 36px;
+    text-align: center;
+    display: inline-block;
+}
+.img-resize-btn:hover { background: var(--gray-100); }
+
 .img-delete-btn { position: absolute; top: -40px; left: 50%; transform: translateX(-50%); background: var(--danger); color: white; border: none; border-radius: 20px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; pointer-events: auto; box-shadow: 0 2px 6px rgba(0,0,0,0.2); display: flex; align-items: center; gap: 4px; white-space: nowrap; z-index: 3002; }
 .img-delete-btn:hover { background: #DC2626; }
 
 .editor-body a { pointer-events: auto !important; cursor: pointer !important; color: #2563EB; text-decoration: underline; }
 
-/* [핵심 수정] 책 모드 레이아웃 고정 */
 #write-modal.mode-book { overflow: hidden; }
 #write-modal.mode-book .editor-container { 
     margin: 0; 
     max-width: none; 
     width: 100vw; 
     height: calc(100vh - 60px); 
-    
-    /* PC 기준: 패딩 40px * 2 = 80px */
     padding: 20px 40px; 
-    /* Gap을 패딩 합계와 맞춤 */
-    column-gap: 80px; 
-    /* 화면 너비에서 갭만큼 빼서 한 페이지가 100vw가 되도록 함 */
     column-width: calc(100vw - 80px); 
-    
+    column-gap: 80px; 
     column-fill: auto; 
     overflow-x: hidden; 
     overflow-y: hidden; 
@@ -231,9 +299,8 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     .editor-container { padding: 20px 20px 100px; }
     .full-screen-modal { padding-top: var(--safe-top); padding-bottom: var(--safe-bottom); }
     
-    /* [수정] 모바일 책 모드 레이아웃 고정 */
     #write-modal.mode-book .editor-container { 
-        padding: 20px 20px; /* 20+20=40px */
+        padding: 20px 20px; 
         column-gap: 40px;
         column-width: calc(100vw - 40px);
     }
