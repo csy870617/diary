@@ -103,32 +103,26 @@ export async function syncFromDrive(callback) {
             state.entries = merged;
             localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
 
-            // 2. [핵심 수정] 카테고리 동기화 로직 강화
+            // 2. 카테고리 동기화
             if (cloudCategories && cloudOrder) {
-                // 시간이 없으면 0으로 처리해서 숫자 비교가 가능하게 함
-                const localTimeStr = state.categoryUpdatedAt || new Date(0).toISOString();
-                const serverTimeStr = cloudCatTime || new Date(0).toISOString();
-                
-                const localTime = new Date(localTimeStr).getTime();
-                const serverTime = new Date(serverTimeStr).getTime();
+                const localTime = new Date(state.categoryUpdatedAt || 0).getTime();
+                const serverTime = new Date(cloudCatTime || 0).getTime();
 
-                // 서버가 더 최신이거나, 로컬이 초기 상태(0)라면 서버 데이터 적용
-                if (serverTime > localTime || localTime === 0) {
+                // 서버가 더 최신이면 내 것을 업데이트
+                if (serverTime > localTime) {
                     state.allCategories = cloudCategories;
                     state.categoryOrder = cloudOrder;
-                    state.categoryUpdatedAt = serverTimeStr;
+                    state.categoryUpdatedAt = cloudCatTime;
                     
                     saveCategoriesToLocal(); 
-                    renderTabs(); // 탭 즉시 갱신
+                    renderTabs();
                     
-                    // 현재 탭이 유효한지 재검사
                     const currentValid = state.allCategories.find(c => c.id === state.currentCategory);
                     if (!currentValid && state.categoryOrder.length > 0) {
                         state.currentCategory = state.categoryOrder[0];
                         renderTabs();
-                        renderEntries();
                     }
-                    console.log("카테고리 동기화 완료 (서버 -> 로컬)");
+                    console.log("카테고리 동기화: 서버 버전 적용");
                 }
             }
 
@@ -143,7 +137,7 @@ export async function syncFromDrive(callback) {
     }
 }
 
-// 5. 저장 (업로드)
+// 5. 저장 (업로드) - [문제 해결의 핵심 로직]
 export async function saveToDrive() {
     if (!state.currentUser) return;
 
@@ -152,35 +146,65 @@ export async function saveToDrive() {
         const fileId = await findDbFile(folderId);
         
         let entriesToSave = state.entries;
+        
+        // 최종적으로 저장할 카테고리 데이터 (기본은 내 것)
+        let finalCategories = state.allCategories;
+        let finalOrder = state.categoryOrder;
+        let finalCatTime = state.categoryUpdatedAt || new Date(0).toISOString();
 
-        // 저장 전 클라우드 데이터 확인 (충돌 방지)
+        // 저장하기 전에 먼저 클라우드 상태를 확인 (충돌 방지)
         if (fileId) {
             try {
                 const cloudRawData = await downloadFile(fileId);
+                
+                // 1. 글 데이터 병합 (기존 로직)
                 let cloudEntries = [];
-                // 구버전/신버전 호환 처리
                 if (Array.isArray(cloudRawData)) {
                     cloudEntries = cloudRawData;
                 } else if (cloudRawData && cloudRawData.entries) {
                     cloudEntries = cloudRawData.entries;
                 }
-                
                 if (Array.isArray(cloudEntries)) {
                     entriesToSave = mergeData(cloudEntries, state.entries);
                     state.entries = entriesToSave;
                     localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
                     renderEntries();
                 }
+
+                // 2. [핵심] 카테고리 상태 확인
+                // 만약 클라우드에 더 최신 카테고리 정보가 있다면?
+                // 내 폰의 카테고리 정보로 덮어쓰지 말고, 클라우드 정보를 유지해야 함!
+                if (cloudRawData && cloudRawData.categories && cloudRawData.categoryUpdatedAt) {
+                    const serverTime = new Date(cloudRawData.categoryUpdatedAt).getTime();
+                    const localTime = new Date(state.categoryUpdatedAt || 0).getTime();
+
+                    if (serverTime > localTime) {
+                        console.log("저장 중 발견: 서버 카테고리가 더 최신임. 서버 데이터 유지.");
+                        // 저장할 데이터 패키지에 서버의 카테고리를 담음
+                        finalCategories = cloudRawData.categories;
+                        finalOrder = cloudRawData.categoryOrder;
+                        finalCatTime = cloudRawData.categoryUpdatedAt;
+
+                        // 내 기기의 상태도 최신으로 업데이트 (화면 갱신)
+                        state.allCategories = finalCategories;
+                        state.categoryOrder = finalOrder;
+                        state.categoryUpdatedAt = finalCatTime;
+                        saveCategoriesToLocal();
+                        renderTabs();
+                    }
+                }
+
             } catch (e) {
                 console.warn("병합 전 읽기 실패", e);
             }
         }
 
+        // 완성된 데이터 패키지
         const fullData = {
             entries: entriesToSave,
-            categories: state.allCategories,
-            categoryOrder: state.categoryOrder,
-            categoryUpdatedAt: state.categoryUpdatedAt || new Date().toISOString(),
+            categories: finalCategories,      // 최신 승자 카테고리
+            categoryOrder: finalOrder,        // 최신 승자 순서
+            categoryUpdatedAt: finalCatTime,  // 최신 승자 시간
             lastUpdated: new Date().toISOString()
         };
 
@@ -208,7 +232,7 @@ export async function saveToDrive() {
             body: multipartRequestBody
         });
         
-        console.log("저장 완료");
+        console.log("저장 완료 (안전한 카테고리 병합)");
 
     } catch (err) {
         handleDriveError(err);
