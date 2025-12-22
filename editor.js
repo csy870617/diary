@@ -35,7 +35,7 @@ function linkifyContents(element) {
 }
 
 // ============================================
-// 이미지 조작 로직
+// [핵심] 이미지 조작 로직 (버튼, 선택, 삭제)
 // ============================================
 let currentSelectedImg = null;
 let selectionBox = null;
@@ -114,7 +114,7 @@ function createSelectionUI() {
             btn.className = 'img-resize-btn';
             btn.innerText = size + '%';
             btn.onclick = (e) => {
-                e.stopPropagation();
+                e.stopPropagation(); 
                 if (currentSelectedImg) {
                     currentSelectedImg.style.width = size + '%';
                     currentSelectedImg.style.height = 'auto';
@@ -286,7 +286,7 @@ export function openEditor(isEdit, entryData) {
     toggleViewMode('default', false);
 }
 
-// [수정] 책 모드 -> 편집 전환 시 툴바 접힘 유지
+// [핵심 수정] 책 모드 -> 편집 전환 시 위치 보존 (Anchor Element 방식)
 export function toggleBookEditing() {
     if(state.currentViewMode !== 'book') return;
 
@@ -301,24 +301,37 @@ export function toggleBookEditing() {
     const isEditable = editBody.isContentEditable;
 
     if (!isEditable) {
-        const pageWidth = window.innerWidth;
+        // [Anchor Logic] 현재 화면 중앙에 보이는 실제 요소를 찾음
+        // 가로 중앙, 세로 상단 1/3 지점 (가장 자연스러운 시선 위치)
+        const centerX = window.innerWidth / 2;
+        const centerY = window.innerHeight / 3 + 60; // 헤더 고려
+        
+        let anchorElement = document.elementFromPoint(centerX, centerY);
+        
+        // 찾은 요소가 에디터 내용물인지 확인 (배경이나 컨테이너면 무효)
+        if (anchorElement && !editBody.contains(anchorElement)) {
+            anchorElement = null;
+        }
+
+        // 백업용 비율 계산 (요소를 못 찾았을 경우)
         const currentScroll = container.scrollLeft;
-        const totalScrollWidth = container.scrollWidth;
-        const scrollRatio = totalScrollWidth > 0 ? currentScroll / (totalScrollWidth - pageWidth || 1) : 0;
+        const totalScroll = container.scrollWidth - container.clientWidth;
+        const scrollRatio = totalScroll > 0 ? currentScroll / totalScroll : 0;
 
         editTitle.readOnly = false;
         editSubtitle.readOnly = false;
         editBody.contentEditable = "true";
+        
+        // [중요] preventScroll로 튐 방지
         editBody.focus({ preventScroll: true });
 
         if(editorToolbar) {
             editorToolbar.style.transition = ''; 
-            // [수정] 열지 않고 접힌 상태 유지 (add collapsed)
-            editorToolbar.classList.add('collapsed');
+            editorToolbar.classList.add('collapsed'); // 접힌 상태 유지
             const icon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
             if(icon) {
                 icon.classList.remove('ph-caret-up');
-                icon.classList.add('ph-caret-down'); // 아이콘도 접힘 상태로
+                icon.classList.add('ph-caret-down');
             }
         }
 
@@ -327,13 +340,20 @@ export function toggleBookEditing() {
             btn.title = "편집 완료";
         }
         
+        // [이동 실행] 모바일 렌더링 시간을 고려해 150ms 딜레이
         setTimeout(() => {
-            const writeModal = document.getElementById('write-modal');
-            const totalHeight = writeModal.scrollHeight - writeModal.clientHeight;
-            if (totalHeight > 0) {
-                writeModal.scrollTo({ top: totalHeight * scrollRatio, behavior: 'auto' });
+            if (anchorElement && anchorElement.scrollIntoView) {
+                // 찾은 요소를 화면 중앙으로 가져옴
+                anchorElement.scrollIntoView({ block: 'center', behavior: 'auto' });
+            } else {
+                // 못 찾았으면 비율대로 이동
+                const writeModal = document.getElementById('write-modal');
+                const totalHeight = writeModal.scrollHeight - writeModal.clientHeight;
+                if (totalHeight > 0) {
+                    writeModal.scrollTo({ top: totalHeight * scrollRatio, behavior: 'auto' });
+                }
             }
-        }, 50);
+        }, 150);
 
     } else {
         editTitle.readOnly = true;
