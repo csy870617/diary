@@ -54,7 +54,6 @@ export function renderEntries(keyword = '') {
     });
 }
 
-// [핵심 수정] 탭 렌더링 및 자동 선택 로직
 export function renderTabs() {
     const tabContainer = getEl('tab-container');
     if(!tabContainer) return;
@@ -64,20 +63,20 @@ export function renderTabs() {
     state.categoryOrder.forEach(id => { const found = state.allCategories.find(c => c.id === id); if(found) sortedCats.push(found); });
     state.allCategories.forEach(c => { if(!state.categoryOrder.includes(c.id)) { sortedCats.push(c); state.categoryOrder.push(c.id); } });
 
-    // [중요] 현재 선택된 카테고리가 유효한지 검사
+    // [중요] 탭 자동 선택 로직
     const currentExists = sortedCats.find(c => c.id === state.currentCategory);
     
-    // 만약 현재 카테고리가 삭제되었거나 동기화로 인해 변경되어 목록에 없다면?
     if (!currentExists && sortedCats.length > 0) {
-        // 첫 번째 카테고리를 강제로 선택
         state.currentCategory = sortedCats[0].id;
-        // 그리고 글 목록을 다시 그려줌 (재귀 호출 방지를 위해 renderEntries만 호출)
-        setTimeout(renderEntries, 0); 
+        // 재귀 호출 대신 즉시 실행
+        setTimeout(() => {
+            renderEntries();
+            // 변경된 선택 상태를 저장해둠 (선택적)
+        }, 0);
     }
 
     sortedCats.forEach(cat => {
         const btn = document.createElement('button');
-        // 현재 선택된 카테고리에 active 클래스 부여
         btn.className = `tab-btn ${state.currentCategory === cat.id ? 'active' : ''}`;
         btn.dataset.id = cat.id; 
         btn.innerHTML = `<span>${cat.name}</span>`;

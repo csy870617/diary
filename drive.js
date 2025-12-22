@@ -89,7 +89,6 @@ export async function syncFromDrive(callback) {
             let cloudOrder = null;
             let cloudCatTime = null;
 
-            // 데이터 구조 확인 (구버전 Array vs 신버전 Object)
             if (Array.isArray(cloudRawData)) {
                 cloudEntries = cloudRawData;
             } else if (cloudRawData && cloudRawData.entries) {
@@ -104,24 +103,37 @@ export async function syncFromDrive(callback) {
             state.entries = merged;
             localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
 
-            // 2. 카테고리 동기화 (시간 비교)
+            // 2. [핵심 수정] 카테고리 동기화 로직 강화
             if (cloudCategories && cloudOrder) {
-                const localTime = new Date(state.categoryUpdatedAt || 0).getTime();
-                const serverTime = new Date(cloudCatTime || 0).getTime();
+                // 시간이 없으면 0으로 처리해서 숫자 비교가 가능하게 함
+                const localTimeStr = state.categoryUpdatedAt || new Date(0).toISOString();
+                const serverTimeStr = cloudCatTime || new Date(0).toISOString();
+                
+                const localTime = new Date(localTimeStr).getTime();
+                const serverTime = new Date(serverTimeStr).getTime();
 
-                // 서버가 더 최신이면 덮어씀
-                if (serverTime > localTime) {
+                // 서버가 더 최신이거나, 로컬이 초기 상태(0)라면 서버 데이터 적용
+                if (serverTime > localTime || localTime === 0) {
                     state.allCategories = cloudCategories;
                     state.categoryOrder = cloudOrder;
-                    state.categoryUpdatedAt = cloudCatTime;
-                    saveCategoriesToLocal(); // 로컬에도 저장
-                    renderTabs(); // 탭 갱신
-                    console.log("카테고리 업데이트 완료 (서버 > 로컬)");
+                    state.categoryUpdatedAt = serverTimeStr;
+                    
+                    saveCategoriesToLocal(); 
+                    renderTabs(); // 탭 즉시 갱신
+                    
+                    // 현재 탭이 유효한지 재검사
+                    const currentValid = state.allCategories.find(c => c.id === state.currentCategory);
+                    if (!currentValid && state.categoryOrder.length > 0) {
+                        state.currentCategory = state.categoryOrder[0];
+                        renderTabs();
+                        renderEntries();
+                    }
+                    console.log("카테고리 동기화 완료 (서버 -> 로컬)");
                 }
             }
 
             renderEntries(); 
-            console.log("동기화 완료");
+            console.log("전체 동기화 완료");
         } else {
             await saveToDrive(); 
         }
@@ -131,7 +143,7 @@ export async function syncFromDrive(callback) {
     }
 }
 
-// 5. 저장 (업로드) - 카테고리 포함
+// 5. 저장 (업로드)
 export async function saveToDrive() {
     if (!state.currentUser) return;
 
@@ -141,11 +153,12 @@ export async function saveToDrive() {
         
         let entriesToSave = state.entries;
 
-        // 병합 먼저 (데이터 보호)
+        // 저장 전 클라우드 데이터 확인 (충돌 방지)
         if (fileId) {
             try {
                 const cloudRawData = await downloadFile(fileId);
                 let cloudEntries = [];
+                // 구버전/신버전 호환 처리
                 if (Array.isArray(cloudRawData)) {
                     cloudEntries = cloudRawData;
                 } else if (cloudRawData && cloudRawData.entries) {
@@ -163,12 +176,11 @@ export async function saveToDrive() {
             }
         }
 
-        // [핵심] 전체 데이터 패키지 생성
         const fullData = {
             entries: entriesToSave,
-            categories: state.allCategories, // 카테고리 포함
+            categories: state.allCategories,
             categoryOrder: state.categoryOrder,
-            categoryUpdatedAt: state.categoryUpdatedAt || new Date().toISOString(), // 시간 포함
+            categoryUpdatedAt: state.categoryUpdatedAt || new Date().toISOString(),
             lastUpdated: new Date().toISOString()
         };
 
@@ -196,7 +208,7 @@ export async function saveToDrive() {
             body: multipartRequestBody
         });
         
-        console.log("저장 완료 (카테고리 포함)");
+        console.log("저장 완료");
 
     } catch (err) {
         handleDriveError(err);
