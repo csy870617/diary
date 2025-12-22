@@ -63,16 +63,11 @@ export function renderTabs() {
     state.categoryOrder.forEach(id => { const found = state.allCategories.find(c => c.id === id); if(found) sortedCats.push(found); });
     state.allCategories.forEach(c => { if(!state.categoryOrder.includes(c.id)) { sortedCats.push(c); state.categoryOrder.push(c.id); } });
 
-    // [중요] 탭 자동 선택 로직
     const currentExists = sortedCats.find(c => c.id === state.currentCategory);
     
     if (!currentExists && sortedCats.length > 0) {
         state.currentCategory = sortedCats[0].id;
-        // 재귀 호출 대신 즉시 실행
-        setTimeout(() => {
-            renderEntries();
-            // 변경된 선택 상태를 저장해둠 (선택적)
-        }, 0);
+        setTimeout(() => renderEntries(), 0);
     }
 
     sortedCats.forEach(cat => {
@@ -234,6 +229,18 @@ function showCatContextMenu(x, y, id) {
     catContextMenu.classList.remove('hidden');
 }
 
+// [핵심] 시간 충돌 방지를 위한 유틸리티 함수
+// 현재 시간이 마지막 저장 시간보다 작거나 같으면(시계 문제), +1초를 강제해서 '최신'으로 만듭니다.
+function getNextTimestamp() {
+    const now = new Date().getTime();
+    const last = new Date(state.categoryUpdatedAt || 0).getTime();
+    
+    if (now <= last) {
+        return new Date(last + 1000).toISOString();
+    }
+    return new Date().toISOString();
+}
+
 export function addNewCategory() {
     const name = prompt("새 주제 이름");
     if (name) {
@@ -241,7 +248,7 @@ export function addNewCategory() {
         state.allCategories.push({id, name});
         state.categoryOrder.push(id);
         
-        state.categoryUpdatedAt = new Date().toISOString();
+        state.categoryUpdatedAt = getNextTimestamp(); // [수정] 안전한 시간 생성
         
         saveCategoriesToLocal();
         renderTabs();
@@ -258,7 +265,7 @@ export function renameCategoryAction() {
     if (newName && newName.trim() !== "") {
         cat.name = newName.trim();
         
-        state.categoryUpdatedAt = new Date().toISOString();
+        state.categoryUpdatedAt = getNextTimestamp(); // [수정]
         
         saveCategoriesToLocal();
         renderTabs();
@@ -277,7 +284,7 @@ export function deleteCategoryAction() {
         state.categoryOrder = state.categoryOrder.filter(id => id !== state.contextCatId);
         if (state.currentCategory === state.contextCatId) state.currentCategory = state.allCategories[0].id;
         
-        state.categoryUpdatedAt = new Date().toISOString();
+        state.categoryUpdatedAt = getNextTimestamp(); // [수정]
         
         saveCategoriesToLocal();
         renderTabs();
