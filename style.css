@@ -1,8 +1,8 @@
 /* =========================================
-   1. 기본 설정 및 변수
+   1. 기본 설정 및 변수 (Base & Variables)
    ========================================= */
 
-/* ✨ 스크롤바 숨기기 */
+/* ✨ 스크롤바 숨기기 (모든 브라우저) */
 ::-webkit-scrollbar {
     display: none; 
 }
@@ -11,6 +11,7 @@ body {
     scrollbar-width: none; 
 }
 
+/* 로딩 아이콘 애니메이션 */
 @keyframes spin { 
     from { transform: rotate(0deg); } 
     to { transform: rotate(360deg); } 
@@ -44,7 +45,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .layout { width: 100%; max-width: 800px; padding: 0 0 100px; min-height: 100vh; position: relative; }
 
 /* =========================================
-   2. 헤더 및 네비게이션
+   2. 헤더 및 네비게이션 (Header & Nav)
    ========================================= */
 
 .brunch-header { padding: 0 24px; margin-top: 50px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end; position: relative; }
@@ -65,25 +66,8 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .login-btn-header { background: none; border: 1px solid var(--gray-200); color: var(--gray-500); padding: 6px 14px; border-radius: 20px; font-size: 12px; cursor: pointer; font-family: var(--text-sans); font-weight: 500; background: white; z-index: 2; white-space: nowrap; }
 .login-btn-header:hover { border-color: var(--gray-900); color: var(--gray-900); }
 
-.login-msg-wrapper { 
-    position: absolute; 
-    top: -48px; 
-    right: 0; 
-    display: flex; 
-    flex-direction: column; 
-    align-items: flex-end; 
-    font-family: var(--text-sans); 
-    pointer-events: none; 
-    width: max-content; 
-}
-.login-msg-main { 
-    font-size: 11px; 
-    color: var(--accent); 
-    font-weight: 500; 
-    text-shadow: 0 1px 2px rgba(255,255,255,0.8); 
-    text-align: right; 
-    line-height: 1.3;  
-}
+.login-msg-wrapper { position: absolute; top: -48px; right: 0; display: flex; flex-direction: column; align-items: flex-end; font-family: var(--text-sans); pointer-events: none; width: max-content; }
+.login-msg-main { font-size: 11px; color: var(--accent); font-weight: 500; text-shadow: 0 1px 2px rgba(255,255,255,0.8); text-align: right; line-height: 1.3; }
 
 /* 탭 및 컨트롤 */
 .nav-row { padding: 0 24px; display: flex; align-items: center; border-bottom: 1px solid var(--gray-100); margin-bottom: 10px; padding-bottom: 0; gap: 15px; position: relative; }
@@ -105,7 +89,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .add-cat-btn { background: var(--gray-100); border: none; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--gray-500); cursor: pointer; font-size: 14px; margin-left: 5px; flex-shrink: 0; }
 
 /* =========================================
-   3. 에디터 및 툴바
+   3. 에디터 툴바 (Toolbar)
    ========================================= */
 
 .editor-toolbar { position: sticky; top: 0; left: 0; width: 100%; background: white; border-top: none; border-bottom: 1px solid var(--gray-200); z-index: 2002; transition: all 0.3s ease; }
@@ -149,7 +133,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 
 .sticker-grid { 
     display: grid; 
-    grid-template-columns: repeat(7, 1fr); 
+    grid-template-columns: repeat(7, 1fr); /* 7열 고정 */
     gap: 2px; 
     justify-items: center;
 }
@@ -205,7 +189,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .floating-pen:hover { transform: scale(1.1); }
 
 /* =========================================
-   6. 에디터 컨텐츠 영역
+   6. 에디터 컨텐츠 영역 (Editor Core)
    ========================================= */
 
 .editor-container { 
@@ -213,7 +197,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     margin: 0 auto; 
     padding: 30px 40px 100px; 
     width: 100%; 
-    height: auto !important; /* 기본 모드: 높이 자동 */
+    height: auto !important; /* 기본(세로) 모드: 높이 자동 */
 }
 
 .editor-title { width: 100%; font-size: 26px; border: none; outline: none; font-family: var(--text-serif); font-weight: 600; margin-bottom: 10px; }
@@ -237,7 +221,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 #write-modal.mode-read-only .editor-subtitle { pointer-events: none; }
 
 /* =========================================
-   7. 이미지 스타일 (선택/리사이즈)
+   7. 이미지 스타일 (선택/리사이즈/UI)
    ========================================= */
 
 .editor-body img {
@@ -268,7 +252,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     bottom: -50px; 
     left: 50%;
     transform: translateX(-50%);
-    display: inline-flex;
+    display: inline-flex; /* 가로 배열 */
     flex-direction: row;
     align-items: center;
     justify-content: center;
@@ -310,10 +294,10 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .editor-body a { pointer-events: auto !important; cursor: pointer !important; color: #2563EB; text-decoration: underline; }
 
 /* =========================================
-   8. 책 모드 (Book Mode)
+   8. 책 모드 (Book Mode) - PC/Mobile 공통
    ========================================= */
 
-/* 책 모드 레이아웃 고정 */
+/* 책 모드는 편집 시에도 레이아웃을 그대로 유지합니다 */
 #write-modal.mode-book { overflow: hidden; }
 #write-modal.mode-book .editor-container { 
     margin: 0; 
@@ -365,7 +349,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .hidden { display: none !important; }
 
 /* =========================================
-   10. 모바일 반응형
+   10. 모바일 반응형 (Mobile Optimized)
    ========================================= */
 
 @media screen and (max-width: 650px) {
@@ -386,16 +370,19 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     .editor-container { padding: 20px 20px 100px; }
     .full-screen-modal { padding-top: var(--safe-top); padding-bottom: var(--safe-bottom); }
     
-    /* 모바일 책 모드 레이아웃 고정 */
+    /* [모바일 책 모드] 레이아웃 고정 및 스크롤 스냅 */
     #write-modal.mode-book .editor-container { 
         padding: 20px 20px; 
         column-gap: 40px;
-        column-width: calc(100vw - 40px);
+        column-width: calc(100vw - 40px); /* 화면 너비 - 패딩합 */
         
         /* 모바일에서도 높이를 고정해야 편집 시 키보드에 의해 밀리지 않습니다 */
         height: calc(100vh - 60px) !important;
         
-        /* 모바일 스크롤 막기 (JS로 1페이지씩 이동) */
-        overflow-x: hidden;
+        /* 페이지 넘김 스냅 (한 장씩 넘기기) */
+        overflow-x: auto; /* 스크롤 허용 */
+        scroll-snap-type: x mandatory; /* 가로 스냅 켜기 */
+        scroll-behavior: smooth;
+        -webkit-overflow-scrolling: touch;
     }
 }
