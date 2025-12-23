@@ -1,5 +1,8 @@
+// [v2.5 FINAL] 모바일 책 모드 편집 안정화 (Scroll Guard + Height Lock)
 import { state } from './state.js';
 import { saveEntry } from './data.js';
+
+console.log("Editor Module Loaded - v2.5 FINAL"); // 콘솔에서 버전 확인 가능
 
 function linkifyContents(element) {
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
@@ -35,7 +38,7 @@ function linkifyContents(element) {
 }
 
 // ============================================
-// 이미지 조작 로직
+// 이미지 조작 및 이벤트 핸들링
 // ============================================
 let currentSelectedImg = null;
 let selectionBox = null;
@@ -49,17 +52,20 @@ function setupImageHandling() {
     
     if (!editorBody) return;
 
-    // [Scroll Guard] 터치 시작 시 현재 위치 기억 -> 튐 방지
-    const guardScroll = () => {
+    // [Scroll Guard] 책 모드에서 터치 시 위치 튐 방지
+    // 브라우저가 포커스를 잡으려고 스크롤을 강제로 이동시키는 것을 막습니다.
+    const guardScroll = (e) => {
         const container = document.getElementById('editor-container');
         if(state.currentViewMode === 'book' && editorBody.isContentEditable) {
             const currentLeft = container.scrollLeft;
-            // 프레임 단위로 위치 복구 시도
+            
+            // 1. 즉시 복구 시도
             requestAnimationFrame(() => {
                 if(Math.abs(container.scrollLeft - currentLeft) > 5) {
                     container.scrollLeft = currentLeft;
                 }
             });
+            // 2. 약간의 딜레이 후 재확인 (모바일 렌더링 대응)
             setTimeout(() => {
                 if(Math.abs(container.scrollLeft - currentLeft) > 5) {
                     container.scrollLeft = currentLeft;
@@ -68,6 +74,7 @@ function setupImageHandling() {
         }
     };
 
+    // 마우스와 터치 이벤트 모두에 가드 적용
     editorBody.addEventListener('mousedown', guardScroll);
     editorBody.addEventListener('touchstart', guardScroll, {passive: true});
 
@@ -308,7 +315,7 @@ export function openEditor(isEdit, entryData) {
     toggleViewMode('default', false);
 }
 
-// [단순화 + Scroll Guard] 책 모드 상태 그대로 편집 활성화
+// [핵심] 책모드 편집: 레이아웃 고정 + Scroll Guard + Height Lock
 export function toggleBookEditing() {
     if(state.currentViewMode !== 'book') return;
 
@@ -318,18 +325,27 @@ export function toggleBookEditing() {
     const editorToolbar = document.getElementById('editor-toolbar');
     const toolbarToggleBtn = document.getElementById('toolbar-toggle-btn');
     const btn = window.btnBookEdit || document.getElementById('btn-book-edit');
+    const container = document.getElementById('editor-container');
 
     const isEditable = editBody.isContentEditable;
 
     if (!isEditable) {
-        // [편집 모드 ON]
+        // [편집 모드 진입]
+        
+        // 1. [모바일] 키보드 Reflow 방지를 위해 현재 높이를 고정 (Freeze)
+        const computedHeight = window.getComputedStyle(container).height;
+        container.style.height = computedHeight; 
+        container.style.minHeight = computedHeight; 
+
+        // 2. 편집 활성화 (레이아웃 유지)
         editTitle.readOnly = false;
         editSubtitle.readOnly = false;
         editBody.contentEditable = "true";
         
-        // 포커스 이동 없음 (사용자가 터치한 곳이 곧 커서 위치)
-        // 단, Scroll Guard가 터치 시 튐 방지함
+        // 3. 포커스는 주되 화면 이동을 막는 옵션 사용
+        editBody.focus({ preventScroll: true });
 
+        // 4. 툴바 접기
         if(editorToolbar) {
             editorToolbar.style.transition = ''; 
             editorToolbar.classList.add('collapsed');
@@ -346,11 +362,15 @@ export function toggleBookEditing() {
         }
 
     } else {
-        // [편집 모드 OFF]
+        // [편집 모드 종료]
         editTitle.readOnly = true;
         editSubtitle.readOnly = true;
         editBody.contentEditable = "false";
         hideImageSelection(); 
+
+        // [모바일] 높이 고정 해제 (반응형 복구)
+        container.style.height = ''; 
+        container.style.minHeight = '';
 
         linkifyContents(editBody);
         
@@ -392,6 +412,7 @@ export function toggleViewMode(mode) {
     const toolbarIcon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
     const container = document.getElementById('editor-container');
 
+    // 모드 변경 시 인라인 스타일 초기화
     if(container) {
         container.style.height = '';
         container.style.minHeight = '';
