@@ -49,6 +49,10 @@ function setupImageHandling() {
     
     if (!editorBody) return;
 
+    // [중요] 책 모드에서 터치 시 위치 튐 방지 (Scroll Lock)
+    editorBody.addEventListener('mousedown', handleEditorInputStart);
+    editorBody.addEventListener('touchstart', handleEditorInputStart, {passive: false});
+
     editorBody.addEventListener('click', (e) => {
         if (!editorBody.isContentEditable) return;
 
@@ -70,6 +74,28 @@ function setupImageHandling() {
             deleteSelectedImage(e);
         }
     });
+}
+
+// [추가] 입력 시작 시 스크롤 위치 사수 함수
+function handleEditorInputStart(e) {
+    const container = document.getElementById('editor-container');
+    if (state.currentViewMode === 'book' && document.getElementById('editor-body').isContentEditable) {
+        // 현재 보고 있는 페이지 위치 저장
+        const currentScrollLeft = container.scrollLeft;
+        
+        // 브라우저가 포커스 때문에 스크롤을 튀게 하는 것을 막음
+        requestAnimationFrame(() => {
+            if (Math.abs(container.scrollLeft - currentScrollLeft) > 10) {
+                container.scrollLeft = currentScrollLeft;
+            }
+        });
+        // 2차 방어
+        setTimeout(() => {
+            if (Math.abs(container.scrollLeft - currentScrollLeft) > 10) {
+                container.scrollLeft = currentScrollLeft;
+            }
+        }, 50);
+    }
 }
 
 function selectImage(img) {
@@ -286,7 +312,7 @@ export function openEditor(isEdit, entryData) {
     toggleViewMode('default', false);
 }
 
-// [단순화] 책 모드 상태 그대로 편집 활성화
+// [핵심] 책모드 편집: 레이아웃 유지 + 위치 고정 + 키보드 대응
 export function toggleBookEditing() {
     if(state.currentViewMode !== 'book') return;
 
@@ -296,19 +322,24 @@ export function toggleBookEditing() {
     const editorToolbar = document.getElementById('editor-toolbar');
     const toolbarToggleBtn = document.getElementById('toolbar-toggle-btn');
     const btn = window.btnBookEdit || document.getElementById('btn-book-edit');
+    const container = document.getElementById('editor-container');
 
     const isEditable = editBody.isContentEditable;
 
     if (!isEditable) {
         // [편집 모드 ON]
-        // 1. 단순 상태 변경
+        
+        // 1. [모바일 키보드 대응] 높이를 현재 픽셀(px)로 박제
+        // 이렇게 해야 키보드가 올라와도 화면 높이가 줄어들지 않아 글자가 안 밀림
+        const computedHeight = window.getComputedStyle(container).height;
+        container.style.height = computedHeight; 
+        container.style.minHeight = computedHeight; 
+
+        // 2. 입력 가능 상태로 변경 (레이아웃 그대로)
         editTitle.readOnly = false;
         editSubtitle.readOnly = false;
         editBody.contentEditable = "true";
         
-        // 2. 중요: 강제 포커스 제거 (스크롤 튐 방지)
-        // 사용자가 수정하고 싶은 곳을 직접 터치하게 함
-
         // 3. 툴바는 접어두기
         if(editorToolbar) {
             editorToolbar.style.transition = ''; 
@@ -328,15 +359,18 @@ export function toggleBookEditing() {
 
     } else {
         // [편집 모드 OFF]
-        // 1. 상태 원복
         editTitle.readOnly = true;
         editSubtitle.readOnly = true;
         editBody.contentEditable = "false";
         hideImageSelection(); 
 
+        // [모바일 키보드 대응 해제] 높이 고정 풀기 (다시 100vh 등으로 돌아감)
+        container.style.height = ''; 
+        container.style.minHeight = '';
+
         linkifyContents(editBody);
         
-        // 2. 툴바 유지
+        // 툴바 유지
         if(editorToolbar) {
             editorToolbar.classList.add('collapsed');
             const icon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
@@ -346,7 +380,7 @@ export function toggleBookEditing() {
             }
         }
 
-        // 3. 버튼 아이콘 원복
+        // 버튼 아이콘 원복
         if(btn) {
             btn.innerHTML = '<i class="ph ph-pencil-simple" style="font-size: 18px;"></i>';
             btn.title = "페이지 편집";
