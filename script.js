@@ -1,7 +1,8 @@
 import { state, loadCategoriesFromLocal } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
 import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameCategoryAction, deleteCategoryAction, addNewCategory } from './ui.js';
-import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, makeBookEditButton, insertImage } from './editor.js';
+/* [수정] makeBookEditButton, toggleBookEditing 제거됨 */
+import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, insertImage } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, saveToDrive, syncFromDrive } from './drive.js';
 
@@ -12,18 +13,18 @@ window.duplicateEntry = duplicateEntry;
 window.changeGlobalFontSize = changeGlobalFontSize;
 window.insertSticker = insertSticker;
 
-// [수정] 이모티콘 70개 (기독교 테마 상단 배치)
+// 이모티콘 70개 리스트
 const stickers = [ 
-    '✝️','⛪','📖','🙏','🕊️','🕯️','🐑',
-    '🍞','🍷','🍇','👼','🙌','🩸','🔥',
-    '🌱','🌿','🌳','☁️','☀️','🌈','✨',
+    '✝️','⛪','🛐','📖','🙏','🕊️','🕯️',
+    '🩸','🐑','🍞','🍷','🍇','👼','🙌',
+    '☁️','☀️','🌙','⭐','✨','🌈','🔥',
+    '💧','🌱','🌿','🍂','🌻','🌷','🌹',
     '❤️','🧡','💛','💚','💙','💜','🤍',
     '🤎','🖤','💔','❣️','💕','💞','💓',
-    '😊','🥰','😍','😭','🥺','🤔','🧐',
-    '👍','👏','💪','🤝','🙇','🙆','🙅',
-    '💡','🔔','📢','📣','🎁','🎀','🎈',
-    '📝','📌','📎','🖍️','🖌️','📅','⏳',
-    '☕','🍵','🍎','🥪','🏠','🚪','🔑'
+    '😊','🥰','😭','🥺','🤔','🫡','👏',
+    '👍','🤝','🙇','🙆','🙅','💪','🎉',
+    '📝','✏️','🖍️','📌','📎','📅','⏳',
+    '💡','🔔','🎁','🎀','💌','🏠','🚪'
 ];
 
 function init() {
@@ -55,7 +56,8 @@ function init() {
 
     setupListeners();
     renderStickers();
-    makeBookEditButton();
+    
+    // [삭제됨] makeBookEditButton(); -> 더 이상 호출하지 않음
     
     makeDraggable(document.getElementById('color-palette-popup'), document.querySelector('.palette-header'));
 }
@@ -405,40 +407,14 @@ function setupUIListeners() {
         
         const container = document.getElementById('editor-container');
         if(container) {
-            container.addEventListener('touchstart', (e) => { if(state.currentViewMode !== 'book') return; state.touchStartX = e.changedTouches[0].screenX; }, {passive:true});
-            container.addEventListener('touchend', (e) => { 
-                if(state.currentViewMode !== 'book') return; 
-                state.touchEndX = e.changedTouches[0].screenX; 
-                const swipeThreshold = 50; 
-                if (state.touchEndX < state.touchStartX - swipeThreshold) turnPage(1); 
-                else if (state.touchEndX > state.touchStartX + swipeThreshold) turnPage(-1); 
-            }, {passive:true});
-            
-            container.addEventListener('mousedown', (e) => {
-                if(state.currentViewMode !== 'book') return;
-                if(e.button === 2) { 
-                    e.preventDefault();
-                    turnPage(1);
-                }
-            });
-            container.addEventListener('contextmenu', (e) => {
-                if(state.currentViewMode === 'book') e.preventDefault();
-            });
-
+            // [수정] JS 스크롤 삭제 -> CSS 스크롤 스냅에 맡김
             container.addEventListener('wheel', (e) => {
                 if(state.currentViewMode !== 'book') return;
-                e.preventDefault(); 
-                if(state.wheelDebounceTimer) return; 
-
-                if(e.deltaY > 0) {
-                    turnPage(1);
-                } else if(e.deltaY < 0) {
-                    turnPage(-1);
+                // 세로 스크롤을 가로 스크롤로 변환 (PC 마우스 휠 지원)
+                if (e.deltaY !== 0) {
+                    e.preventDefault();
+                    container.scrollLeft += e.deltaY;
                 }
-
-                state.wheelDebounceTimer = setTimeout(() => {
-                    state.wheelDebounceTimer = null;
-                }, 250);
             }, { passive: false });
         }
     }
