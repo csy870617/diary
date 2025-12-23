@@ -1,3 +1,7 @@
+/* =========================================
+   1. 기본 설정 및 변수
+   ========================================= */
+
 /* ✨ 스크롤바 숨기기 */
 ::-webkit-scrollbar {
     display: none; 
@@ -39,7 +43,10 @@ body {
 body { background-color: var(--bg-color); color: var(--gray-900); font-family: var(--text-serif); display: flex; justify-content: center; overscroll-behavior-y: none; overflow-x: hidden; }
 .layout { width: 100%; max-width: 800px; padding: 0 0 100px; min-height: 100vh; position: relative; }
 
-/* 헤더 영역 */
+/* =========================================
+   2. 헤더 및 네비게이션
+   ========================================= */
+
 .brunch-header { padding: 0 24px; margin-top: 50px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end; position: relative; }
 .header-left { display: flex; flex-direction: column; }
 .logo-area h1 { font-size: 26px; font-weight: 700; letter-spacing: -1px; line-height: 1.2; }
@@ -53,32 +60,15 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .search-container input { border: none; background: transparent; outline: none; font-family: var(--text-sans); font-size: 13px; width: 100%; opacity: 0; transition: opacity 0.2s 0.1s; }
 .search-container:focus-within input, .search-container:hover input { opacity: 1; }
 
-/* 로그인/인증 영역 */
+/* 로그인 영역 */
 .auth-area { display: flex; align-items: center; gap: 8px; position: relative; }
 .login-btn-header { background: none; border: 1px solid var(--gray-200); color: var(--gray-500); padding: 6px 14px; border-radius: 20px; font-size: 12px; cursor: pointer; font-family: var(--text-sans); font-weight: 500; background: white; z-index: 2; white-space: nowrap; }
 .login-btn-header:hover { border-color: var(--gray-900); color: var(--gray-900); }
 
-.login-msg-wrapper { 
-    position: absolute; 
-    top: -48px; 
-    right: 0; 
-    display: flex; 
-    flex-direction: column; 
-    align-items: flex-end; 
-    font-family: var(--text-sans); 
-    pointer-events: none; 
-    width: max-content; 
-}
-.login-msg-main { 
-    font-size: 11px; 
-    color: var(--accent); 
-    font-weight: 500; 
-    text-shadow: 0 1px 2px rgba(255,255,255,0.8); 
-    text-align: right; 
-    line-height: 1.3;  
-}
+.login-msg-wrapper { position: absolute; top: -48px; right: 0; display: flex; flex-direction: column; align-items: flex-end; font-family: var(--text-sans); pointer-events: none; width: max-content; }
+.login-msg-main { font-size: 11px; color: var(--accent); font-weight: 500; text-shadow: 0 1px 2px rgba(255,255,255,0.8); text-align: right; line-height: 1.3; }
 
-/* 탭 네비게이션 */
+/* 탭 및 컨트롤 */
 .nav-row { padding: 0 24px; display: flex; align-items: center; border-bottom: 1px solid var(--gray-100); margin-bottom: 10px; padding-bottom: 0; gap: 15px; position: relative; }
 .tabs { display: flex; gap: 10px; overflow-x: auto; flex-grow: 1; align-items: center; padding-bottom: 1px; white-space: nowrap; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none; }
 .tabs::-webkit-scrollbar { display: none; }
@@ -87,7 +77,6 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .sortable-ghost { opacity: 0.4; background: var(--gray-100); border-radius: 8px; }
 .sortable-drag { cursor: grabbing; }
 
-/* 컨트롤 (정렬, 휴지통) */
 .controls-row { display: flex; justify-content: flex-end; padding: 0 24px 10px; margin-bottom: 10px; }
 .nav-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .sort-control { display: flex; align-items: center; gap: 4px; }
@@ -98,7 +87,10 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .divider-vertical { width: 1px; height: 12px; background: var(--gray-200); margin: 0 4px; }
 .add-cat-btn { background: var(--gray-100); border: none; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--gray-500); cursor: pointer; font-size: 14px; margin-left: 5px; flex-shrink: 0; }
 
-/* 에디터 툴바 */
+/* =========================================
+   3. 에디터 및 툴바
+   ========================================= */
+
 .editor-toolbar { position: sticky; top: 0; left: 0; width: 100%; background: white; border-top: none; border-bottom: 1px solid var(--gray-200); z-index: 2002; transition: all 0.3s ease; }
 .toolbar-content-scroll { padding: 10px 15px; display: flex; align-items: center; gap: 12px; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; transition: max-height 0.3s ease, opacity 0.3s ease; max-height: 60px; opacity: 1; }
 .toolbar-content-scroll::-webkit-scrollbar { display: none; } 
@@ -114,7 +106,11 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .font-select { border: 1px solid var(--gray-200); border-radius: 6px; padding: 6px; font-size: 13px; outline: none; background: white; width: 70px; }
 .font-size-controls { display: flex; gap: 4px; }
 
-/* 이모티콘 팔레트 (7열, 고정 위치, 핏 컨텐츠) */
+/* =========================================
+   4. 팔레트 (이모티콘, 색상)
+   ========================================= */
+
+/* 이모티콘 팔레트 (7열, fit-content) */
 .sticker-palette { 
     position: fixed; 
     top: 110px; 
@@ -162,7 +158,10 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .color-dot:hover { transform: scale(1.15); border-color: var(--gray-400); }
 .color-dot.remove-color { background-color: transparent; border: 1px solid var(--gray-400); color: var(--danger); font-size: 14px; }
 
-/* 모달 공통 */
+/* =========================================
+   5. 모달 및 컨테이너
+   ========================================= */
+
 .full-screen-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: white; z-index: 1000; overflow-y: auto; display: flex; flex-direction: column; padding-top: var(--safe-top); padding-bottom: var(--safe-bottom); }
 .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4); z-index: 4000; display: flex; justify-content: center; align-items: center; backdrop-filter: blur(2px); opacity: 1; transition: opacity 0.2s; }
 .modal-overlay.hidden { opacity: 0; pointer-events: none; }
@@ -185,17 +184,19 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .cancel-btn { background: var(--gray-100); color: var(--gray-900); border: none; padding: 12px 0; border-radius: 10px; cursor: pointer; font-size: 14px; font-weight: 500; transition: background 0.2s; }
 .cancel-btn:hover { background: var(--gray-200); }
 
-/* 글쓰기 버튼 */
 .floating-pen { position: fixed; bottom: 30px; right: calc(50% - 260px); width: 56px; height: 56px; border-radius: 50%; background: var(--gray-900); color: white; box-shadow: 0 4px 12px rgba(0,0,0,0.3); cursor: pointer; display: flex; justify-content: center; align-items: center; font-size: 24px; z-index: 100; transition: transform 0.2s; }
 .floating-pen:hover { transform: scale(1.1); }
 
-/* 에디터 메인 컨테이너 */
+/* =========================================
+   6. 에디터 컨텐츠 영역
+   ========================================= */
+
 .editor-container { 
     max-width: 700px; 
     margin: 0 auto; 
     padding: 30px 40px 100px; 
     width: 100%; 
-    height: auto !important; /* 중요: 편집 모드에서는 높이 자동 */
+    height: auto !important; /* 기본 모드: 높이 자동 */
 }
 
 .editor-title { width: 100%; font-size: 26px; border: none; outline: none; font-family: var(--text-serif); font-weight: 600; margin-bottom: 10px; }
@@ -218,7 +219,10 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 #write-modal.mode-read-only .editor-title, 
 #write-modal.mode-read-only .editor-subtitle { pointer-events: none; }
 
-/* 이미지 스타일 (선택/삭제/크기조절 UI 포함) */
+/* =========================================
+   7. 이미지 스타일 (선택/리사이즈)
+   ========================================= */
+
 .editor-body img {
     max-width: 100%;
     height: auto;
@@ -241,13 +245,13 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .resize-handle { position: absolute; width: 20px; height: 20px; background-color: white; border: 2px solid var(--selection-color); border-radius: 50%; pointer-events: auto; z-index: 3001; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
 .resize-handle.se { bottom: -10px; right: -10px; cursor: nwse-resize; }
 
-/* 이미지 크기조절 버튼 그룹 (가로 고정) */
+/* 이미지 크기 조절 버튼 그룹 (슬림, 가로) */
 .img-resize-group {
     position: absolute;
     bottom: -50px; 
     left: 50%;
     transform: translateX(-50%);
-    display: inline-flex;
+    display: inline-flex; /* 가로 배열 */
     flex-direction: row;
     align-items: center;
     justify-content: center;
@@ -258,7 +262,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
     border: 1px solid var(--gray-200);
-    height: 38px;
+    height: 38px; /* 높이 고정 */
     box-sizing: border-box;
     white-space: nowrap;
 }
@@ -275,7 +279,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     border-radius: 6px;
     cursor: pointer;
     color: var(--gray-900);
-    line-height: 28px;
+    line-height: 28px; /* 버튼 텍스트 수직 정렬 */
     height: 28px;
     min-width: 36px;
     text-align: center;
@@ -288,15 +292,19 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 
 .editor-body a { pointer-events: auto !important; cursor: pointer !important; color: #2563EB; text-decoration: underline; }
 
-/* 책 모드 (가로 스크롤 레이아웃) */
+/* =========================================
+   8. 책 모드 (Book Mode)
+   ========================================= */
+
+/* 책 모드는 편집 시에도 레이아웃을 유지합니다 */
 #write-modal.mode-book { overflow: hidden; }
 #write-modal.mode-book .editor-container { 
     margin: 0; 
     max-width: none; 
     width: 100vw; 
-    height: calc(100vh - 60px) !important; 
+    height: calc(100vh - 60px) !important; /* PC 높이 고정 */
     padding: 20px 40px; 
-    column-width: calc(100vw - 80px); 
+    column-width: calc(100vw - 80px); /* 뷰포트 - 패딩합 */
     column-gap: 80px; 
     column-fill: auto; 
     overflow-x: hidden; 
@@ -306,7 +314,10 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .book-nav { display: none !important; }
 .page-indicator { position: fixed; bottom: 15px; left: 50%; transform: translateX(-50%); font-family: var(--text-sans); font-size: 12px; color: var(--gray-400); z-index: 1050; background: rgba(255,255,255,0.8); padding: 4px 10px; border-radius: 10px; }
 
-/* 기타 UI */
+/* =========================================
+   9. 기타 컴포넌트 (휴지통, 카드 등)
+   ========================================= */
+
 .trash-container { padding: 20px; }
 .trash-item { background: white; border: 1px solid var(--gray-200); border-radius: 12px; padding: 15px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
 .trash-info h4 { font-size: 16px; margin-bottom: 4px; text-decoration: line-through; color: var(--gray-400); }
@@ -335,7 +346,10 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .card-meta { font-family: var(--text-sans); font-size: 12px; color: var(--gray-500); }
 .hidden { display: none !important; }
 
-/* 모바일 반응형 */
+/* =========================================
+   10. 모바일 반응형
+   ========================================= */
+
 @media screen and (max-width: 650px) {
     .layout { padding: 0 16px 100px; width: 100%; }
     .brunch-header { padding: 0 4px; margin-top: 50px; margin-bottom: 20px; flex-direction: row; align-items: flex-end; }
@@ -354,9 +368,17 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     .editor-container { padding: 20px 20px 100px; }
     .full-screen-modal { padding-top: var(--safe-top); padding-bottom: var(--safe-bottom); }
     
+    /* 모바일 책 모드 레이아웃 고정 */
     #write-modal.mode-book .editor-container { 
         padding: 20px 20px; 
         column-gap: 40px;
         column-width: calc(100vw - 40px);
+        
+        /* 모바일에서도 높이를 고정해야 편집 시 키보드에 의해 밀리지 않습니다 */
+        height: calc(100vh - 60px) !important;
+        
+        /* 터치 스크롤 */
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
     }
 }

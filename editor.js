@@ -286,7 +286,7 @@ export function openEditor(isEdit, entryData) {
     toggleViewMode('default', false);
 }
 
-// [완전 수정] 레이아웃 변경 없이 제자리 편집
+// [핵심 수정] 모바일 키보드 대응: 높이 고정 및 상태 유지
 export function toggleBookEditing() {
     if(state.currentViewMode !== 'book') return;
 
@@ -296,15 +296,21 @@ export function toggleBookEditing() {
     const editorToolbar = document.getElementById('editor-toolbar');
     const toolbarToggleBtn = document.getElementById('toolbar-toggle-btn');
     const btn = window.btnBookEdit || document.getElementById('btn-book-edit');
-    // const writeModal = document.getElementById('write-modal'); // 사용 안함 (레이아웃 유지)
+    const container = document.getElementById('editor-container');
 
     const isEditable = editBody.isContentEditable;
 
     if (!isEditable) {
         // [편집 시작]
-        // 1. 레이아웃(mode-book)은 절대 건드리지 않음
         
-        // 2. 편집 가능 상태로만 변경
+        // 1. [모바일 전용] 현재 높이를 픽셀로 박제 (키보드 올라와도 Reflow 방지)
+        if (window.innerWidth <= 650) {
+            const currentHeight = container.clientHeight;
+            container.style.height = `${currentHeight}px`; 
+            container.style.minHeight = `${currentHeight}px`; 
+        }
+
+        // 2. 편집 활성화
         editTitle.readOnly = false;
         editSubtitle.readOnly = false;
         editBody.contentEditable = "true";
@@ -312,7 +318,7 @@ export function toggleBookEditing() {
         // 3. 포커스 (스크롤 튐 방지)
         editBody.focus({ preventScroll: true });
 
-        // 4. 툴바 닫힘 유지
+        // 4. 툴바 접기
         if(editorToolbar) {
             editorToolbar.style.transition = ''; 
             editorToolbar.classList.add('collapsed');
@@ -333,11 +339,16 @@ export function toggleBookEditing() {
         editTitle.readOnly = true;
         editSubtitle.readOnly = true;
         editBody.contentEditable = "false";
-        hideImageSelection(); 
+        
+        // 1. [모바일 전용] 고정했던 높이 해제 (원상복구)
+        if (window.innerWidth <= 650) {
+            container.style.height = ''; 
+            container.style.minHeight = '';
+        }
 
+        hideImageSelection(); 
         linkifyContents(editBody);
         
-        // 툴바 유지
         if(editorToolbar) {
             editorToolbar.classList.add('collapsed');
             const icon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
@@ -374,6 +385,13 @@ export function toggleViewMode(mode) {
     const toolbarToggleBtn = document.getElementById('toolbar-toggle-btn');
     const btnBookEdit = window.btnBookEdit || document.getElementById('btn-book-edit');
     const toolbarIcon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
+    const container = document.getElementById('editor-container');
+
+    // 모드 변경 시 스타일 초기화 (혹시 남아있을 수 있는 인라인 스타일 제거)
+    if(container) {
+        container.style.height = '';
+        container.style.minHeight = '';
+    }
 
     if (mode === 'book' && editorToolbar) {
         editorToolbar.style.transition = 'none'; 
@@ -420,7 +438,6 @@ export function toggleViewMode(mode) {
         if(exitFocusBtn) exitFocusBtn.classList.remove('hidden');
         if(btnBookMode) btnBookMode.classList.add('active');
         
-        const container = document.getElementById('editor-container');
         if(container) container.scrollLeft = 0; 
         updateBookNav(); 
         
