@@ -65,8 +65,25 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .login-btn-header { background: none; border: 1px solid var(--gray-200); color: var(--gray-500); padding: 6px 14px; border-radius: 20px; font-size: 12px; cursor: pointer; font-family: var(--text-sans); font-weight: 500; background: white; z-index: 2; white-space: nowrap; }
 .login-btn-header:hover { border-color: var(--gray-900); color: var(--gray-900); }
 
-.login-msg-wrapper { position: absolute; top: -48px; right: 0; display: flex; flex-direction: column; align-items: flex-end; font-family: var(--text-sans); pointer-events: none; width: max-content; }
-.login-msg-main { font-size: 11px; color: var(--accent); font-weight: 500; text-shadow: 0 1px 2px rgba(255,255,255,0.8); text-align: right; line-height: 1.3; }
+.login-msg-wrapper { 
+    position: absolute; 
+    top: -48px; 
+    right: 0; 
+    display: flex; 
+    flex-direction: column; 
+    align-items: flex-end; 
+    font-family: var(--text-sans); 
+    pointer-events: none; 
+    width: max-content; 
+}
+.login-msg-main { 
+    font-size: 11px; 
+    color: var(--accent); 
+    font-weight: 500; 
+    text-shadow: 0 1px 2px rgba(255,255,255,0.8); 
+    text-align: right; 
+    line-height: 1.3;  
+}
 
 /* 탭 및 컨트롤 */
 .nav-row { padding: 0 24px; display: flex; align-items: center; border-bottom: 1px solid var(--gray-100); margin-bottom: 10px; padding-bottom: 0; gap: 15px; position: relative; }
@@ -245,13 +262,13 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .resize-handle { position: absolute; width: 20px; height: 20px; background-color: white; border: 2px solid var(--selection-color); border-radius: 50%; pointer-events: auto; z-index: 3001; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
 .resize-handle.se { bottom: -10px; right: -10px; cursor: nwse-resize; }
 
-/* 이미지 크기 조절 버튼 그룹 (슬림, 가로) */
+/* 이미지 크기 조절 버튼 그룹 (슬림, 가로 고정) */
 .img-resize-group {
     position: absolute;
     bottom: -50px; 
     left: 50%;
     transform: translateX(-50%);
-    display: inline-flex; /* 가로 배열 */
+    display: inline-flex;
     flex-direction: row;
     align-items: center;
     justify-content: center;
@@ -262,7 +279,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
     border: 1px solid var(--gray-200);
-    height: 38px; /* 높이 고정 */
+    height: 38px;
     box-sizing: border-box;
     white-space: nowrap;
 }
@@ -279,7 +296,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     border-radius: 6px;
     cursor: pointer;
     color: var(--gray-900);
-    line-height: 28px; /* 버튼 텍스트 수직 정렬 */
+    line-height: 28px;
     height: 28px;
     min-width: 36px;
     text-align: center;
@@ -296,13 +313,14 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
    8. 책 모드 (Book Mode)
    ========================================= */
 
-/* 책 모드는 편집 시에도 레이아웃을 유지합니다 */
+/* 책 모드 레이아웃 고정 */
 #write-modal.mode-book { overflow: hidden; }
 #write-modal.mode-book .editor-container { 
     margin: 0; 
     max-width: none; 
     width: 100vw; 
-    height: calc(100vh - 60px) !important; /* PC 높이 고정 */
+    /* PC/모바일 모두 화면 높이에 딱 맞춤 (편집 시 밀림 방지) */
+    height: calc(100vh - 60px) !important; 
     padding: 20px 40px; 
     column-width: calc(100vw - 80px); /* 뷰포트 - 패딩합 */
     column-gap: 80px; 
@@ -315,7 +333,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .page-indicator { position: fixed; bottom: 15px; left: 50%; transform: translateX(-50%); font-family: var(--text-sans); font-size: 12px; color: var(--gray-400); z-index: 1050; background: rgba(255,255,255,0.8); padding: 4px 10px; border-radius: 10px; }
 
 /* =========================================
-   9. 기타 컴포넌트 (휴지통, 카드 등)
+   9. 기타 컴포넌트
    ========================================= */
 
 .trash-container { padding: 20px; }
@@ -374,10 +392,10 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
         column-gap: 40px;
         column-width: calc(100vw - 40px);
         
-        /* 모바일에서도 높이를 고정해야 편집 시 키보드에 의해 밀리지 않습니다 */
+        /* 모바일에서도 높이 고정 (필수) */
         height: calc(100vh - 60px) !important;
         
-        /* 터치 스크롤 */
+        /* 터치 스크롤 허용 */
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
     }

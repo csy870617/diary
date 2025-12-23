@@ -286,7 +286,7 @@ export function openEditor(isEdit, entryData) {
     toggleViewMode('default', false);
 }
 
-// [핵심 수정] 모바일 키보드 대응: 높이 고정 및 상태 유지
+// [단순화] 책 모드 상태 그대로 편집 활성화
 export function toggleBookEditing() {
     if(state.currentViewMode !== 'book') return;
 
@@ -296,29 +296,20 @@ export function toggleBookEditing() {
     const editorToolbar = document.getElementById('editor-toolbar');
     const toolbarToggleBtn = document.getElementById('toolbar-toggle-btn');
     const btn = window.btnBookEdit || document.getElementById('btn-book-edit');
-    const container = document.getElementById('editor-container');
 
     const isEditable = editBody.isContentEditable;
 
     if (!isEditable) {
-        // [편집 시작]
-        
-        // 1. [모바일 전용] 현재 높이를 픽셀로 박제 (키보드 올라와도 Reflow 방지)
-        if (window.innerWidth <= 650) {
-            const currentHeight = container.clientHeight;
-            container.style.height = `${currentHeight}px`; 
-            container.style.minHeight = `${currentHeight}px`; 
-        }
-
-        // 2. 편집 활성화
+        // [편집 모드 ON]
+        // 1. 단순 상태 변경
         editTitle.readOnly = false;
         editSubtitle.readOnly = false;
         editBody.contentEditable = "true";
         
-        // 3. 포커스 (스크롤 튐 방지)
-        editBody.focus({ preventScroll: true });
+        // 2. 중요: 강제 포커스 제거 (스크롤 튐 방지)
+        // 사용자가 수정하고 싶은 곳을 직접 터치하게 함
 
-        // 4. 툴바 접기
+        // 3. 툴바는 접어두기
         if(editorToolbar) {
             editorToolbar.style.transition = ''; 
             editorToolbar.classList.add('collapsed');
@@ -329,26 +320,23 @@ export function toggleBookEditing() {
             }
         }
 
+        // 4. 버튼 아이콘 변경
         if(btn) {
             btn.innerHTML = '<i class="ph ph-check" style="font-size: 18px; color: #10B981;"></i>';
             btn.title = "편집 완료";
         }
 
     } else {
-        // [편집 완료]
+        // [편집 모드 OFF]
+        // 1. 상태 원복
         editTitle.readOnly = true;
         editSubtitle.readOnly = true;
         editBody.contentEditable = "false";
-        
-        // 1. [모바일 전용] 고정했던 높이 해제 (원상복구)
-        if (window.innerWidth <= 650) {
-            container.style.height = ''; 
-            container.style.minHeight = '';
-        }
-
         hideImageSelection(); 
+
         linkifyContents(editBody);
         
+        // 2. 툴바 유지
         if(editorToolbar) {
             editorToolbar.classList.add('collapsed');
             const icon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
@@ -358,6 +346,7 @@ export function toggleBookEditing() {
             }
         }
 
+        // 3. 버튼 아이콘 원복
         if(btn) {
             btn.innerHTML = '<i class="ph ph-pencil-simple" style="font-size: 18px;"></i>';
             btn.title = "페이지 편집";
@@ -387,7 +376,7 @@ export function toggleViewMode(mode) {
     const toolbarIcon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
     const container = document.getElementById('editor-container');
 
-    // 모드 변경 시 스타일 초기화 (혹시 남아있을 수 있는 인라인 스타일 제거)
+    // 모드 변경 시 스타일 초기화
     if(container) {
         container.style.height = '';
         container.style.minHeight = '';
