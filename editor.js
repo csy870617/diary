@@ -286,69 +286,33 @@ export function openEditor(isEdit, entryData) {
     toggleViewMode('default', false);
 }
 
-// [핵심 함수] 모바일/PC 통합 위치 추적 (하이브리드 방식)
-function findVisibleElementInBookMode() {
-    const editorBody = document.getElementById('editor-body');
-    const container = document.getElementById('editor-container');
-    if (!editorBody || !container) return null;
-
-    const viewportWidth = window.innerWidth;
-    
-    // 1. 순차 탐색: 현재 페이지에서 "시작하는" 요소가 있는지 확인
-    const children = Array.from(editorBody.querySelectorAll('*')); // 모든 태그 검색
-    for (let el of children) {
-        if (el.tagName === 'BR' || el.style.display === 'none') continue;
-        const rect = el.getBoundingClientRect();
-        
-        // 화면 왼쪽 끝 ~ 화면 너비 사이에 시작점이 있는 요소
-        if (rect.left >= 0 && rect.left < viewportWidth - 20) {
-            // 텍스트나 이미지가 있는 의미 있는 요소만 반환
-            if(el.textContent.trim().length > 0 || el.tagName === 'IMG') {
-                return el;
-            }
-        }
-    }
-
-    // 2. [모바일 대응] 긴 문단이라 시작점이 없는 경우 -> 화면 중앙 좌표로 요소 찾기 (Fallback)
-    // 화면 정중앙 좌표의 요소를 가져옴
-    const centerX = window.innerWidth / 2;
-    const centerY = window.innerHeight / 2;
-    let centerElement = document.elementFromPoint(centerX, centerY);
-
-    // 찾은 요소가 에디터 내부의 것인지 확인
-    if (centerElement && editorBody.contains(centerElement)) {
-        // editor-body 자체가 잡히면 무의미하므로 제외
-        if (centerElement !== editorBody && centerElement !== container) {
-            return centerElement;
-        }
-    }
-
-    // 3. 그래도 없으면 첫 번째 자식 (안전장치)
-    return editorBody.firstElementChild;
-}
-
+// [완전 수정] 레이아웃 변경 없이 제자리 편집
 export function toggleBookEditing() {
+    if(state.currentViewMode !== 'book') return;
+
     const editTitle = document.getElementById('edit-title');
     const editSubtitle = document.getElementById('edit-subtitle');
     const editBody = document.getElementById('editor-body');
     const editorToolbar = document.getElementById('editor-toolbar');
     const toolbarToggleBtn = document.getElementById('toolbar-toggle-btn');
     const btn = window.btnBookEdit || document.getElementById('btn-book-edit');
-    const writeModal = document.getElementById('write-modal');
+    // const writeModal = document.getElementById('write-modal'); // 사용 안함 (레이아웃 유지)
 
     const isEditable = editBody.isContentEditable;
 
     if (!isEditable) {
-        // [1] 현재 보이는 요소를 확실하게 찾음
-        const targetElement = findVisibleElementInBookMode();
+        // [편집 시작]
+        // 1. 레이아웃(mode-book)은 절대 건드리지 않음
         
-        // [2] 모드 전환 (책 모드 해제)
-        writeModal.classList.remove('mode-book');
-        
+        // 2. 편집 가능 상태로만 변경
         editTitle.readOnly = false;
         editSubtitle.readOnly = false;
         editBody.contentEditable = "true";
         
+        // 3. 포커스 (스크롤 튐 방지)
+        editBody.focus({ preventScroll: true });
+
+        // 4. 툴바 닫힘 유지
         if(editorToolbar) {
             editorToolbar.style.transition = ''; 
             editorToolbar.classList.add('collapsed');
@@ -364,33 +328,8 @@ export function toggleBookEditing() {
             btn.title = "편집 완료";
         }
 
-        // [3] 위치 이동 (모바일 레이아웃 재계산 시간 확보)
-        setTimeout(() => {
-            if (targetElement) {
-                // 해당 요소를 화면 상단(혹은 중앙)으로 가져옴
-                targetElement.scrollIntoView({ block: 'center', behavior: 'auto' });
-                
-                // 포커스 (스크롤 튐 방지)
-                try {
-                    const range = document.createRange();
-                    const sel = window.getSelection();
-                    // 요소의 앞부분에 커서 위치
-                    range.setStart(targetElement, 0); 
-                    range.collapse(true);
-                    sel.removeAllRanges();
-                    sel.addRange(range);
-                    
-                    editBody.focus({ preventScroll: true }); 
-                } catch(e) {
-                    editBody.focus({ preventScroll: true });
-                }
-            } else {
-                editBody.focus();
-            }
-        }, 100); // 모바일은 100ms 정도 딜레이가 안전
-
     } else {
-        // [4] 편집 완료 -> 책 모드 복귀
+        // [편집 완료]
         editTitle.readOnly = true;
         editSubtitle.readOnly = true;
         editBody.contentEditable = "false";
@@ -398,8 +337,7 @@ export function toggleBookEditing() {
 
         linkifyContents(editBody);
         
-        writeModal.classList.add('mode-book');
-
+        // 툴바 유지
         if(editorToolbar) {
             editorToolbar.classList.add('collapsed');
             const icon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
@@ -415,10 +353,6 @@ export function toggleBookEditing() {
         }
         
         debouncedSave(); 
-        
-        setTimeout(() => {
-            updateBookNav();
-        }, 50);
     }
 }
 
