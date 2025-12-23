@@ -1,5 +1,5 @@
 /* =========================================
-   1. 기본 설정 (스크롤바 숨김 등)
+   1. 기본 설정 및 변수
    ========================================= */
 ::-webkit-scrollbar { display: none; }
 body { -ms-overflow-style: none; scrollbar-width: none; }
@@ -23,14 +23,13 @@ body { -ms-overflow-style: none; scrollbar-width: none; }
 body { background-color: var(--bg-color); color: var(--gray-900); font-family: var(--text-serif); display: flex; justify-content: center; overscroll-behavior-y: none; overflow-x: hidden; }
 .layout { width: 100%; max-width: 800px; padding: 0 0 100px; min-height: 100vh; position: relative; }
 
-/* 헤더 & 네비게이션 & 기타 UI는 기존과 동일하게 유지 */
+/* 헤더 & 네비게이션 */
 .brunch-header { padding: 0 24px; margin-top: 50px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end; position: relative; }
 .header-left { display: flex; flex-direction: column; }
 .logo-area h1 { font-size: 26px; font-weight: 700; letter-spacing: -1px; line-height: 1.2; }
 .sub-logo { font-family: var(--text-sans); font-size: 11px; color: var(--accent); letter-spacing: 0.5px; margin-top: 4px; }
 .header-right { display: flex; align-items: center; gap: 8px; position: relative; }
 
-/* 검색창 */
 .search-container { background-color: transparent; border-radius: 20px; padding: 0; display: flex; align-items: center; justify-content: flex-end; gap: 0; width: 32px; height: 32px; transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1); overflow: hidden; border: 1px solid transparent; z-index: 5; }
 .search-container:focus-within, .search-container:hover { background-color: white; border: 1px solid var(--gray-900); width: 160px; padding: 6px 12px; gap: 8px; }
 .search-container i { color: var(--gray-900); font-size: 20px; cursor: pointer; min-width: 20px; margin-left: 6px; }
@@ -89,7 +88,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .color-dot:hover { transform: scale(1.15); border-color: var(--gray-400); }
 .color-dot.remove-color { background-color: transparent; border: 1px solid var(--gray-400); color: var(--danger); font-size: 14px; }
 
-/* 모달 & 컨테이너 */
+/* 모달 & 에디터 */
 .full-screen-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: white; z-index: 1000; overflow-y: auto; display: flex; flex-direction: column; padding-top: var(--safe-top); padding-bottom: var(--safe-bottom); }
 .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4); z-index: 4000; display: flex; justify-content: center; align-items: center; backdrop-filter: blur(2px); opacity: 1; transition: opacity 0.2s; }
 .modal-overlay.hidden { opacity: 0; pointer-events: none; }
@@ -111,7 +110,6 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .floating-pen { position: fixed; bottom: 30px; right: calc(50% - 260px); width: 56px; height: 56px; border-radius: 50%; background: var(--gray-900); color: white; box-shadow: 0 4px 12px rgba(0,0,0,0.3); cursor: pointer; display: flex; justify-content: center; align-items: center; font-size: 24px; z-index: 100; transition: transform 0.2s; }
 .floating-pen:hover { transform: scale(1.1); }
 
-/* 에디터 */
 .editor-container { max-width: 700px; margin: 0 auto; padding: 30px 40px 100px; width: 100%; height: auto !important; }
 .editor-title { width: 100%; font-size: 26px; border: none; outline: none; font-family: var(--text-serif); font-weight: 600; margin-bottom: 10px; }
 .editor-subtitle { width: 100%; font-size: 16px; border: none; outline: none; color: var(--gray-500); font-family: var(--text-serif); margin-bottom: 20px; }
@@ -144,9 +142,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .img-delete-btn:hover { background: #DC2626; }
 .editor-body a { pointer-events: auto !important; cursor: pointer !important; color: #2563EB; text-decoration: underline; }
 
-/* =========================================
-   8. 책 모드 (Book Mode) - PC/Mobile 공통
-   ========================================= */
+/* 책 모드 (Book Mode) */
 #write-modal.mode-book { overflow: hidden; }
 #write-modal.mode-book .editor-container { 
     margin: 0; 
@@ -154,31 +150,17 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     width: 100vw; 
     height: calc(100vh - 60px) !important; 
     padding: 20px 40px; 
-    column-width: calc(100vw - 80px); /* 뷰포트 - 패딩합 */
+    column-width: calc(100vw - 80px); 
     column-gap: 80px; 
     column-fill: auto; 
-    
-    /* 🔥 CSS 스크롤 스냅 적용 (PC에서도 적용해도 무방) */
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
-    scroll-behavior: smooth;
-    overflow-y: hidden;
+    overflow-x: hidden; 
+    overflow-y: hidden; 
 }
-/* 스냅 포인트 */
-#write-modal.mode-book .editor-container > * {
-    /* 자식 요소들이 스냅 기준이 되지는 않지만, 컨테이너 자체가 스냅 영역임 */
-}
-
-#write-modal.mode-book .editor-title, 
-#write-modal.mode-book .editor-subtitle, 
-#write-modal.mode-book .meta-info-row, 
-#write-modal.mode-book .divider { 
-    break-inside: avoid; 
-} 
+#write-modal.mode-book .editor-title, #write-modal.mode-book .editor-subtitle, #write-modal.mode-book .meta-info-row, #write-modal.mode-book .divider { break-inside: avoid; } 
 .book-nav { display: none !important; }
 .page-indicator { position: fixed; bottom: 15px; left: 50%; transform: translateX(-50%); font-family: var(--text-sans); font-size: 12px; color: var(--gray-400); z-index: 1050; background: rgba(255,255,255,0.8); padding: 4px 10px; border-radius: 10px; }
 
-/* 기타 UI */
+/* 기타 */
 .trash-container { padding: 20px; }
 .trash-item { background: white; border: 1px solid var(--gray-200); border-radius: 12px; padding: 15px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
 .trash-info h4 { font-size: 16px; margin-bottom: 4px; text-decoration: line-through; color: var(--gray-400); }
@@ -225,14 +207,12 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     .editor-container { padding: 20px 20px 100px; }
     .full-screen-modal { padding-top: var(--safe-top); padding-bottom: var(--safe-bottom); }
     
+    /* [모바일 책 모드] 스크롤 봉쇄 + JS Swipe 사용 */
     #write-modal.mode-book .editor-container { 
         padding: 20px 20px; 
         column-gap: 40px;
         column-width: calc(100vw - 40px);
         height: calc(100vh - 60px) !important;
-        /* 모바일에서는 스크롤 허용 + 스냅 */
-        overflow-x: auto;
-        scroll-snap-type: x mandatory;
-        -webkit-overflow-scrolling: touch;
+        overflow-x: hidden !important; /* 스크롤 물리적 차단 (JS 제스처만 허용) */
     }
 }

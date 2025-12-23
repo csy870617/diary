@@ -49,6 +49,29 @@ function setupImageHandling() {
     
     if (!editorBody) return;
 
+    // [Swipe Listener] 모바일 책 모드 1페이지씩 넘기기
+    let touchStartX = 0;
+    const editorContainer = document.getElementById('editor-container');
+    
+    editorContainer.addEventListener('touchstart', (e) => {
+        if(state.currentViewMode === 'book') {
+            touchStartX = e.changedTouches[0].screenX;
+        }
+    }, {passive: true});
+
+    editorContainer.addEventListener('touchend', (e) => {
+        if(state.currentViewMode === 'book') {
+            const touchEndX = e.changedTouches[0].screenX;
+            const diff = touchStartX - touchEndX;
+            
+            // 50px 이상 밀었을 때만 페이지 넘김
+            if (Math.abs(diff) > 50) {
+                if (diff > 0) turnPage(1); // 오른쪽으로 밀면 다음 페이지
+                else turnPage(-1); // 왼쪽으로 밀면 이전 페이지
+            }
+        }
+    }, {passive: true});
+
     editorBody.addEventListener('click', (e) => {
         if (!editorBody.isContentEditable) return;
 
@@ -243,10 +266,15 @@ export function makeBookEditButton() {
     }
 }
 
+// [수정] 글 열 때 무조건 맨 위(제목)부터 보이게 설정
 export function openEditor(isEdit, entryData) { 
     state.isEditMode = isEdit; 
     const writeModal = document.getElementById('write-modal');
     writeModal.classList.remove('hidden');
+    
+    // [중요] 스크롤 초기화
+    writeModal.scrollTop = 0;
+    document.getElementById('editor-container').scrollTop = 0;
     
     if (!history.state || history.state.modal !== 'open') {
         history.pushState({ modal: 'open' }, null, '');
@@ -286,7 +314,6 @@ export function openEditor(isEdit, entryData) {
     toggleViewMode('default', false);
 }
 
-// [완전 단순화] 책 모드 상태 그대로 편집 활성화 (위치 이동/포커스 일절 없음)
 export function toggleBookEditing() {
     if(state.currentViewMode !== 'book') return;
 
@@ -300,12 +327,10 @@ export function toggleBookEditing() {
     const isEditable = editBody.isContentEditable;
 
     if (!isEditable) {
-        // [편집 모드 ON]
         editTitle.readOnly = false;
         editSubtitle.readOnly = false;
         editBody.contentEditable = "true";
         
-        // 툴바는 접어두기
         if(editorToolbar) {
             editorToolbar.style.transition = ''; 
             editorToolbar.classList.add('collapsed');
@@ -322,7 +347,6 @@ export function toggleBookEditing() {
         }
 
     } else {
-        // [편집 모드 OFF]
         editTitle.readOnly = true;
         editSubtitle.readOnly = true;
         editBody.contentEditable = "false";
@@ -368,7 +392,6 @@ export function toggleViewMode(mode) {
     const toolbarIcon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
     const container = document.getElementById('editor-container');
 
-    // 모드 변경 시 스타일 초기화
     if(container) {
         container.style.height = '';
         container.style.minHeight = '';
