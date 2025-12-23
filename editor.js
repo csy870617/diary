@@ -11,48 +11,54 @@ let deleteBtn = null;
 let resizeBtnGroup = null;
 
 // 책 모드 상태
-let isTurningPage = false;    // 페이지 넘김 중복 방지 락
+let isTurningPage = false;    // 페이지 넘김 락
 let currentBookPageIndex = 0; // 현재 페이지 번호
 let touchStartX = 0;          // 터치 시작 좌표
 
+// 휠 쿨타임 (관성 제어용)
+let wheelLockTimer = null;
+
 // ============================================
-// [2] 독립된 이벤트 핸들러 (중복 방지용)
+// [2] 이벤트 핸들러
 // ============================================
 
-// 1. 휠 핸들러 (버튼처럼 동작)
 function handleBookWheel(e) {
     if (state.currentViewMode !== 'book') return;
 
-    // 브라우저 기본 스크롤 동작 및 버블링 완전 차단
+    // 1. 브라우저의 모든 기본 스크롤 동작 차단
     e.preventDefault();
     e.stopPropagation();
 
-    // 쿨타임 중이면 무시 (연속 입력 방지)
+    // 2. 락이 걸려있으면(페이지 넘어가는 중 or 관성 남음) 무시
     if (isTurningPage) return;
 
-    // 미세한 떨림 무시
-    if (Math.abs(e.deltaY) < 20) return;
+    // 3. 휠 감도 설정 (작은 떨림 무시)
+    if (Math.abs(e.deltaY) < 30) return;
 
-    // 방향 결정 (양수: 다음페이지, 음수: 이전페이지)
+    // 4. 방향 결정
     const direction = e.deltaY > 0 ? 1 : -1;
+    turnPage(direction);
     
-    // 페이지 이동 실행
-    changePage(direction);
+    // 5. 휠 이벤트가 발생하면 즉시 락을 걸고, 0.5초 뒤에 품
+    // (연속 휠 동작을 하나의 동작으로 처리)
+    isTurningPage = true;
+    if (wheelLockTimer) clearTimeout(wheelLockTimer);
+    wheelLockTimer = setTimeout(() => {
+        isTurningPage = false;
+        wheelLockTimer = null;
+    }, 500);
 }
 
-// 2. 터치 시작
 function handleBookTouchStart(e) {
     if (state.currentViewMode !== 'book') return;
     touchStartX = e.changedTouches[0].screenX;
 }
 
-// 3. 터치 이동 (화면 끌림 방지)
 function handleBookTouchMove(e) {
     if (state.currentViewMode !== 'book') return;
-    e.preventDefault(); 
+    e.preventDefault(); // 모바일 스크롤 차단
 }
 
-// 4. 터치 끝
 function handleBookTouchEnd(e) {
     if (state.currentViewMode !== 'book') return;
     if (isTurningPage) return;
@@ -60,36 +66,38 @@ function handleBookTouchEnd(e) {
     const touchEndX = e.changedTouches[0].screenX;
     const diff = touchStartX - touchEndX;
 
-    // 50px 이상 스와이프 시 페이지 넘김
     if (Math.abs(diff) > 50) {
         const direction = diff > 0 ? 1 : -1;
-        changePage(direction);
+        turnPage(direction);
+        
+        isTurningPage = true;
+        setTimeout(() => isTurningPage = false, 300);
     }
 }
 
-// 5. 리사이즈 핸들러
 function handleBookResize() {
     if (state.currentViewMode === 'book') {
-        updateBookLayout();
-        // 현재 페이지 위치로 즉시 복귀
+        updateBookLayout(); // 레이아웃 및 높이 재계산
         const container = document.getElementById('editor-container');
         if(container) {
-            const stride = container.clientWidth;
-            container.scrollTo({ left: currentBookPageIndex * stride, behavior: 'auto' });
+            // 리사이즈 시 현재 페이지 위치 유지
+            const stride = Math.floor(container.clientWidth);
+            container.scrollLeft = currentBookPageIndex * stride;
             updateBookNav();
         }
     }
 }
 
 // ============================================
-// [3] 페이지 이동 핵심 로직
+// [3] 페이지 이동 (순간 이동 방식)
 // ============================================
 
-function changePage(direction) {
+export function turnPage(direction) { 
     const container = document.getElementById('editor-container');
     if (!container) return;
 
-    const stride = container.clientWidth;
+    // 정확한 1페이지 너비 계산
+    const stride = Math.floor(container.clientWidth);
     const maxPage = Math.ceil(container.scrollWidth / stride) - 1;
 
     let nextIndex = currentBookPageIndex + direction;
@@ -97,31 +105,33 @@ function changePage(direction) {
     if (nextIndex < 0) nextIndex = 0;
     if (nextIndex > maxPage) nextIndex = maxPage;
 
-    // 페이지 변화가 없으면 리턴
     if (nextIndex === currentBookPageIndex) return;
 
     currentBookPageIndex = nextIndex;
-    isTurningPage = true;
 
-    // 이동 실행 (smooth)
-    container.scrollTo({ 
-        left: currentBookPageIndex * stride, 
-        behavior: 'smooth' 
-    });
+    // [핵심] 애니메이션 없이 좌표 강제 주입 (텔레포트)
+    container.scrollLeft = currentBookPageIndex * stride;
 
-    // 쿨타임 해제 및 네비 업데이트 (0.7초)
-    setTimeout(() => {
-        isTurningPage = false;
-        updateBookNav();
-    }, 700);
+    updateBookNav();
 }
 
 function updateBookLayout() {
     const container = document.getElementById('editor-container');
     if (!container) return;
-    const width = container.clientWidth;
+    
+    // [중요] JS로 스타일 강제 주입 (CSS 무시 방지)
+    // 1. 가로 너비 설정
+    const width = Math.floor(container.clientWidth);
     container.style.columnWidth = `${width}px`;
     container.style.columnGap = '0px';
+    
+    // 2. 높이 설정 (화면 높이 - 120px) -> 하단 여백 확보
+    // 모바일 주소창 등을 고려해 window.innerHeight 사용
+    const targetHeight = window.innerHeight - 120; 
+    container.style.height = `${targetHeight}px`;
+    
+    // 3. 스크롤바 숨김 강제
+    container.style.overflow = 'hidden';
 }
 
 export function updateBookNav() { 
@@ -133,7 +143,7 @@ export function updateBookNav() {
 
     if(!container) return;
 
-    const stride = container.clientWidth;
+    const stride = Math.floor(container.clientWidth);
     const scrollWidth = container.scrollWidth; 
     
     const currentPage = currentBookPageIndex + 1;
@@ -156,16 +166,14 @@ export function updateBookNav() {
 }
 
 // ============================================
-// [4] 에디터 모드 관리
+// [4] 에디터 모드 관리 (위치 동기화 포함)
 // ============================================
 
 function linkifyContents(element) {
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
     const nodes = [];
     while(walker.nextNode()) nodes.push(walker.currentNode);
-    
     const urlRegex = /((https?:\/\/|www\.)[^\s]+)/g;
-    
     nodes.forEach(node => {
         if (node.parentNode.tagName === 'A' || node.parentNode.tagName === 'BUTTON' || node.parentNode.isContentEditable) return;
         const text = node.nodeValue;
@@ -192,7 +200,6 @@ function linkifyContents(element) {
 function setupBasicHandling() {
     const editorBody = document.getElementById('editor-body');
     const writeModal = document.getElementById('write-modal');
-    
     if (!editorBody) return;
 
     editorBody.onclick = (e) => {
@@ -213,7 +220,7 @@ function setupBasicHandling() {
         }
     };
     
-    // 리사이즈는 모드에 따라 다르게 처리되므로 공통 리스너 등록
+    // 리사이즈 이벤트 등록 (기존 리스너 제거 후 등록)
     window.removeEventListener('resize', handleBookResize); 
     window.addEventListener('resize', () => {
         updateSelectionBox();
@@ -221,12 +228,10 @@ function setupBasicHandling() {
     });
 }
 
-// 리스너 토글 함수
 function toggleBookEventListeners(enable) {
     const container = document.getElementById('editor-container');
     if (!container) return;
 
-    // 안전하게 제거 후 등록
     container.removeEventListener('wheel', handleBookWheel);
     container.removeEventListener('touchstart', handleBookTouchStart);
     container.removeEventListener('touchmove', handleBookTouchMove);
@@ -251,6 +256,7 @@ export function openEditor(isEdit, entryData) {
         editorContainer.scrollTop = 0;
         editorContainer.scrollLeft = 0;
     }
+    
     currentBookPageIndex = 0;
     isTurningPage = false;
     
@@ -258,7 +264,7 @@ export function openEditor(isEdit, entryData) {
         history.pushState({ modal: 'open' }, null, '');
     }
 
-    setupBasicHandling(); // 기본 핸들링 (이미지 등)
+    setupBasicHandling();
     
     const catName = state.allCategories.find(c => c.id === state.currentCategory)?.name || '기록';
     const displayCat = document.getElementById('display-category');
@@ -291,29 +297,40 @@ export function openEditor(isEdit, entryData) {
 }
 
 export function toggleViewMode(mode) {
+    const previousMode = state.currentViewMode;
+    const container = document.getElementById('editor-container');
+    
+    let savedScrollTop = 0;
+    let savedPageIndex = 0;
+
+    if (container) {
+        if (previousMode === 'book') {
+            savedPageIndex = currentBookPageIndex;
+        } else {
+            savedScrollTop = container.scrollTop;
+        }
+    }
+
     state.currentViewMode = mode;
     const writeModal = document.getElementById('write-modal');
-    const container = document.getElementById('editor-container');
     const editBody = document.getElementById('editor-body');
     const editTitle = document.getElementById('edit-title');
     const editSubtitle = document.getElementById('edit-subtitle');
     const exitFocusBtn = document.getElementById('exit-view-btn');
     const editorToolbar = document.getElementById('editor-toolbar');
-    
     const btnReadOnly = document.getElementById('btn-readonly');
     const btnBookMode = document.getElementById('btn-bookmode');
-
-    // [수정 완료] 여기서 toolbarIcon을 정의합니다.
     const toolbarToggleBtn = document.getElementById('toolbar-toggle-btn');
     const toolbarIcon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
 
-    // 스타일 초기화
+    // 스타일 초기화 (일반 모드로 복귀 시 필수)
     if(container) {
-        container.style.height = '';
-        container.style.minHeight = '';
+        container.style.height = ''; // JS 강제 스타일 제거
+        container.style.overflow = ''; // JS 강제 스타일 제거
         container.style.columnWidth = ''; 
         container.style.columnGap = '';
         container.scrollLeft = 0; 
+        container.scrollTop = 0;
     }
 
     writeModal.classList.remove('mode-read-only', 'mode-book');
@@ -324,11 +341,10 @@ export function toggleViewMode(mode) {
     if(btnBookMode) btnBookMode.classList.remove('active');
     
     hideImageSelection();
-
-    // 책 모드 리스너 해제 (기본)
     toggleBookEventListeners(false);
 
     if (mode === 'book') {
+        // [책 모드]
         editTitle.readOnly = true; 
         editSubtitle.readOnly = true;
         editBody.contentEditable = "false";
@@ -337,56 +353,66 @@ export function toggleViewMode(mode) {
         writeModal.classList.add('mode-book');
         if(exitFocusBtn) exitFocusBtn.classList.remove('hidden');
         if(btnBookMode) btnBookMode.classList.add('active');
-        
         if(editorToolbar) {
             editorToolbar.classList.add('collapsed');
-            if(toolbarIcon) { 
-                toolbarIcon.classList.remove('ph-caret-up'); 
-                toolbarIcon.classList.add('ph-caret-down'); 
-            }
+            if(toolbarIcon) { toolbarIcon.classList.remove('ph-caret-up'); toolbarIcon.classList.add('ph-caret-down'); }
         }
 
-        // [중요] 책 모드 진입 시 리스너 부착 및 초기화
+        // [중요] 초기화 및 리스너 등록
         currentBookPageIndex = 0;
         updateBookLayout(); 
         toggleBookEventListeners(true);
         
+        // 위치 복원 (일반 -> 책)
         setTimeout(() => {
-            container.scrollTo(0, 0); 
-            updateBookNav();
+            if(container) {
+                // 현재 높이는 JS로 강제 설정된 값 사용
+                const pageHeight = container.clientHeight; 
+                const stride = Math.floor(container.clientWidth);
+                // 안전장치: 0으로 나누기 방지
+                if(pageHeight > 0) {
+                    const targetIndex = Math.floor(savedScrollTop / pageHeight);
+                    currentBookPageIndex = targetIndex;
+                    container.scrollLeft = currentBookPageIndex * stride;
+                    updateBookNav();
+                }
+            }
         }, 50);
-        
-        if(editorToolbar) { setTimeout(() => { editorToolbar.style.transition = ''; }, 50); }
 
-    } else if (mode === 'readOnly') {
-        editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false"; linkifyContents(editBody);
-        writeModal.classList.add('mode-read-only');
-        if(exitFocusBtn) exitFocusBtn.classList.remove('hidden');
-        if(btnReadOnly) btnReadOnly.classList.add('active');
-        
-        if(editorToolbar) {
-            editorToolbar.classList.add('collapsed');
-            if(toolbarIcon) { 
-                toolbarIcon.classList.remove('ph-caret-up'); 
-                toolbarIcon.classList.add('ph-caret-down'); 
+    } else {
+        // [일반/읽기 모드]
+        if (mode === 'readOnly') {
+            editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false"; linkifyContents(editBody);
+            writeModal.classList.add('mode-read-only');
+            if(exitFocusBtn) exitFocusBtn.classList.remove('hidden');
+            if(btnReadOnly) btnReadOnly.classList.add('active');
+            if(editorToolbar) editorToolbar.classList.add('collapsed');
+        } else {
+            editTitle.readOnly = false; editSubtitle.readOnly = false; editBody.contentEditable = "true";
+            if(editorToolbar) { 
+                editorToolbar.style.transition = ''; 
+                editorToolbar.classList.remove('collapsed'); 
+                if(toolbarIcon) { toolbarIcon.classList.remove('ph-caret-down'); toolbarIcon.classList.add('ph-caret-up'); } 
             }
         }
 
-    } else {
-        editTitle.readOnly = false; editSubtitle.readOnly = false; editBody.contentEditable = "true";
-        if(editorToolbar) { 
-            editorToolbar.style.transition = ''; 
-            editorToolbar.classList.remove('collapsed'); 
-            if(toolbarIcon) { 
-                toolbarIcon.classList.remove('ph-caret-down'); 
-                toolbarIcon.classList.add('ph-caret-up'); 
-            } 
-        }
+        // 위치 복원 (책 -> 일반)
+        setTimeout(() => {
+            if(container && previousMode === 'book') {
+                // 이전 모드(책)에서의 페이지 높이를 추정해야 함. 
+                // 지금은 일반모드로 돌아왔으므로 container.clientHeight는 다름.
+                // 따라서 저장 당시의 높이(화면높이 - 120)를 역산
+                const estimatedPageHeight = window.innerHeight - 120;
+                container.scrollTop = savedPageIndex * estimatedPageHeight;
+            } else if (container) {
+                container.scrollTop = savedScrollTop;
+            }
+        }, 50);
     }
 }
 
 // ============================================
-// [5] 기타 유틸리티 함수 (이미지, 폰트 등)
+// [5] 기타 유틸리티 함수
 // ============================================
 
 function selectImage(img) {
@@ -441,32 +467,3 @@ export function changeGlobalFontSize(delta) { const editBody = document.getEleme
 export function insertSticker(emoji) { const editBody = document.getElementById('editor-body'); if (editBody) { editBody.focus(); document.execCommand('insertText', false, emoji); } debouncedSave(); }
 export function insertImage(src) { const editBody = document.getElementById('editor-body'); if (editBody) { editBody.focus(); document.execCommand('insertImage', false, src); } debouncedSave(); }
 function debouncedSave() { if(state.autoSaveTimer) clearTimeout(state.autoSaveTimer); state.autoSaveTimer = setTimeout(saveEntry, 1000); }
-
-// [중요] 반드시 export 해야 함 (script.js에서 참조)
-export function turnPage(direction) {
-    const container = document.getElementById('editor-container');
-    if (!container) return;
-
-    const stride = container.clientWidth;
-    const maxPage = Math.ceil(container.scrollWidth / stride) - 1;
-
-    let nextIndex = currentBookPageIndex + direction;
-
-    if (nextIndex < 0) nextIndex = 0;
-    if (nextIndex > maxPage) nextIndex = maxPage;
-
-    if (nextIndex === currentBookPageIndex) return;
-
-    currentBookPageIndex = nextIndex;
-    isTurningPage = true;
-
-    container.scrollTo({ 
-        left: currentBookPageIndex * stride, 
-        behavior: 'smooth' 
-    });
-
-    setTimeout(() => {
-        isTurningPage = false;
-        updateBookNav();
-    }, 700);
-}
