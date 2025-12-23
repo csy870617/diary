@@ -392,11 +392,10 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
         column-gap: 40px;
         column-width: calc(100vw - 40px);
         
-        /* 모바일에서도 높이 고정 (필수) */
+        /* 모바일에서도 높이를 고정해야 편집 시 키보드에 의해 밀리지 않습니다 */
         height: calc(100vh - 60px) !important;
         
-        /* 터치 스크롤 허용 */
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
+        /* 모바일 스크롤 막기 (JS로 1페이지씩 이동) */
+        overflow-x: hidden;
     }
 }
