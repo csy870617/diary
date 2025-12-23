@@ -1,8 +1,8 @@
 /* =========================================
-   1. 기본 설정 및 변수 (Base & Variables)
+   1. 기본 설정 및 변수
    ========================================= */
 
-/* ✨ 스크롤바 숨기기 (모든 브라우저) */
+/* ✨ 스크롤바 숨기기 */
 ::-webkit-scrollbar {
     display: none; 
 }
@@ -11,7 +11,6 @@ body {
     scrollbar-width: none; 
 }
 
-/* 로딩 아이콘 애니메이션 */
 @keyframes spin { 
     from { transform: rotate(0deg); } 
     to { transform: rotate(360deg); } 
@@ -45,7 +44,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .layout { width: 100%; max-width: 800px; padding: 0 0 100px; min-height: 100vh; position: relative; }
 
 /* =========================================
-   2. 헤더 및 네비게이션 (Header & Nav)
+   2. 헤더 및 네비게이션
    ========================================= */
 
 .brunch-header { padding: 0 24px; margin-top: 50px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end; position: relative; }
@@ -89,7 +88,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .add-cat-btn { background: var(--gray-100); border: none; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--gray-500); cursor: pointer; font-size: 14px; margin-left: 5px; flex-shrink: 0; }
 
 /* =========================================
-   3. 에디터 툴바 (Toolbar)
+   3. 에디터 툴바
    ========================================= */
 
 .editor-toolbar { position: sticky; top: 0; left: 0; width: 100%; background: white; border-top: none; border-bottom: 1px solid var(--gray-200); z-index: 2002; transition: all 0.3s ease; }
@@ -108,10 +107,9 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .font-size-controls { display: flex; gap: 4px; }
 
 /* =========================================
-   4. 팔레트 (이모티콘, 색상)
+   4. 팔레트
    ========================================= */
 
-/* 이모티콘 팔레트 (7열, fit-content) */
 .sticker-palette { 
     position: fixed; 
     top: 110px; 
@@ -133,7 +131,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 
 .sticker-grid { 
     display: grid; 
-    grid-template-columns: repeat(7, 1fr); /* 7열 고정 */
+    grid-template-columns: repeat(7, 1fr); 
     gap: 2px; 
     justify-items: center;
 }
@@ -149,7 +147,6 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 }
 .sticker-item:hover { background-color: var(--gray-100); }
 
-/* 컬러 팔레트 */
 .palette-header { cursor: move; width: 100%; display: flex; justify-content: center; padding-bottom: 8px; border-bottom: 1px solid #f0f0f0; }
 .color-palette-popup { position: fixed; top: 110px !important; bottom: auto; left: 50% !important; transform: translateX(-50%); background: white; border: 1px solid var(--gray-200); padding: 16px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); z-index: 2006; width: 250px; display: flex; flex-direction: column; gap: 10px; }
 .color-remove-btn { width: 100%; border: 1px solid var(--gray-200); background: var(--gray-100); color: var(--gray-500); padding: 6px; border-radius: 6px; cursor: pointer; font-size: 13px; font-family: var(--text-sans); display: flex; align-items: center; justify-content: center; gap: 6px; }
@@ -189,7 +186,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .floating-pen:hover { transform: scale(1.1); }
 
 /* =========================================
-   6. 에디터 컨텐츠 영역 (Editor Core)
+   6. 에디터 컨텐츠 영역
    ========================================= */
 
 .editor-container { 
@@ -197,7 +194,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     margin: 0 auto; 
     padding: 30px 40px 100px; 
     width: 100%; 
-    height: auto !important; /* 기본(세로) 모드: 높이 자동 */
+    height: auto !important; /* 기본 모드: 높이 자동 */
 }
 
 .editor-title { width: 100%; font-size: 26px; border: none; outline: none; font-family: var(--text-serif); font-weight: 600; margin-bottom: 10px; }
@@ -221,7 +218,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 #write-modal.mode-read-only .editor-subtitle { pointer-events: none; }
 
 /* =========================================
-   7. 이미지 스타일 (선택/리사이즈/UI)
+   7. 이미지 스타일
    ========================================= */
 
 .editor-body img {
@@ -246,13 +243,12 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .resize-handle { position: absolute; width: 20px; height: 20px; background-color: white; border: 2px solid var(--selection-color); border-radius: 50%; pointer-events: auto; z-index: 3001; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
 .resize-handle.se { bottom: -10px; right: -10px; cursor: nwse-resize; }
 
-/* 이미지 크기 조절 버튼 그룹 (슬림, 가로 고정) */
 .img-resize-group {
     position: absolute;
     bottom: -50px; 
     left: 50%;
     transform: translateX(-50%);
-    display: inline-flex; /* 가로 배열 */
+    display: inline-flex;
     flex-direction: row;
     align-items: center;
     justify-content: center;
@@ -294,16 +290,16 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .editor-body a { pointer-events: auto !important; cursor: pointer !important; color: #2563EB; text-decoration: underline; }
 
 /* =========================================
-   8. 책 모드 (Book Mode) - PC/Mobile 공통
+   8. 책 모드 (Book Mode)
    ========================================= */
 
-/* 책 모드는 편집 시에도 레이아웃을 그대로 유지합니다 */
+/* [중요] 책 모드는 가로 레이아웃 고정 */
 #write-modal.mode-book { overflow: hidden; }
 #write-modal.mode-book .editor-container { 
     margin: 0; 
     max-width: none; 
     width: 100vw; 
-    /* PC/모바일 모두 화면 높이에 딱 맞춤 (편집 시 밀림 방지) */
+    /* PC 높이 고정 */
     height: calc(100vh - 60px) !important; 
     padding: 20px 40px; 
     column-width: calc(100vw - 80px); /* 뷰포트 - 패딩합 */
@@ -349,7 +345,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .hidden { display: none !important; }
 
 /* =========================================
-   10. 모바일 반응형 (Mobile Optimized)
+   10. 모바일 반응형
    ========================================= */
 
 @media screen and (max-width: 650px) {
@@ -370,19 +366,16 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     .editor-container { padding: 20px 20px 100px; }
     .full-screen-modal { padding-top: var(--safe-top); padding-bottom: var(--safe-bottom); }
     
-    /* [모바일 책 모드] 레이아웃 고정 및 스크롤 스냅 */
+    /* [모바일 책 모드] 스크롤 잠금 및 높이 고정 */
     #write-modal.mode-book .editor-container { 
         padding: 20px 20px; 
         column-gap: 40px;
-        column-width: calc(100vw - 40px); /* 화면 너비 - 패딩합 */
+        column-width: calc(100vw - 40px);
         
         /* 모바일에서도 높이를 고정해야 편집 시 키보드에 의해 밀리지 않습니다 */
         height: calc(100vh - 60px) !important;
         
-        /* 페이지 넘김 스냅 (한 장씩 넘기기) */
-        overflow-x: auto; /* 스크롤 허용 */
-        scroll-snap-type: x mandatory; /* 가로 스냅 켜기 */
-        scroll-behavior: smooth;
-        -webkit-overflow-scrolling: touch;
+        /* 🔥 중요: 모바일 스크롤 막기 (JS 스와이프 사용) */
+        overflow-x: hidden; 
     }
 }

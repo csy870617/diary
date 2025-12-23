@@ -49,6 +49,28 @@ function setupImageHandling() {
     
     if (!editorBody) return;
 
+    // [Scroll Guard] 터치 시작 시 현재 위치 기억 -> 튐 방지
+    const guardScroll = () => {
+        const container = document.getElementById('editor-container');
+        if(state.currentViewMode === 'book' && editorBody.isContentEditable) {
+            const currentLeft = container.scrollLeft;
+            // 프레임 단위로 위치 복구 시도
+            requestAnimationFrame(() => {
+                if(Math.abs(container.scrollLeft - currentLeft) > 5) {
+                    container.scrollLeft = currentLeft;
+                }
+            });
+            setTimeout(() => {
+                if(Math.abs(container.scrollLeft - currentLeft) > 5) {
+                    container.scrollLeft = currentLeft;
+                }
+            }, 50);
+        }
+    };
+
+    editorBody.addEventListener('mousedown', guardScroll);
+    editorBody.addEventListener('touchstart', guardScroll, {passive: true});
+
     editorBody.addEventListener('click', (e) => {
         if (!editorBody.isContentEditable) return;
 
@@ -286,7 +308,7 @@ export function openEditor(isEdit, entryData) {
     toggleViewMode('default', false);
 }
 
-// [완전 단순화] 책 모드 상태 그대로 편집 활성화 (위치 이동/포커스 일절 없음)
+// [단순화 + Scroll Guard] 책 모드 상태 그대로 편집 활성화
 export function toggleBookEditing() {
     if(state.currentViewMode !== 'book') return;
 
@@ -301,12 +323,13 @@ export function toggleBookEditing() {
 
     if (!isEditable) {
         // [편집 모드 ON]
-        // 1. 단순 상태 변경만 수행 (스크롤, 포커스 등 일체 건드리지 않음)
         editTitle.readOnly = false;
         editSubtitle.readOnly = false;
         editBody.contentEditable = "true";
         
-        // 2. 툴바는 접힌 상태로 설정
+        // 포커스 이동 없음 (사용자가 터치한 곳이 곧 커서 위치)
+        // 단, Scroll Guard가 터치 시 튐 방지함
+
         if(editorToolbar) {
             editorToolbar.style.transition = ''; 
             editorToolbar.classList.add('collapsed');
@@ -317,7 +340,6 @@ export function toggleBookEditing() {
             }
         }
 
-        // 3. 버튼 아이콘 변경
         if(btn) {
             btn.innerHTML = '<i class="ph ph-check" style="font-size: 18px; color: #10B981;"></i>';
             btn.title = "편집 완료";
@@ -332,7 +354,6 @@ export function toggleBookEditing() {
 
         linkifyContents(editBody);
         
-        // 툴바 유지 (접힌 상태)
         if(editorToolbar) {
             editorToolbar.classList.add('collapsed');
             const icon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
@@ -342,7 +363,6 @@ export function toggleBookEditing() {
             }
         }
 
-        // 버튼 아이콘 원복
         if(btn) {
             btn.innerHTML = '<i class="ph ph-pencil-simple" style="font-size: 18px;"></i>';
             btn.title = "페이지 편집";
@@ -372,7 +392,6 @@ export function toggleViewMode(mode) {
     const toolbarIcon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
     const container = document.getElementById('editor-container');
 
-    // 모드 변경 시 스타일 초기화
     if(container) {
         container.style.height = '';
         container.style.minHeight = '';
