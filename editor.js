@@ -25,28 +25,27 @@ let wheelLockTimer = null;
 function handleBookWheel(e) {
     if (state.currentViewMode !== 'book') return;
 
-    // 1. 브라우저의 모든 기본 스크롤 동작 차단
+    // 1. 기본 스크롤 동작 차단
     e.preventDefault();
-    e.stopPropagation();
 
-    // 2. 락이 걸려있으면(페이지 넘어가는 중 or 관성 남음) 무시
+    // 2. 락이 걸려있으면 무시
     if (isTurningPage) return;
 
-    // 3. 휠 감도 설정 (작은 떨림 무시)
-    if (Math.abs(e.deltaY) < 30) return;
+    // 3. 휠 감도 설정 (임계값 이상일 때만 동작)
+    if (Math.abs(e.deltaY) < 20) return;
 
-    // 4. 방향 결정
+    // 4. 방향 결정 및 페이지 이동
     const direction = e.deltaY > 0 ? 1 : -1;
+    
+    // 5. 즉시 락을 걸어 연속 동작 방지
+    isTurningPage = true;
     turnPage(direction);
     
-    // 5. 휠 이벤트가 발생하면 즉시 락을 걸고, 0.5초 뒤에 품
-    // (연속 휠 동작을 하나의 동작으로 처리)
-    isTurningPage = true;
     if (wheelLockTimer) clearTimeout(wheelLockTimer);
     wheelLockTimer = setTimeout(() => {
         isTurningPage = false;
         wheelLockTimer = null;
-    }, 500);
+    }, 400); // 0.4초 쿨타임
 }
 
 function handleBookTouchStart(e) {
@@ -56,7 +55,7 @@ function handleBookTouchStart(e) {
 
 function handleBookTouchMove(e) {
     if (state.currentViewMode !== 'book') return;
-    e.preventDefault(); // 모바일 스크롤 차단
+    e.preventDefault(); 
 }
 
 function handleBookTouchEnd(e) {
@@ -68,20 +67,18 @@ function handleBookTouchEnd(e) {
 
     if (Math.abs(diff) > 50) {
         const direction = diff > 0 ? 1 : -1;
-        turnPage(direction);
-        
         isTurningPage = true;
+        turnPage(direction);
         setTimeout(() => isTurningPage = false, 300);
     }
 }
 
 function handleBookResize() {
     if (state.currentViewMode === 'book') {
-        updateBookLayout(); // 레이아웃 및 높이 재계산
+        updateBookLayout();
         const container = document.getElementById('editor-container');
         if(container) {
-            // 리사이즈 시 현재 페이지 위치 유지
-            const stride = Math.floor(container.clientWidth);
+            const stride = container.clientWidth;
             container.scrollLeft = currentBookPageIndex * stride;
             updateBookNav();
         }
@@ -89,16 +86,15 @@ function handleBookResize() {
 }
 
 // ============================================
-// [3] 페이지 이동 (순간 이동 방식)
+// [3] 페이지 이동 (정밀 스냅 방식)
 // ============================================
 
 export function turnPage(direction) { 
     const container = document.getElementById('editor-container');
     if (!container) return;
 
-    // 정확한 1페이지 너비 계산
-    const stride = Math.floor(container.clientWidth);
-    const maxPage = Math.ceil(container.scrollWidth / stride) - 1;
+    const stride = container.clientWidth;
+    const maxPage = Math.max(0, Math.ceil(container.scrollWidth / stride) - 1);
 
     let nextIndex = currentBookPageIndex + direction;
 
@@ -109,7 +105,7 @@ export function turnPage(direction) {
 
     currentBookPageIndex = nextIndex;
 
-    // [핵심] 애니메이션 없이 좌표 강제 주입 (텔레포트)
+    // 정확한 페이지 배수로 스크롤 위치 강제 지정
     container.scrollLeft = currentBookPageIndex * stride;
 
     updateBookNav();
@@ -119,18 +115,12 @@ function updateBookLayout() {
     const container = document.getElementById('editor-container');
     if (!container) return;
     
-    // [중요] JS로 스타일 강제 주입 (CSS 무시 방지)
-    // 1. 가로 너비 설정
-    const width = Math.floor(container.clientWidth);
+    const width = container.clientWidth;
     container.style.columnWidth = `${width}px`;
     container.style.columnGap = '0px';
     
-    // 2. 높이 설정 (화면 높이 - 120px) -> 하단 여백 확보
-    // 모바일 주소창 등을 고려해 window.innerHeight 사용
     const targetHeight = window.innerHeight - 120; 
     container.style.height = `${targetHeight}px`;
-    
-    // 3. 스크롤바 숨김 강제
     container.style.overflow = 'hidden';
 }
 
@@ -143,11 +133,11 @@ export function updateBookNav() {
 
     if(!container) return;
 
-    const stride = Math.floor(container.clientWidth);
+    const stride = container.clientWidth;
     const scrollWidth = container.scrollWidth; 
     
     const currentPage = currentBookPageIndex + 1;
-    const totalPages = Math.ceil(scrollWidth / stride) || 1; 
+    const totalPages = Math.max(1, Math.ceil(scrollWidth / stride)); 
     
     if (bookNavLeft) {
         if (currentBookPageIndex > 0) bookNavLeft.classList.remove('hidden'); 
@@ -166,7 +156,7 @@ export function updateBookNav() {
 }
 
 // ============================================
-// [4] 에디터 모드 관리 (위치 동기화 포함)
+// [4] 에디터 모드 관리
 // ============================================
 
 function linkifyContents(element) {
@@ -220,7 +210,6 @@ function setupBasicHandling() {
         }
     };
     
-    // 리사이즈 이벤트 등록 (기존 리스너 제거 후 등록)
     window.removeEventListener('resize', handleBookResize); 
     window.addEventListener('resize', () => {
         updateSelectionBox();
@@ -233,6 +222,7 @@ function toggleBookEventListeners(enable) {
     if (!container) return;
 
     container.removeEventListener('wheel', handleBookWheel);
+    container.removeEventListener('touchstart', handleBookWheel); // 기존 중복 제거
     container.removeEventListener('touchstart', handleBookTouchStart);
     container.removeEventListener('touchmove', handleBookTouchMove);
     container.removeEventListener('touchend', handleBookTouchEnd);
@@ -304,11 +294,8 @@ export function toggleViewMode(mode) {
     let savedPageIndex = 0;
 
     if (container) {
-        if (previousMode === 'book') {
-            savedPageIndex = currentBookPageIndex;
-        } else {
-            savedScrollTop = container.scrollTop;
-        }
+        if (previousMode === 'book') savedPageIndex = currentBookPageIndex;
+        else savedScrollTop = container.scrollTop;
     }
 
     state.currentViewMode = mode;
@@ -323,10 +310,9 @@ export function toggleViewMode(mode) {
     const toolbarToggleBtn = document.getElementById('toolbar-toggle-btn');
     const toolbarIcon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
 
-    // 스타일 초기화 (일반 모드로 복귀 시 필수)
     if(container) {
-        container.style.height = ''; // JS 강제 스타일 제거
-        container.style.overflow = ''; // JS 강제 스타일 제거
+        container.style.height = ''; 
+        container.style.overflow = ''; 
         container.style.columnWidth = ''; 
         container.style.columnGap = '';
         container.scrollLeft = 0; 
@@ -344,7 +330,6 @@ export function toggleViewMode(mode) {
     toggleBookEventListeners(false);
 
     if (mode === 'book') {
-        // [책 모드]
         editTitle.readOnly = true; 
         editSubtitle.readOnly = true;
         editBody.contentEditable = "false";
@@ -358,21 +343,16 @@ export function toggleViewMode(mode) {
             if(toolbarIcon) { toolbarIcon.classList.remove('ph-caret-up'); toolbarIcon.classList.add('ph-caret-down'); }
         }
 
-        // [중요] 초기화 및 리스너 등록
         currentBookPageIndex = 0;
         updateBookLayout(); 
         toggleBookEventListeners(true);
         
-        // 위치 복원 (일반 -> 책)
         setTimeout(() => {
             if(container) {
-                // 현재 높이는 JS로 강제 설정된 값 사용
                 const pageHeight = container.clientHeight; 
-                const stride = Math.floor(container.clientWidth);
-                // 안전장치: 0으로 나누기 방지
+                const stride = container.clientWidth;
                 if(pageHeight > 0) {
-                    const targetIndex = Math.floor(savedScrollTop / pageHeight);
-                    currentBookPageIndex = targetIndex;
+                    currentBookPageIndex = Math.floor(savedScrollTop / pageHeight);
                     container.scrollLeft = currentBookPageIndex * stride;
                     updateBookNav();
                 }
@@ -380,7 +360,6 @@ export function toggleViewMode(mode) {
         }, 50);
 
     } else {
-        // [일반/읽기 모드]
         if (mode === 'readOnly') {
             editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false"; linkifyContents(editBody);
             writeModal.classList.add('mode-read-only');
@@ -396,12 +375,8 @@ export function toggleViewMode(mode) {
             }
         }
 
-        // 위치 복원 (책 -> 일반)
         setTimeout(() => {
             if(container && previousMode === 'book') {
-                // 이전 모드(책)에서의 페이지 높이를 추정해야 함. 
-                // 지금은 일반모드로 돌아왔으므로 container.clientHeight는 다름.
-                // 따라서 저장 당시의 높이(화면높이 - 120)를 역산
                 const estimatedPageHeight = window.innerHeight - 120;
                 container.scrollTop = savedPageIndex * estimatedPageHeight;
             } else if (container) {

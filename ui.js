@@ -4,7 +4,6 @@ import { openEditor, toggleViewMode, applyFontStyle, turnPage, formatDoc, change
 import { saveToDrive } from './drive.js';
 
 const getEl = (id) => document.getElementById(id);
-let tabSortable = null; // Sortable 인스턴스 관리용
 
 export function renderEntries(keyword = '') {
     const entryList = getEl('entry-list');
@@ -58,85 +57,38 @@ export function renderEntries(keyword = '') {
 export function renderTabs() {
     const tabContainer = getEl('tab-container');
     if(!tabContainer) return;
-    
-    // 기존 Sortable 인스턴스 정리 (중복 방지)
-    if (tabSortable) {
-        tabSortable.destroy();
-        tabSortable = null;
-    }
-
     tabContainer.innerHTML = '';
     
-    // 순서 정렬 로직
     const sortedCats = [];
     state.categoryOrder.forEach(id => { const found = state.allCategories.find(c => c.id === id); if(found) sortedCats.push(found); });
     state.allCategories.forEach(c => { if(!state.categoryOrder.includes(c.id)) { sortedCats.push(c); state.categoryOrder.push(c.id); } });
 
-    // 현재 선택된 카테고리가 없으면 첫 번째 선택
     const currentExists = sortedCats.find(c => c.id === state.currentCategory);
+    
     if (!currentExists && sortedCats.length > 0) {
         state.currentCategory = sortedCats[0].id;
         setTimeout(() => renderEntries(), 0);
     }
 
-    // 탭 버튼 생성
     sortedCats.forEach(cat => {
         const btn = document.createElement('button');
         btn.className = `tab-btn ${state.currentCategory === cat.id ? 'active' : ''}`;
         btn.dataset.id = cat.id; 
         btn.innerHTML = `<span>${cat.name}</span>`;
-        
-        // 클릭 시 탭 전환
-        btn.onclick = (e) => { 
-            // 드래그 중 클릭 방지
-            if(btn.classList.contains('sortable-drag')) return;
+        btn.onclick = () => { 
             state.currentCategory = cat.id; 
             renderTabs(); 
             renderEntries(); 
         };
-        
         attachCatContextMenu(btn, cat.id);
         tabContainer.appendChild(btn);
     });
     
-    // 추가 버튼 (+)
     const addBtn = document.createElement('button');
     addBtn.className = 'add-cat-btn';
     addBtn.innerHTML = '<i class="ph ph-plus"></i>';
     addBtn.onclick = addNewCategory;
     tabContainer.appendChild(addBtn);
-
-    // [핵심] 탭 드래그 앤 드롭 기능 적용
-    if (typeof Sortable !== 'undefined') {
-        tabSortable = new Sortable(tabContainer, {
-            animation: 150,
-            draggable: ".tab-btn", // 탭 버튼만 드래그 가능 (+버튼 제외)
-            filter: ".add-cat-btn",
-            onEnd: async function (evt) {
-                // DOM 순서대로 ID 추출
-                const newOrder = [];
-                tabContainer.querySelectorAll('.tab-btn').forEach(btn => {
-                    newOrder.push(btn.dataset.id);
-                });
-
-                // 순서가 실제로 바뀌었으면 저장 및 동기화
-                if (JSON.stringify(state.categoryOrder) !== JSON.stringify(newOrder)) {
-                    state.categoryOrder = newOrder;
-                    
-                    // [중요] 타임스탬프 갱신 (그래야 다른 기기가 이 변경사항을 받아들임)
-                    state.categoryUpdatedAt = new Date().toISOString();
-                    
-                    saveCategoriesToLocal();
-                    
-                    // 클라우드 즉시 동기화
-                    const refreshBtn = document.getElementById('refresh-btn');
-                    if(refreshBtn) refreshBtn.classList.add('rotating');
-                    await saveToDrive();
-                    if(refreshBtn) refreshBtn.classList.remove('rotating');
-                }
-            }
-        });
-    }
 }
 
 export function renderTrash() { 
@@ -353,8 +305,43 @@ export function openMoveModal() {
     });
 }
 
-// UI 리스너 설정
+// [핵심] setupUIListeners (동기화 버튼 + 툴바 휠 스크롤 추가)
 export function setupUIListeners() {
+    // 1. 에디터 내 동기화 버튼 (onclick 강제 할당)
+    const editorSyncBtn = document.getElementById('editor-sync-btn');
+    if(editorSyncBtn) {
+        editorSyncBtn.onclick = async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // 시각적 피드백
+            editorSyncBtn.classList.add('rotating');
+            
+            try {
+                // 저장 및 동기화 실행
+                await saveEntry(); 
+            } catch(err) {
+                console.error('동기화 오류:', err);
+            } finally {
+                // 1초 뒤 멈춤
+                setTimeout(() => {
+                    editorSyncBtn.classList.remove('rotating');
+                }, 1000);
+            }
+        };
+    }
+
+    // 2. [추가됨] 툴바 가로 휠 스크롤 지원
+    const toolbarScroll = document.querySelector('.toolbar-content-scroll');
+    if (toolbarScroll) {
+        toolbarScroll.addEventListener('wheel', (e) => {
+            if (e.deltaY !== 0) {
+                e.preventDefault(); 
+                toolbarScroll.scrollLeft += e.deltaY; // 휠을 굴린 만큼 가로로 이동
+            }
+        }, { passive: false });
+    }
+
     const closeLoginBtn = document.getElementById('close-login-btn');
     if(closeLoginBtn) closeLoginBtn.addEventListener('click', () => closeAllModals(true));
     
@@ -386,11 +373,11 @@ export function setupUIListeners() {
 
     const refreshBtn = document.getElementById('refresh-btn');
     if(refreshBtn) {
-        refreshBtn.addEventListener('click', async () => {
+        refreshBtn.onclick = async () => {
             refreshBtn.classList.add('rotating');
             await saveToDrive();
             refreshBtn.classList.remove('rotating');
-        });
+        };
     }
 
     const fontSelector = document.getElementById('font-selector');

@@ -25,11 +25,11 @@ export async function saveEntry() {
     
     if(!title.trim() && !bodyEl.innerText.trim()) return;
 
-    // [중요] 수정 시점의 타임스탬프 생성
+    // [중요] 저장 버튼 누른 시점을 수정 시간으로 기록
     const nowISO = new Date().toISOString();
 
     if(!state.editingId) {
-        // --- 새 글 작성 ---
+        // --- 새 글 ---
         const newId = Date.now().toString();
         const newEntry = {
             id: newId,
@@ -38,7 +38,7 @@ export async function saveEntry() {
             body: body,
             date: new Date().toLocaleDateString('ko-KR'),
             timestamp: nowISO,
-            modifiedAt: nowISO, // 수정 시간 기록
+            modifiedAt: nowISO, // 수정 시간
             category: state.currentCategory,
             isDeleted: false,
             isPurged: false,
@@ -47,7 +47,7 @@ export async function saveEntry() {
         };
         state.entries.unshift(newEntry);
     } else {
-        // --- 기존 글 수정 ---
+        // --- 수정 ---
         const index = state.entries.findIndex(e => e.id === state.editingId);
         if(index > -1) {
             state.entries[index] = {
@@ -65,35 +65,40 @@ export async function saveEntry() {
     saveDataLocal();
     renderEntries();
     
-    // [핵심] 저장 후 즉시 클라우드 동기화 (병합 과정 포함)
+    // [핵심] 저장 후 즉시 병합 동기화 시도
     await saveToDrive(); 
 }
 
 export function updateEntryField(id, fields) {
     const index = state.entries.findIndex(e => e.id === id);
     if(index > -1) {
-        state.entries[index] = { ...state.entries[index], ...fields, modifiedAt: new Date().toISOString() };
+        // 필드 업데이트 시에도 수정 시간 갱신
+        state.entries[index] = { 
+            ...state.entries[index], 
+            ...fields, 
+            modifiedAt: new Date().toISOString() 
+        };
         saveDataLocal();
-        return saveToDrive(); // 변경 즉시 동기화
+        return saveToDrive(); 
     }
 }
 
 export async function moveToTrash(id) {
     if(confirm('휴지통으로 이동하시겠습니까?')) {
-        await updateEntryField(id, { isDeleted: true, modifiedAt: new Date().toISOString() });
+        await updateEntryField(id, { isDeleted: true });
         renderEntries();
     }
 }
 
 export async function restoreEntry(id) {
-    await updateEntryField(id, { isDeleted: false, modifiedAt: new Date().toISOString() });
+    await updateEntryField(id, { isDeleted: false });
     renderTrash();
     renderEntries();
 }
 
 export async function permanentDelete(id) {
     if(confirm('영구 삭제하시겠습니까? 되돌릴 수 없습니다.')) {
-        await updateEntryField(id, { isPurged: true, modifiedAt: new Date().toISOString() });
+        await updateEntryField(id, { isPurged: true });
         renderTrash();
     }
 }
@@ -156,7 +161,7 @@ export async function duplicateEntry(id) {
     await saveToDrive();
 }
 
-// 내부 저장용 (localStorage만 갱신)
+// 로컬 스토리지 저장 (백업용)
 function saveDataLocal() {
     localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
 }
