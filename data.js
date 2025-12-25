@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import { renderEntries, renderTrash } from './ui.js';
-import { saveToDrive } from './drive.js';
+import { saveToDrive, syncFromDrive } from './drive.js';
 
 export function loadDataFromLocal() {
     const localData = localStorage.getItem('faithLogDB');
@@ -17,14 +17,16 @@ export async function saveEntry() {
     if(!titleEl || !bodyEl) return;
     
     const title = titleEl.value;
-    const body = bodyEl.innerHTML; // 서식(태그) 포함 저장
+    const body = bodyEl.innerHTML; 
     const subtitle = subtitleEl ? subtitleEl.value : '';
     
-    // [핵심 수정] 현재 적용된 폰트와 크기 정보를 가져옴 (없으면 기본값)
     const currentFont = state.currentFontFamily || 'Pretendard';
     const currentSize = state.currentFontSize || 16;
     
     if(!title.trim() && !bodyEl.innerText.trim()) return;
+
+    // [중요] 수정 시점의 타임스탬프 생성
+    const nowISO = new Date().toISOString();
 
     if(!state.editingId) {
         // --- 새 글 작성 ---
@@ -34,78 +36,64 @@ export async function saveEntry() {
             title: title || '제목 없음',
             subtitle: subtitle,
             body: body,
-            // [추가] 폰트 정보 저장
-            fontFamily: currentFont,
-            fontSize: currentSize,
-            
             date: new Date().toLocaleDateString('ko-KR'),
-            timestamp: new Date().toISOString(),
-            modifiedAt: new Date().toISOString(),
+            timestamp: nowISO,
+            modifiedAt: nowISO, // 수정 시간 기록
             category: state.currentCategory,
             isDeleted: false,
-            isPurged: false
+            isPurged: false,
+            fontFamily: currentFont,
+            fontSize: currentSize
         };
         state.entries.unshift(newEntry);
-        state.editingId = newId; 
-        
     } else {
         // --- 기존 글 수정 ---
-        const entry = state.entries.find(e => e.id === state.editingId);
-        if(entry) {
-            entry.title = title;
-            entry.subtitle = subtitle;
-            entry.body = body;
-            
-            // [추가] 폰트 정보 업데이트
-            entry.fontFamily = currentFont;
-            entry.fontSize = currentSize;
-            
-            entry.modifiedAt = new Date().toISOString(); 
+        const index = state.entries.findIndex(e => e.id === state.editingId);
+        if(index > -1) {
+            state.entries[index] = {
+                ...state.entries[index],
+                title: title,
+                subtitle: subtitle,
+                body: body,
+                fontFamily: currentFont,
+                fontSize: currentSize,
+                modifiedAt: nowISO // 수정 시간 갱신
+            };
         }
     }
     
+    saveDataLocal();
     renderEntries();
-    saveData();
+    
+    // [핵심] 저장 후 즉시 클라우드 동기화 (병합 과정 포함)
+    await saveToDrive(); 
 }
 
-export function saveData() {
-    localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-    saveToDrive(); 
-}
-
-export async function updateEntryField(id, fields) {
-    const entry = state.entries.find(e => e.id === id);
-    if(entry) {
-        Object.assign(entry, fields);
-        entry.modifiedAt = new Date().toISOString();
-        saveData();
-        renderEntries();
+export function updateEntryField(id, fields) {
+    const index = state.entries.findIndex(e => e.id === id);
+    if(index > -1) {
+        state.entries[index] = { ...state.entries[index], ...fields, modifiedAt: new Date().toISOString() };
+        saveDataLocal();
+        return saveToDrive(); // 변경 즉시 동기화
     }
 }
 
 export async function moveToTrash(id) {
-    await updateEntryField(id, { isDeleted: true });
-}
-
-export async function restoreEntry(id) {
-    const entry = state.entries.find(e => e.id === id);
-    if(entry) {
-        entry.isDeleted = false;
-        entry.isPurged = false;
-        entry.modifiedAt = new Date().toISOString();
-        saveData();
-        renderTrash();
+    if(confirm('휴지통으로 이동하시겠습니까?')) {
+        await updateEntryField(id, { isDeleted: true, modifiedAt: new Date().toISOString() });
         renderEntries();
     }
 }
 
+export async function restoreEntry(id) {
+    await updateEntryField(id, { isDeleted: false, modifiedAt: new Date().toISOString() });
+    renderTrash();
+    renderEntries();
+}
+
 export async function permanentDelete(id) {
-    const entry = state.entries.find(e => e.id === id);
-    if(entry) {
-        entry.isDeleted = true;
-        entry.isPurged = true; 
-        entry.modifiedAt = new Date(Date.now() + 1000).toISOString();
-        saveData();
+    if(confirm('영구 삭제하시겠습니까? 되돌릴 수 없습니다.')) {
+        await updateEntryField(id, { isPurged: true, modifiedAt: new Date().toISOString() });
         renderTrash();
     }
 }
@@ -115,12 +103,14 @@ export async function emptyTrash() {
     if(trashItems.length === 0) return;
     
     if(confirm('휴지통을 비우시겠습니까? 복구할 수 없습니다.')) {
+        const now = new Date().toISOString();
         trashItems.forEach(e => {
             e.isPurged = true;
-            e.modifiedAt = new Date().toISOString();
+            e.modifiedAt = now;
         });
-        saveData();
+        saveDataLocal();
         renderTrash();
+        await saveToDrive();
     }
 }
 
@@ -138,25 +128,35 @@ export function checkOldTrash() {
             }
         }
     });
-    if(changed) saveData();
+    if(changed) {
+        saveDataLocal();
+        saveToDrive();
+    }
 }
 
 export async function duplicateEntry(id) {
     const original = state.entries.find(e => e.id === id);
     if (!original) return;
 
+    const nowISO = new Date().toISOString();
     const newEntry = {
         ...original, 
-        id: Date.now().toString(), 
-        title: (original.title || '제목 없음') + " (복사본)",
+        id: Date.now().toString(),
+        title: original.title + " (복사본)",
         date: new Date().toLocaleDateString('ko-KR'),
-        timestamp: new Date().toISOString(),
-        modifiedAt: new Date().toISOString(),
+        timestamp: nowISO,
+        modifiedAt: nowISO,
         isDeleted: false,
         isPurged: false
     };
     
-    state.entries.unshift(newEntry); 
-    saveData();
+    state.entries.unshift(newEntry);
+    saveDataLocal();
     renderEntries();
+    await saveToDrive();
+}
+
+// 내부 저장용 (localStorage만 갱신)
+function saveDataLocal() {
+    localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
 }
