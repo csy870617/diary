@@ -39,14 +39,23 @@ function init() {
         if (isLoggedIn) {
             renderTabs();
             renderEntries(); 
+            // 주기적 동기화 간격을 30초로 단축하여 실시간성 강화
             setInterval(() => {
                 if (!document.hidden && window.gapi?.client?.getToken()) syncFromDrive();
-            }, 60000);
+            }, 30000);
         }
     });
 
+    // 화면 포커스를 얻거나, 다른 앱에서 돌아올 때(모바일) 즉시 동기화
     window.addEventListener('focus', () => {
         if (window.gapi?.client?.getToken()) syncFromDrive();
+    });
+
+    // [추가] 브라우저 가시성 상태 감지 (모바일 앱 전환 시 매우 중요)
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && window.gapi?.client?.getToken()) {
+            syncFromDrive();
+        }
     });
 
     window.addEventListener('online', () => syncFromDrive());

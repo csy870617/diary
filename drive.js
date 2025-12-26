@@ -4,9 +4,10 @@ import { renderEntries, renderTabs } from './ui.js';
 
 let tokenClient;
 let gapiInited = false;
-let gisInited = false;
+let gisInited = false; // 변수명 대소문자 수정 완료
 let isSyncing = false;
 let pendingSync = false;
+let lastCloudModifiedTime = null; 
 
 // 1. Google API 초기화
 export function initGoogleDrive(callback) {
@@ -55,7 +56,7 @@ export function initGoogleDrive(callback) {
             await checkAuthAndSync(callback);
         },
     });
-    gisInited = true;
+    gisInited = true; // 대소문자 일치 확인
 }
 
 export function handleAuthClick() {
@@ -104,7 +105,7 @@ function toggleSpinners(active) {
 }
 
 /**
- * 완벽 동기화 프로세스 (Pull -> Merge -> Push)
+ * 정교한 동기화 프로세스 (버전 확인 -> 병합 -> 업로드)
  */
 export async function saveToDrive() {
     if (!gapi.client.getToken()) return;
@@ -114,37 +115,40 @@ export async function saveToDrive() {
     toggleSpinners(true);
 
     try {
-        console.log("동기화 시작...");
         const folderId = await ensureAppFolder();
         const fileMeta = await findDBFileMeta(folderId);
         
-        let cloudData = { entries: [], categories: [], categoryOrder: [], categoryUpdatedAt: "1970-01-01T00:00:00.000Z" };
+        let cloudData = null;
         
         if (fileMeta) {
-            const response = await gapi.client.drive.files.get({
-                fileId: fileMeta.id,
-                alt: 'media'
-            });
-            cloudData = typeof response.result === 'string' ? JSON.parse(response.result) : response.result;
+            // 클라우드 파일이 변경되었을 때만 데이터 가져오기
+            if (!lastCloudModifiedTime || fileMeta.modifiedTime !== lastCloudModifiedTime) {
+                const response = await gapi.client.drive.files.get({
+                    fileId: fileMeta.id,
+                    alt: 'media'
+                });
+                cloudData = typeof response.result === 'string' ? JSON.parse(response.result) : response.result;
+                lastCloudModifiedTime = fileMeta.modifiedTime;
+            }
         }
 
-        // 정밀 병합
-        state.entries = mergeEntries(state.entries, cloudData.entries || []);
-        const mergedCats = mergeCategories(state, cloudData);
+        if (cloudData) {
+            state.entries = mergeEntries(state.entries, cloudData.entries || []);
+            const mergedCats = mergeCategories(state, cloudData);
+            state.allCategories = mergedCats.categories;
+            state.categoryOrder = mergedCats.order;
+            state.categoryUpdatedAt = mergedCats.updatedAt;
 
-        state.allCategories = mergedCats.categories;
-        state.categoryOrder = mergedCats.order;
-        state.categoryUpdatedAt = mergedCats.updatedAt;
+            localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+            saveCategoriesToLocal();
+            renderTabs();
+            renderEntries();
+        }
 
-        localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-        saveCategoriesToLocal();
-
-        // 클라우드 업로드
-        await uploadToDrive(folderId, fileMeta ? fileMeta.id : null);
-        console.log("동기화 완료.");
-
-        renderTabs();
-        renderEntries();
+        const uploadRes = await uploadToDrive(folderId, fileMeta ? fileMeta.id : null);
+        if (uploadRes && uploadRes.result) {
+            lastCloudModifiedTime = uploadRes.result.modifiedTime;
+        }
 
     } catch (err) {
         console.error("Sync Error", err);
@@ -181,10 +185,10 @@ async function uploadToDrive(folderId, fileId) {
         delimiter + 'Content-Type: application/json\r\n\r\n' + JSON.stringify(fileMetadata) +
         delimiter + 'Content-Type: application/json\r\n\r\n' + fileContent + close_delim;
 
-    await gapi.client.request({
+    return await gapi.client.request({
         'path': fileId ? `/upload/drive/v3/files/${fileId}` : '/upload/drive/v3/files',
         'method': fileId ? 'PATCH' : 'POST',
-        'params': { 'uploadType': 'multipart' },
+        'params': { 'uploadType': 'multipart', 'fields': 'id, name, modifiedTime' },
         'headers': { 'Content-Type': 'multipart/related; boundary="' + boundary + '"' },
         'body': multipartRequestBody
     });
@@ -202,7 +206,7 @@ function mergeEntries(localList, cloudList) {
         } else {
             const localTime = new Date(localItem.modifiedAt || localItem.timestamp || 0).getTime();
             const cloudTime = new Date(cloudItem.modifiedAt || cloudItem.timestamp || 0).getTime();
-            if (localTime > cloudTime) {
+            if (localTime >= cloudTime) {
                 entryMap.set(localItem.id, localItem);
             }
         }

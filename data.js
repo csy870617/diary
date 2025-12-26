@@ -41,13 +41,17 @@ export async function saveEntry() {
         };
         state.entries.unshift(newEntry);
     } else {
-        state.entries[index] = {
-            ...state.entries[index],
-            title, subtitle, body,
-            modifiedAt: nowISO, 
-            fontFamily: state.currentFontFamily,
-            fontSize: state.currentFontSize
-        };
+        // [중요] 기존 데이터와 내용이 다를 때만 modifiedAt 갱신 (불필요한 동기화 방지)
+        const old = state.entries[index];
+        if (old.title !== title || old.body !== body || old.subtitle !== subtitle) {
+            state.entries[index] = {
+                ...old,
+                title, subtitle, body,
+                modifiedAt: nowISO, 
+                fontFamily: state.currentFontFamily,
+                fontSize: state.currentFontSize
+            };
+        }
     }
     
     localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
