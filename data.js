@@ -19,6 +19,7 @@ export async function saveEntry() {
     const subtitle = subtitleEl ? subtitleEl.value : '';
     const nowISO = new Date().toISOString();
 
+    // 제목과 내용이 모두 비어있으면 저장하지 않음 (단, ID는 유지)
     if(!title.trim() && !bodyEl.innerText.trim()) return;
 
     if (!state.editingId) state.editingId = Date.now().toString();
@@ -41,6 +42,7 @@ export async function saveEntry() {
         };
         state.entries.unshift(newEntry);
     } else {
+        // 기존 글 업데이트 (수정 시간 갱신)
         state.entries[index] = {
             ...state.entries[index],
             title, subtitle, body,
@@ -50,13 +52,14 @@ export async function saveEntry() {
         };
     }
     
-    saveData();
-    renderEntries();
+    // 로컬 스토리지 저장
+    localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+    // 참고: 클라우드 동기화는 editor.js의 triggerAutoSave에서 별도로 호출함
 }
 
 export function saveData() {
     localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-    saveToDrive(false); // 일반 저장은 Pull 없이 Push 시도
+    saveToDrive(false); 
 }
 
 export async function updateEntryField(id, fields) {

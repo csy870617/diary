@@ -1,5 +1,6 @@
 import { state } from './state.js';
 import { saveEntry } from './data.js';
+import { saveToDrive } from './drive.js';
 
 // ============================================
 // [1] 전역 변수 및 상태
@@ -20,14 +21,26 @@ let touchStartX = 0;
 let wheelLockTimer = null;    
 
 // ============================================
-// [2] 자동 저장 (Auto-Save) 로직
+// [2] 자동 저장 (Auto-Save) 로직 - 작성 중 동기화 핵심
 // ============================================
-function triggerAutoSave() {
+async function triggerAutoSave() {
     if (autoSaveTimer) clearTimeout(autoSaveTimer);
-    // 3초 동안 입력이 없으면 저장 및 동기화 수행
-    autoSaveTimer = setTimeout(() => {
-        console.log("자동 저장 및 동기화 실행...");
-        saveEntry(); 
+    
+    // 3초 동안 입력이 없으면 실행
+    autoSaveTimer = setTimeout(async () => {
+        const editBody = document.getElementById('editor-body');
+        if (!editBody || state.currentViewMode !== 'default') return;
+
+        console.log("작성 중인 내용을 자동 저장 및 클라우드 동기화 중...");
+        
+        // 1. 로컬 상태 업데이트
+        await saveEntry(); 
+        
+        // 2. 즉시 클라우드 전송 (작성 중인 글은 강제로 밀어넣음)
+        // 리스트를 리렌더링하지 않고 백그라운드에서 조용히 전송
+        if (gapi.client && gapi.client.getToken()) {
+            await saveToDrive(false); 
+        }
     }, 3000);
 }
 
@@ -161,7 +174,7 @@ export function updateBookNav() {
 }
 
 // ============================================
-// [5] 에디터 모드 관리 & 자동 저장 연결
+// [5] 에디터 모드 관리
 // ============================================
 
 function linkifyContents(element) {
@@ -211,7 +224,7 @@ function setupBasicHandling() {
 
     if(writeModal) writeModal.addEventListener('scroll', updateSelectionBox);
     
-    // [자동 저장 연결] 내용이 바뀔 때마다 트리거
+    // 내용 입력 시 자동 저장 트리거
     editorBody.addEventListener('input', () => {
         updateSelectionBox();
         triggerAutoSave();
@@ -290,9 +303,8 @@ export function openEditor(isEdit, entryData) {
         linkifyContents(editBody);
         applyFontStyle(entryData.fontFamily || 'Pretendard', entryData.fontSize || 16); 
     } else { 
-        // ID 선발급 (중복 방지)
+        // 새 글 작성 시 즉시 ID 발급하여 동기화 준비
         state.editingId = Date.now().toString(); 
-        
         editTitle.value = ''; 
         editSubtitle.value = ''; 
         editBody.innerHTML = ''; 
@@ -312,11 +324,8 @@ export function toggleViewMode(mode) {
     let savedPageIndex = 0;
 
     if (container) {
-        if (previousMode === 'book') {
-            savedPageIndex = currentBookPageIndex;
-        } else {
-            savedScrollTop = container.scrollTop;
-        }
+        if (previousMode === 'book') savedPageIndex = currentBookPageIndex;
+        else savedScrollTop = container.scrollTop;
     }
 
     state.currentViewMode = mode;
@@ -332,12 +341,9 @@ export function toggleViewMode(mode) {
     const toolbarIcon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
 
     if(container) {
-        container.style.height = ''; 
-        container.style.overflow = ''; 
-        container.style.columnWidth = ''; 
-        container.style.columnGap = '';
-        container.scrollLeft = 0; 
-        container.scrollTop = 0;
+        container.style.height = ''; container.style.overflow = ''; 
+        container.style.columnWidth = ''; container.style.columnGap = '';
+        container.scrollLeft = 0; container.scrollTop = 0;
     }
 
     writeModal.classList.remove('mode-read-only', 'mode-book');
@@ -351,66 +357,43 @@ export function toggleViewMode(mode) {
     toggleBookEventListeners(false);
 
     if (mode === 'book') {
-        editTitle.readOnly = true; 
-        editSubtitle.readOnly = true;
-        editBody.contentEditable = "false";
+        editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false";
         linkifyContents(editBody);
-        
         writeModal.classList.add('mode-book');
-        if(exitFocusBtn) exitFocusBtn.classList.remove('hidden');
         if(btnBookMode) btnBookMode.classList.add('active');
         if(editorToolbar) {
             editorToolbar.classList.add('collapsed');
             if(toolbarIcon) { toolbarIcon.classList.remove('ph-caret-up'); toolbarIcon.classList.add('ph-caret-down'); }
         }
-
         currentBookPageIndex = 0;
         updateBookLayout(); 
         toggleBookEventListeners(true);
-        
         setTimeout(() => {
             if(container) {
                 const pageHeight = container.clientHeight; 
                 const stride = Math.floor(container.clientWidth);
                 if(pageHeight > 0) {
-                    const targetIndex = Math.floor(savedScrollTop / pageHeight);
-                    currentBookPageIndex = targetIndex;
+                    currentBookPageIndex = Math.floor(savedScrollTop / pageHeight);
                     container.scrollLeft = currentBookPageIndex * stride;
                     updateBookNav();
                 }
             }
         }, 50);
-
     } else {
         if (mode === 'readOnly') {
             editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false"; linkifyContents(editBody);
             writeModal.classList.add('mode-read-only');
-            if(exitFocusBtn) exitFocusBtn.classList.remove('hidden');
             if(btnReadOnly) btnReadOnly.classList.add('active');
             if(editorToolbar) editorToolbar.classList.add('collapsed');
         } else {
             editTitle.readOnly = false; editSubtitle.readOnly = false; editBody.contentEditable = "true";
-            if(editorToolbar) { 
-                editorToolbar.style.transition = ''; 
-                editorToolbar.classList.remove('collapsed'); 
-                if(toolbarIcon) { toolbarIcon.classList.remove('ph-caret-down'); toolbarIcon.classList.add('ph-caret-up'); } 
-            }
+            if(editorToolbar) { editorToolbar.classList.remove('collapsed'); }
         }
-
         setTimeout(() => {
-            if(container && previousMode === 'book') {
-                const estimatedPageHeight = window.innerHeight - 120;
-                container.scrollTop = savedPageIndex * estimatedPageHeight;
-            } else if (container) {
-                container.scrollTop = savedScrollTop;
-            }
+            if(container) container.scrollTop = (previousMode === 'book') ? savedPageIndex * (window.innerHeight - 120) : savedScrollTop;
         }, 50);
     }
 }
-
-// ============================================
-// [6] 기타 유틸리티 함수
-// ============================================
 
 function selectImage(img) {
     if (currentSelectedImg === img) return;
@@ -458,7 +441,6 @@ function startResize(e) { e.preventDefault(); e.stopPropagation(); isResizing = 
 function resizing(e) { if (!isResizing || !currentSelectedImg) return; const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX; const dx = clientX - startX; const newWidth = startWidth + dx; const containerWidth = document.getElementById('editor-body').clientWidth; if (newWidth > 50 && newWidth <= containerWidth) { currentSelectedImg.style.width = newWidth + 'px'; currentSelectedImg.style.height = 'auto'; updateSelectionBox(); } }
 function stopResize() { isResizing = false; document.removeEventListener('mousemove', resizing); document.removeEventListener('touchmove', resizing); document.removeEventListener('mouseup', stopResize); document.removeEventListener('touchend', stopResize); triggerAutoSave(); }
 
-// [수정] 서식 적용 시에도 자동 저장 트리거
 export function formatDoc(cmd, value = null) { const editBody = document.getElementById('editor-body'); if (!editBody) return; editBody.focus(); document.execCommand(cmd, false, value); triggerAutoSave(); }
 export function applyFontStyle(f, s) { state.currentFontFamily = f; state.currentFontSize = s; const editBody = document.getElementById('editor-body'); if(editBody) { editBody.style.fontFamily = f; editBody.style.fontSize = (f==='Nanum Pen Script' ? s+4 : s) + 'px'; } }
 export function changeGlobalFontSize(delta) { const editBody = document.getElementById('editor-body'); if(!editBody) return; const style = window.getComputedStyle(editBody); let currentSize = parseFloat(style.fontSize) || 16; let newSize = currentSize + delta; if(newSize < 12) newSize = 12; if(newSize > 60) newSize = 60; state.currentFontSize = newSize; applyFontStyle(state.currentFontFamily, newSize); triggerAutoSave(); }
