@@ -23,18 +23,14 @@ export async function saveEntry() {
     const currentFont = state.currentFontFamily || 'Pretendard';
     const currentSize = state.currentFontSize || 16;
     
-    // 내용이 없으면 저장 안 함
     if(!title.trim() && !bodyEl.innerText.trim()) return;
 
-    // 만약 editingId가 없으면(비상용) 생성
     if (!state.editingId) state.editingId = Date.now().toString();
 
-    // [핵심] ID가 실제 목록에 존재하는지 확인
     const index = state.entries.findIndex(e => e.id === state.editingId);
     const nowISO = new Date().toISOString();
 
     if(index === -1) {
-        // --- 목록에 없으므로 새 글 추가 ---
         const newEntry = {
             id: state.editingId,
             title: title || '제목 없음',
@@ -51,7 +47,6 @@ export async function saveEntry() {
         };
         state.entries.unshift(newEntry);
     } else {
-        // --- 목록에 있으므로 수정 ---
         state.entries[index] = {
             ...state.entries[index],
             title: title,
@@ -69,7 +64,6 @@ export async function saveEntry() {
 
 export function saveData() {
     localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-    // 저장 시 자동으로 클라우드 동기화 호출
     saveToDrive(); 
 }
 
@@ -101,18 +95,23 @@ export async function permanentDelete(id) {
     }
 }
 
+// [핵심] 휴지통 비우기 기능
 export async function emptyTrash() {
     const trashItems = state.entries.filter(e => e.isDeleted && !e.isPurged);
-    if(trashItems.length === 0) return;
     
-    if(confirm('휴지통을 비우시겠습니까? 복구할 수 없습니다.')) {
+    if(trashItems.length === 0) {
+        alert("휴지통이 이미 비어있습니다.");
+        return;
+    }
+    
+    if(confirm(`휴지통에 있는 글 ${trashItems.length}개를 모두 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) {
         const now = new Date().toISOString();
         trashItems.forEach(e => {
             e.isPurged = true;
             e.modifiedAt = now;
         });
-        saveData();
-        renderTrash();
+        saveData(); // 저장 및 동기화
+        renderTrash(); // 화면 갱신
     }
 }
 
