@@ -10,6 +10,9 @@ let resizeHandle = null;
 let deleteBtn = null;
 let resizeBtnGroup = null;
 
+// 자동 저장 타이머
+let autoSaveTimer = null;
+
 // 책 모드 상태
 let isTurningPage = false;    
 let currentBookPageIndex = 0; 
@@ -17,12 +20,23 @@ let touchStartX = 0;
 let wheelLockTimer = null;    
 
 // ============================================
-// [2] 이벤트 핸들러
+// [2] 자동 저장 (Auto-Save) 로직
+// ============================================
+function triggerAutoSave() {
+    if (autoSaveTimer) clearTimeout(autoSaveTimer);
+    // 3초 동안 입력이 없으면 저장 및 동기화 수행
+    autoSaveTimer = setTimeout(() => {
+        console.log("자동 저장 및 동기화 실행...");
+        saveEntry(); 
+    }, 3000);
+}
+
+// ============================================
+// [3] 이벤트 핸들러
 // ============================================
 
 function handleBookWheel(e) {
     if (state.currentViewMode !== 'book') return;
-
     e.preventDefault();
     e.stopPropagation();
 
@@ -80,7 +94,7 @@ function handleBookResize() {
 }
 
 // ============================================
-// [3] 페이지 이동
+// [4] 페이지 이동
 // ============================================
 
 export function turnPage(direction) { 
@@ -147,7 +161,7 @@ export function updateBookNav() {
 }
 
 // ============================================
-// [4] 에디터 모드 관리
+// [5] 에디터 모드 관리 & 자동 저장 연결
 // ============================================
 
 function linkifyContents(element) {
@@ -180,7 +194,10 @@ function linkifyContents(element) {
 
 function setupBasicHandling() {
     const editorBody = document.getElementById('editor-body');
+    const editTitle = document.getElementById('edit-title');
+    const editSubtitle = document.getElementById('edit-subtitle');
     const writeModal = document.getElementById('write-modal');
+    
     if (!editorBody) return;
 
     editorBody.onclick = (e) => {
@@ -193,7 +210,15 @@ function setupBasicHandling() {
     };
 
     if(writeModal) writeModal.addEventListener('scroll', updateSelectionBox);
-    editorBody.addEventListener('input', updateSelectionBox);
+    
+    // [자동 저장 연결] 내용이 바뀔 때마다 트리거
+    editorBody.addEventListener('input', () => {
+        updateSelectionBox();
+        triggerAutoSave();
+    });
+    
+    if(editTitle) editTitle.addEventListener('input', triggerAutoSave);
+    if(editSubtitle) editSubtitle.addEventListener('input', triggerAutoSave);
 
     document.onkeydown = (e) => {
         if (currentSelectedImg && (e.key === 'Delete' || e.key === 'Backspace')) {
@@ -265,7 +290,7 @@ export function openEditor(isEdit, entryData) {
         linkifyContents(editBody);
         applyFontStyle(entryData.fontFamily || 'Pretendard', entryData.fontSize || 16); 
     } else { 
-        // [핵심] 새 글 작성 시 ID를 미리 발급하여 중복 생성 방지
+        // ID 선발급 (중복 방지)
         state.editingId = Date.now().toString(); 
         
         editTitle.value = ''; 
@@ -384,7 +409,7 @@ export function toggleViewMode(mode) {
 }
 
 // ============================================
-// [5] 기타 유틸리티 함수
+// [6] 기타 유틸리티 함수
 // ============================================
 
 function selectImage(img) {
@@ -410,7 +435,7 @@ function createSelectionUI() {
         resizeBtnGroup = document.createElement('div'); resizeBtnGroup.className = 'img-resize-group';
         [25, 50, 75, 100].forEach(size => {
             const btn = document.createElement('button'); btn.className = 'img-resize-btn'; btn.innerText = size + '%';
-            btn.onclick = (e) => { e.stopPropagation(); if (currentSelectedImg) { currentSelectedImg.style.width = size + '%'; currentSelectedImg.style.height = 'auto'; updateSelectionBox(); debouncedSave(); } };
+            btn.onclick = (e) => { e.stopPropagation(); if (currentSelectedImg) { currentSelectedImg.style.width = size + '%'; currentSelectedImg.style.height = 'auto'; updateSelectionBox(); triggerAutoSave(); } };
             resizeBtnGroup.appendChild(btn);
         });
         document.body.appendChild(resizeBtnGroup);
@@ -427,15 +452,15 @@ function updateSelectionBox() {
     deleteBtn.style.top = (rect.top + scrollTop - 40) + 'px'; deleteBtn.style.left = (rect.left + scrollLeft + rect.width / 2) + 'px';
     resizeBtnGroup.style.top = (rect.bottom + scrollTop + 10) + 'px'; resizeBtnGroup.style.left = (rect.left + scrollLeft + rect.width / 2) + 'px';
 }
-function deleteSelectedImage(e) { if(e) { e.preventDefault(); e.stopPropagation(); } if (currentSelectedImg) { currentSelectedImg.remove(); hideImageSelection(); debouncedSave(); } }
+function deleteSelectedImage(e) { if(e) { e.preventDefault(); e.stopPropagation(); } if (currentSelectedImg) { currentSelectedImg.remove(); hideImageSelection(); triggerAutoSave(); } }
 let isResizing = false; let startX, startWidth;
 function startResize(e) { e.preventDefault(); e.stopPropagation(); isResizing = true; const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX; startX = clientX; startWidth = currentSelectedImg.clientWidth; document.addEventListener('mousemove', resizing); document.addEventListener('touchmove', resizing, {passive: false}); document.addEventListener('mouseup', stopResize); document.addEventListener('touchend', stopResize); }
 function resizing(e) { if (!isResizing || !currentSelectedImg) return; const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX; const dx = clientX - startX; const newWidth = startWidth + dx; const containerWidth = document.getElementById('editor-body').clientWidth; if (newWidth > 50 && newWidth <= containerWidth) { currentSelectedImg.style.width = newWidth + 'px'; currentSelectedImg.style.height = 'auto'; updateSelectionBox(); } }
-function stopResize() { isResizing = false; document.removeEventListener('mousemove', resizing); document.removeEventListener('touchmove', resizing); document.removeEventListener('mouseup', stopResize); document.removeEventListener('touchend', stopResize); debouncedSave(); }
+function stopResize() { isResizing = false; document.removeEventListener('mousemove', resizing); document.removeEventListener('touchmove', resizing); document.removeEventListener('mouseup', stopResize); document.removeEventListener('touchend', stopResize); triggerAutoSave(); }
 
-export function formatDoc(cmd, value = null) { const editBody = document.getElementById('editor-body'); if (!editBody) return; editBody.focus(); document.execCommand(cmd, false, value); debouncedSave(); }
+// [수정] 서식 적용 시에도 자동 저장 트리거
+export function formatDoc(cmd, value = null) { const editBody = document.getElementById('editor-body'); if (!editBody) return; editBody.focus(); document.execCommand(cmd, false, value); triggerAutoSave(); }
 export function applyFontStyle(f, s) { state.currentFontFamily = f; state.currentFontSize = s; const editBody = document.getElementById('editor-body'); if(editBody) { editBody.style.fontFamily = f; editBody.style.fontSize = (f==='Nanum Pen Script' ? s+4 : s) + 'px'; } }
-export function changeGlobalFontSize(delta) { const editBody = document.getElementById('editor-body'); if(!editBody) return; const style = window.getComputedStyle(editBody); let currentSize = parseFloat(style.fontSize) || 16; let newSize = currentSize + delta; if(newSize < 12) newSize = 12; if(newSize > 60) newSize = 60; state.currentFontSize = newSize; applyFontStyle(state.currentFontFamily, newSize); debouncedSave(); }
-export function insertSticker(emoji) { const editBody = document.getElementById('editor-body'); if (editBody) { editBody.focus(); document.execCommand('insertText', false, emoji); } debouncedSave(); }
-export function insertImage(src) { const editBody = document.getElementById('editor-body'); if (editBody) { editBody.focus(); document.execCommand('insertImage', false, src); } debouncedSave(); }
-function debouncedSave() { if(state.autoSaveTimer) clearTimeout(state.autoSaveTimer); state.autoSaveTimer = setTimeout(saveEntry, 1000); }
+export function changeGlobalFontSize(delta) { const editBody = document.getElementById('editor-body'); if(!editBody) return; const style = window.getComputedStyle(editBody); let currentSize = parseFloat(style.fontSize) || 16; let newSize = currentSize + delta; if(newSize < 12) newSize = 12; if(newSize > 60) newSize = 60; state.currentFontSize = newSize; applyFontStyle(state.currentFontFamily, newSize); triggerAutoSave(); }
+export function insertSticker(emoji) { const editBody = document.getElementById('editor-body'); if (editBody) { editBody.focus(); document.execCommand('insertText', false, emoji); } triggerAutoSave(); }
+export function insertImage(src) { const editBody = document.getElementById('editor-body'); if (editBody) { editBody.focus(); document.execCommand('insertImage', false, src); } triggerAutoSave(); }

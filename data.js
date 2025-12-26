@@ -95,7 +95,6 @@ export async function permanentDelete(id) {
     }
 }
 
-// [핵심] 휴지통 비우기 기능
 export async function emptyTrash() {
     const trashItems = state.entries.filter(e => e.isDeleted && !e.isPurged);
     
@@ -110,8 +109,8 @@ export async function emptyTrash() {
             e.isPurged = true;
             e.modifiedAt = now;
         });
-        saveData(); // 저장 및 동기화
-        renderTrash(); // 화면 갱신
+        saveData();
+        renderTrash();
     }
 }
 
