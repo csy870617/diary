@@ -19,7 +19,7 @@ export function renderEntries(keyword = '') {
         !entry.isPurged && 
         !entry.isDeleted && 
         entry.category === state.currentCategory && 
-        (entry.title.includes(keyword) || entry.body.includes(keyword))
+        (entry.title.includes(keyword) || (entry.body && entry.body.includes(keyword)))
     );
     
     filtered.sort((a, b) => { 
@@ -64,10 +64,8 @@ export function renderTabs() {
     state.allCategories.forEach(c => { if(!state.categoryOrder.includes(c.id)) { sortedCats.push(c); state.categoryOrder.push(c.id); } });
 
     const currentExists = sortedCats.find(c => c.id === state.currentCategory);
-    
     if (!currentExists && sortedCats.length > 0) {
         state.currentCategory = sortedCats[0].id;
-        setTimeout(() => renderEntries(), 0);
     }
 
     sortedCats.forEach(cat => {
@@ -94,54 +92,26 @@ export function renderTabs() {
 export function renderTrash() { 
     const trashList = getEl('trash-list');
     trashList.innerHTML = `<div style="padding:10px 0; text-align:center; font-size:12px; color:#9CA3AF; font-family:'Pretendard'; margin-bottom:10px;">휴지통에 보관된 글은 30일 후 자동 삭제됩니다.</div>`;
-    
     const deleted = state.entries.filter(e => e.isDeleted && !e.isPurged); 
-    
     if(deleted.length === 0) { 
         trashList.innerHTML += `<div style="text-align:center; margin-top:50px; color:#aaa; font-family:'Pretendard';">비어있음</div>`; 
         return; 
     } 
-    
     deleted.forEach(entry => { 
-        const div = document.createElement('div'); 
-        div.className = 'trash-item'; 
-        
-        div.innerHTML = `
-            <div class="trash-info">
-                <h4>${entry.title}</h4>
-                <p>${entry.date}</p>
-            </div>
-            <div class="trash-btn-group"></div>
-        `;
-        
+        const div = document.createElement('div'); div.className = 'trash-item'; 
+        div.innerHTML = `<div class="trash-info"><h4>${entry.title}</h4><p>${entry.date}</p></div><div class="trash-btn-group"></div>`;
         const btnGroup = div.querySelector('.trash-btn-group');
-        const btnRestore = document.createElement('button');
-        btnRestore.className = 'btn-restore';
-        btnRestore.innerText = '복구';
-        btnRestore.addEventListener('click', (e) => {
-            e.stopPropagation();
-            restoreEntry(entry.id);
-        });
-        
-        const btnDelete = document.createElement('button');
-        btnDelete.className = 'btn-perm-delete';
-        btnDelete.innerText = '삭제';
-        btnDelete.addEventListener('click', (e) => {
-            e.stopPropagation();
-            permanentDelete(entry.id);
-        });
-        
-        btnGroup.appendChild(btnRestore);
-        btnGroup.appendChild(btnDelete);
+        const btnRestore = document.createElement('button'); btnRestore.className = 'btn-restore'; btnRestore.innerText = '복구';
+        btnRestore.onclick = (e) => { e.stopPropagation(); restoreEntry(entry.id); };
+        const btnDelete = document.createElement('button'); btnDelete.className = 'btn-perm-delete'; btnDelete.innerText = '삭제';
+        btnDelete.onclick = (e) => { e.stopPropagation(); permanentDelete(entry.id); };
+        btnGroup.appendChild(btnRestore); btnGroup.appendChild(btnDelete);
         trashList.appendChild(div); 
     }); 
 }
 
-/**
- * 모든 모달 닫기 (히스토리 제어 포함)
- */
 export function closeAllModals(goBack = true) {
-    const ids = ['write-modal', 'trash-modal', 'login-modal', 'reset-pw-modal', 'sticker-palette', 'color-palette-popup', 'context-menu', 'category-context-menu', 'move-modal'];
+    const ids = ['write-modal', 'trash-modal', 'login-modal', 'move-modal'];
     ids.forEach(id => {
         const el = getEl(id);
         if(el) el.classList.add('hidden');
@@ -149,18 +119,7 @@ export function closeAllModals(goBack = true) {
 
     toggleViewMode('default'); 
     
-    const editorToolbar = getEl('editor-toolbar');
-    const toolbarToggleBtn = getEl('toolbar-toggle-btn');
-    if(editorToolbar) {
-        editorToolbar.classList.remove('collapsed');
-        const icon = toolbarToggleBtn ? toolbarToggleBtn.querySelector('i') : null;
-        if(icon) {
-            icon.classList.remove('ph-caret-down');
-            icon.classList.add('ph-caret-up');
-        }
-    }
-    
-    // UI 버튼으로 닫은 경우에만 history.back() 실행
+    // [중요] UI 버튼으로 닫은 경우에만 history.back() 실행
     if(goBack && history.state && history.state.modal === 'open') {
         history.back();
     }
@@ -172,6 +131,7 @@ export function closeAllModals(goBack = true) {
  */
 export function openModal(modal) {
     if(!modal) return;
+    // [중요] 모달 오픈 시 히스토리 상태 추가 (뒤로가기 방어용)
     if (!history.state || history.state.modal !== 'open') {
         history.pushState({ modal: 'open' }, null, '');
     }
@@ -184,65 +144,46 @@ export function openTrashModal() {
 }
 
 function attachContextMenu(element, entryId) {
-    element.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        showContextMenu(e.clientX, e.clientY, entryId);
-    });
+    element.oncontextmenu = (e) => { e.preventDefault(); showContextMenu(e.clientX, e.clientY, entryId); };
     element.addEventListener('touchstart', (e) => {
         state.longPressTimer = setTimeout(() => {
             const touch = e.touches[0];
             showContextMenu(touch.clientX, touch.clientY, entryId);
         }, 600);
     }, { passive: true });
-    element.addEventListener('touchend', () => clearTimeout(state.longPressTimer));
-    element.addEventListener('touchmove', () => clearTimeout(state.longPressTimer));
+    element.ontouchend = () => clearTimeout(state.longPressTimer);
 }
 
 function showContextMenu(x, y, id) {
     const contextMenu = getEl('context-menu');
     if(!contextMenu) return;
-    const catContextMenu = getEl('category-context-menu');
-    if(catContextMenu) catContextMenu.classList.add('hidden');
+    getEl('category-context-menu')?.classList.add('hidden');
     state.contextTargetId = id;
     contextMenu.style.top = `${y}px`;
     contextMenu.style.left = `${x}px`;
     if (x + 160 > window.innerWidth) contextMenu.style.left = `${window.innerWidth - 170}px`;
-    if (y + 160 > window.innerHeight) contextMenu.style.top = `${y - 160}px`;
     contextMenu.classList.remove('hidden');
 }
 
 function attachCatContextMenu(element, catId) {
-    element.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        showCatContextMenu(e.clientX, e.clientY, catId);
-    });
+    element.oncontextmenu = (e) => { e.preventDefault(); showCatContextMenu(e.clientX, e.clientY, catId); };
     element.addEventListener('touchstart', (e) => {
         state.longPressTimer = setTimeout(() => {
             const touch = e.touches[0];
             showCatContextMenu(touch.clientX, touch.clientY, catId);
         }, 600);
     }, { passive: true });
-    element.addEventListener('touchend', () => clearTimeout(state.longPressTimer));
-    element.addEventListener('touchmove', () => clearTimeout(state.longPressTimer));
+    element.ontouchend = () => clearTimeout(state.longPressTimer);
 }
 
 function showCatContextMenu(x, y, id) {
     const catContextMenu = getEl('category-context-menu');
     if(!catContextMenu) return;
-    const contextMenu = getEl('context-menu');
-    if(contextMenu) contextMenu.classList.add('hidden');
+    getEl('context-menu')?.classList.add('hidden');
     state.contextCatId = id;
     catContextMenu.style.top = `${y}px`;
     catContextMenu.style.left = `${x}px`;
-    if (x + 160 > window.innerWidth) catContextMenu.style.left = `${window.innerWidth - 170}px`;
     catContextMenu.classList.remove('hidden');
-}
-
-function getNextTimestamp() {
-    const now = new Date().getTime();
-    const last = new Date(state.categoryUpdatedAt || 0).getTime();
-    if (now <= last) { return new Date(last + 1000).toISOString(); }
-    return new Date().toISOString();
 }
 
 export function addNewCategory() {
@@ -251,53 +192,42 @@ export function addNewCategory() {
         const id = 'custom_' + Date.now();
         state.allCategories.push({id, name});
         state.categoryOrder.push(id);
-        state.categoryUpdatedAt = getNextTimestamp();
-        saveCategoriesToLocal();
-        renderTabs();
-        saveToDrive(); 
+        state.categoryUpdatedAt = new Date().toISOString();
+        saveCategoriesToLocal(); renderTabs(); saveToDrive(); 
     }
 }
 
 export function renameCategoryAction() {
-    const catContextMenu = getEl('category-context-menu');
-    if(catContextMenu) catContextMenu.classList.add('hidden');
+    getEl('category-context-menu')?.classList.add('hidden');
     const cat = state.allCategories.find(c => c.id === state.contextCatId);
     if (!cat) return;
     const newName = prompt(`'${cat.name}'의 새로운 이름:`, cat.name);
     if (newName && newName.trim() !== "") {
         cat.name = newName.trim();
-        state.categoryUpdatedAt = getNextTimestamp();
-        saveCategoriesToLocal();
-        renderTabs();
-        saveToDrive(); 
+        state.categoryUpdatedAt = new Date().toISOString();
+        saveCategoriesToLocal(); renderTabs(); saveToDrive(); 
     }
 }
 
 export function deleteCategoryAction() {
-    const catContextMenu = getEl('category-context-menu');
-    if(catContextMenu) catContextMenu.classList.add('hidden');
+    getEl('category-context-menu')?.classList.add('hidden');
     const cat = state.allCategories.find(c => c.id === state.contextCatId);
-    if (!cat) return;
-    if (state.allCategories.length <= 1) return alert("최소 하나의 주제는 있어야 합니다.");
+    if (!cat || state.allCategories.length <= 1) return;
     if (confirm(`'${cat.name}' 주제를 삭제하시겠습니까?`)) {
         state.allCategories = state.allCategories.filter(c => c.id !== state.contextCatId);
         state.categoryOrder = state.categoryOrder.filter(id => id !== state.contextCatId);
         if (state.currentCategory === state.contextCatId) state.currentCategory = state.allCategories[0].id;
-        state.categoryUpdatedAt = getNextTimestamp();
-        saveCategoriesToLocal();
-        renderTabs();
-        renderEntries();
-        saveToDrive(); 
+        state.categoryUpdatedAt = new Date().toISOString();
+        saveCategoriesToLocal(); renderTabs(); renderEntries(); saveToDrive(); 
     }
 }
 
 export function openMoveModal() {
-    const contextMenu = getEl('context-menu');
+    getEl('context-menu')?.classList.add('hidden');
     const moveModal = getEl('move-modal');
     const moveCategoryList = getEl('move-category-list');
-    if(!contextMenu || !moveModal) return;
-    contextMenu.classList.add('hidden');
-    moveModal.classList.remove('hidden');
+    // [중요] 이동 모달도 히스토리 관리 적용
+    openModal(moveModal);
     moveCategoryList.innerHTML = '';
     state.allCategories.forEach(cat => {
         const div = document.createElement('div');
@@ -306,8 +236,7 @@ export function openMoveModal() {
         if (state.currentCategory !== cat.id) {
             div.onclick = async () => {
                 await updateEntryField(state.contextTargetId, { category: cat.id });
-                moveModal.classList.add('hidden');
-                renderEntries();
+                closeAllModals(true);
             };
         }
         moveCategoryList.appendChild(div);

@@ -1,79 +1,48 @@
 import { state } from './state.js';
 import { saveEntry } from './data.js';
 import { saveToDrive } from './drive.js';
+import { openModal } from './ui.js';
 
-// ============================================
-// [1] 전역 변수 및 상태
-// ============================================
 let currentSelectedImg = null;
 let selectionBox = null;
 let resizeHandle = null;
 let deleteBtn = null;
 let resizeBtnGroup = null;
-
 let autoSaveTimer = null;
 let isTurningPage = false;    
 let currentBookPageIndex = 0; 
 let touchStartX = 0;          
 let wheelLockTimer = null;    
 
-/**
- * 실시간 자동 저장 및 클라우드 동기화
- */
 async function triggerAutoSave() {
     if (autoSaveTimer) clearTimeout(autoSaveTimer);
-    
     autoSaveTimer = setTimeout(async () => {
         const editBody = document.getElementById('editor-body');
         if (!editBody || state.currentViewMode !== 'default') return;
-
-        console.log("자동 저장 및 동기화...");
         await saveEntry(); 
-        
-        if (window.gapi && gapi.client && gapi.client.getToken()) {
-            await saveToDrive(); 
-        }
+        if (window.gapi && gapi.client && gapi.client.getToken()) await saveToDrive(); 
     }, 3000);
 }
-
-// ============================================
-// [2] 이벤트 핸들러
-// ============================================
 
 function handleBookWheel(e) {
     if (state.currentViewMode !== 'book') return;
     e.preventDefault(); e.stopPropagation();
-
     if (wheelLockTimer) clearTimeout(wheelLockTimer);
-
-    if (!isTurningPage) {
-        if (Math.abs(e.deltaY) > 20) {
-            turnPage(e.deltaY > 0 ? 1 : -1);
-            isTurningPage = true; 
-        }
+    if (!isTurningPage && Math.abs(e.deltaY) > 20) {
+        turnPage(e.deltaY > 0 ? 1 : -1);
+        isTurningPage = true; 
     }
-
-    wheelLockTimer = setTimeout(() => {
-        isTurningPage = false; wheelLockTimer = null;
-    }, 500);
+    wheelLockTimer = setTimeout(() => { isTurningPage = false; wheelLockTimer = null; }, 500);
 }
 
-function handleBookTouchStart(e) {
-    if (state.currentViewMode === 'book') touchStartX = e.changedTouches[0].screenX;
-}
-
-function handleBookTouchMove(e) {
-    if (state.currentViewMode === 'book') e.preventDefault(); 
-}
-
+function handleBookTouchStart(e) { if (state.currentViewMode === 'book') touchStartX = e.changedTouches[0].screenX; }
+function handleBookTouchMove(e) { if (state.currentViewMode === 'book') e.preventDefault(); }
 function handleBookTouchEnd(e) {
     if (state.currentViewMode !== 'book' || isTurningPage) return;
-
     const diff = touchStartX - e.changedTouches[0].screenX;
     if (Math.abs(diff) > 50) {
         turnPage(diff > 0 ? 1 : -1);
-        isTurningPage = true;
-        setTimeout(() => isTurningPage = false, 300);
+        isTurningPage = true; setTimeout(() => isTurningPage = false, 300);
     }
 }
 
@@ -81,27 +50,18 @@ function handleBookResize() {
     if (state.currentViewMode === 'book') {
         updateBookLayout();
         const container = document.getElementById('editor-container');
-        if(container) {
-            container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
-            updateBookNav();
-        }
+        if(container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
+        updateBookNav();
     }
 }
-
-// ============================================
-// [3] 페이지 이동
-// ============================================
 
 export function turnPage(direction) { 
     const container = document.getElementById('editor-container');
     if (!container) return;
-
     const stride = Math.floor(container.clientWidth);
     const maxPage = Math.ceil(container.scrollWidth / stride) - 1;
-
     let nextIndex = Math.max(0, Math.min(maxPage, currentBookPageIndex + direction));
     if (nextIndex === currentBookPageIndex) return;
-
     currentBookPageIndex = nextIndex;
     container.scrollLeft = currentBookPageIndex * stride;
     updateBookNav();
@@ -110,7 +70,6 @@ export function turnPage(direction) {
 function updateBookLayout() {
     const container = document.getElementById('editor-container');
     if (!container) return;
-    
     container.style.columnWidth = `${Math.floor(container.clientWidth)}px`;
     container.style.columnGap = '0px';
     container.style.height = `${window.innerHeight - 120}px`;
@@ -121,23 +80,13 @@ export function updateBookNav() {
     if (state.currentViewMode !== 'book') return; 
     const container = document.getElementById('editor-container');
     if(!container) return;
-
     const stride = Math.floor(container.clientWidth);
     const totalPages = Math.ceil(container.scrollWidth / stride) || 1; 
-    
     document.getElementById('book-nav-left')?.classList.toggle('hidden', currentBookPageIndex <= 0);
     document.getElementById('book-nav-right')?.classList.toggle('hidden', currentBookPageIndex + 1 >= totalPages);
-    
     const pageIndicator = document.getElementById('page-indicator');
-    if (pageIndicator) {
-        pageIndicator.innerText = `${currentBookPageIndex + 1} / ${totalPages}`; 
-        pageIndicator.classList.remove('hidden');
-    }
+    if (pageIndicator) { pageIndicator.innerText = `${currentBookPageIndex + 1} / ${totalPages}`; pageIndicator.classList.remove('hidden'); }
 }
-
-// ============================================
-// [4] 에디터 모드 관리
-// ============================================
 
 function linkifyContents(element) {
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
@@ -152,12 +101,9 @@ function linkifyContents(element) {
             let lastIdx = 0;
             text.replace(urlRegex, (match, url, protocol, offset) => {
                 fragment.appendChild(document.createTextNode(text.slice(lastIdx, offset)));
-                const a = document.createElement('a');
-                a.href = protocol === 'www.' ? 'http://' + url : url;
-                a.target = '_blank'; a.textContent = url;
-                a.style.textDecoration = 'underline'; a.style.color = '#2563EB'; a.style.cursor = 'pointer'; 
-                fragment.appendChild(a);
-                lastIdx = offset + match.length;
+                const a = document.createElement('a'); a.href = protocol === 'www.' ? 'http://' + url : url; a.target = '_blank'; a.textContent = url;
+                a.style.textDecoration = 'underline'; a.style.color = '#2563EB'; a.style.cursor = 'pointer';
+                fragment.appendChild(a); lastIdx = offset + match.length;
             });
             fragment.appendChild(document.createTextNode(text.slice(lastIdx)));
             node.parentNode.replaceChild(fragment, node);
@@ -167,24 +113,16 @@ function linkifyContents(element) {
 
 function setupBasicHandling() {
     const editorBody = document.getElementById('editor-body');
-    const editTitle = document.getElementById('edit-title');
-    const editSubtitle = document.getElementById('edit-subtitle');
     if (!editorBody) return;
-
     editorBody.onclick = (e) => {
         if (!editorBody.isContentEditable) return;
         if (e.target.tagName === 'IMG') { e.stopPropagation(); e.preventDefault(); selectImage(e.target); }
         else hideImageSelection();
     };
-    
     editorBody.addEventListener('input', () => { updateSelectionBox(); triggerAutoSave(); });
-    editTitle?.addEventListener('input', triggerAutoSave);
-    editSubtitle?.addEventListener('input', triggerAutoSave);
-
-    window.addEventListener('resize', () => {
-        updateSelectionBox();
-        if(state.currentViewMode === 'book') handleBookResize();
-    });
+    document.getElementById('edit-title')?.addEventListener('input', triggerAutoSave);
+    document.getElementById('edit-subtitle')?.addEventListener('input', triggerAutoSave);
+    window.addEventListener('resize', () => { updateSelectionBox(); if(state.currentViewMode === 'book') handleBookResize(); });
 }
 
 function toggleBookEventListeners(enable) {
@@ -205,97 +143,53 @@ function toggleBookEventListeners(enable) {
 export function openEditor(isEdit, entryData) { 
     state.isEditMode = isEdit; 
     const writeModal = document.getElementById('write-modal');
-    writeModal.classList.remove('hidden');
+    openModal(writeModal);
     writeModal.scrollTop = 0;
-    
     currentBookPageIndex = 0;
     setupBasicHandling();
-    
     const catName = state.allCategories.find(c => c.id === state.currentCategory)?.name || '기록';
     document.getElementById('display-category').innerText = catName;
     document.getElementById('display-date').innerText = entryData ? entryData.date : new Date().toLocaleDateString('ko-KR');
-
     const editTitle = document.getElementById('edit-title'), editSubtitle = document.getElementById('edit-subtitle'), editBody = document.getElementById('editor-body');
-
     if(isEdit && entryData) { 
-        state.editingId = entryData.id; 
-        editTitle.value = entryData.title || ''; editSubtitle.value = entryData.subtitle || ''; editBody.innerHTML = entryData.body || ''; 
+        state.editingId = entryData.id; editTitle.value = entryData.title || ''; editSubtitle.value = entryData.subtitle || ''; editBody.innerHTML = entryData.body || ''; 
         linkifyContents(editBody); applyFontStyle(entryData.fontFamily || 'Pretendard', entryData.fontSize || 16); 
     } else { 
-        state.editingId = Date.now().toString(); 
-        editTitle.value = ''; editSubtitle.value = ''; editBody.innerHTML = ''; 
+        state.editingId = Date.now().toString(); editTitle.value = ''; editSubtitle.value = ''; editBody.innerHTML = ''; 
         applyFontStyle('Pretendard', 16); setTimeout(() => editTitle.focus(), 100);
     } 
     toggleViewMode('default');
 }
 
-/**
- * 뷰 모드(기본, 읽기전용, 책모드) 전환
- */
 export function toggleViewMode(mode) {
     const container = document.getElementById('editor-container');
     state.currentViewMode = mode;
-    const writeModal = document.getElementById('write-modal'), 
-          editBody = document.getElementById('editor-body'), 
-          editTitle = document.getElementById('edit-title'), 
-          editSubtitle = document.getElementById('edit-subtitle'), 
-          editorToolbar = document.getElementById('editor-toolbar');
-
-    // [수정] 모드 버튼 활성화(active) 표시 제어
+    const writeModal = document.getElementById('write-modal'), editBody = document.getElementById('editor-body'), editTitle = document.getElementById('edit-title'), editSubtitle = document.getElementById('edit-subtitle'), editorToolbar = document.getElementById('editor-toolbar');
+    
+    // 버튼 활성화 표시 추가
     const btnReadOnly = document.getElementById('btn-readonly');
     const btnBookMode = document.getElementById('btn-bookmode');
     if(btnReadOnly) btnReadOnly.classList.toggle('active', mode === 'readOnly');
     if(btnBookMode) btnBookMode.classList.toggle('active', mode === 'book');
 
-    // [추가] 툴바 토글 버튼 아이콘 상태 동기화용
-    const toggleBtn = document.getElementById('toolbar-toggle-btn');
-    const icon = toggleBtn ? toggleBtn.querySelector('i') : null;
-
-    if(container) {
-        container.style.height = ''; container.style.overflow = ''; 
-        container.style.columnWidth = ''; container.style.columnGap = '';
-        container.scrollLeft = 0;
-    }
-
+    if(container) { container.style.height = ''; container.style.overflow = ''; container.style.columnWidth = ''; container.style.columnGap = ''; container.scrollLeft = 0; }
     writeModal.classList.remove('mode-read-only', 'mode-book');
     document.querySelectorAll('.book-nav, #page-indicator').forEach(el => el.classList.add('hidden'));
     hideImageSelection(); toggleBookEventListeners(false);
-
     if (mode === 'book') {
-        editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false";
-        linkifyContents(editBody); 
-        writeModal.classList.add('mode-book');
-        
-        // [수정] 책 모드 시작 시 툴바 접기 및 아이콘 변경
+        editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false"; linkifyContents(editBody);
+        writeModal.classList.add('mode-book'); updateBookLayout(); toggleBookEventListeners(true); updateBookNav();
         editorToolbar?.classList.add('collapsed');
-        if (icon) icon.className = 'ph ph-caret-down';
-
-        updateBookLayout(); toggleBookEventListeners(true); updateBookNav();
     } else if (mode === 'readOnly') {
-        editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false";
-        linkifyContents(editBody); // 읽기 전용에서도 링크 활성화
-        writeModal.classList.add('mode-read-only'); 
-        
-        // 툴바 접기 및 아이콘 변경
-        editorToolbar?.classList.add('collapsed');
-        if (icon) icon.className = 'ph ph-caret-down';
+        editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false"; linkifyContents(editBody);
+        writeModal.classList.add('mode-read-only'); editorToolbar?.classList.add('collapsed');
     } else {
-        editTitle.readOnly = false; editSubtitle.readOnly = false; editBody.contentEditable = "true";
-        
-        // 기본 모드 시 툴바 펼치기 및 아이콘 변경
-        editorToolbar?.classList.remove('collapsed');
-        if (icon) icon.className = 'ph ph-caret-up';
+        editTitle.readOnly = false; editSubtitle.readOnly = false; editBody.contentEditable = "true"; editorToolbar?.classList.remove('collapsed');
     }
 }
 
 function selectImage(img) { currentSelectedImg = img; createSelectionUI(); updateSelectionBox(); }
-function hideImageSelection() {
-    currentSelectedImg = null;
-    ['img-selection-box', 'resize-handle', 'img-delete-btn', 'img-resize-group'].forEach(id => {
-        const el = document.querySelector('.' + id) || document.getElementById(id);
-        if(el) el.style.display = 'none';
-    });
-}
+function hideImageSelection() { currentSelectedImg = null; if (selectionBox) selectionBox.style.display = 'none'; if (resizeHandle) resizeHandle.style.display = 'none'; if (deleteBtn) deleteBtn.style.display = 'none'; if (resizeBtnGroup) resizeBtnGroup.style.display = 'none'; }
 function createSelectionUI() {
     if (!selectionBox) {
         selectionBox = document.createElement('div'); selectionBox.className = 'img-selection-box'; document.body.appendChild(selectionBox);

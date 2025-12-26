@@ -116,7 +116,12 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .editor-body:empty:before { content: attr(placeholder); color: var(--gray-500); display: block; }
 .meta-info-row { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 13px; color: var(--gray-500); font-family: var(--text-sans); }
 .write-category { color: var(--accent); font-weight: 600; }
-.write-header { display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-bottom: 1px solid var(--gray-100); flex-shrink: 0; }
+
+/* [수정] 헤더 중앙 정렬 지원을 위해 relative 추가 */
+.write-header { display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-bottom: 1px solid var(--gray-100); flex-shrink: 0; position: relative; }
+/* [추가] 모달 제목 중앙 정렬 클래스 */
+.modal-title-center { position: absolute; left: 50%; transform: translateX(-50%); font-weight: 600; font-size: 16px; pointer-events: none; }
+
 .header-actions { display: flex; gap: 10px; align-items: center; }
 .nav-back-btn { display: flex; align-items: center; gap: 4px; font-size: 15px; color: var(--gray-500); font-family: var(--text-sans); font-weight: 500; cursor: pointer; background: none; border: none; padding: 5px 8px; border-radius: 6px; transition: all 0.2s; }
 .nav-back-btn:hover { color: var(--gray-900); background-color: var(--gray-100); }
@@ -159,24 +164,16 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     margin: 0; 
     max-width: none; 
     width: 100%; 
-    
-    /* 🔥 [핵심] 높이를 줄여서 하단에 물리적인 여백 공간을 만듭니다 */
     height: calc(100vh - 120px) !important; 
-    
     padding: 0 !important;
     column-width: auto; 
     column-gap: 0 !important; 
     column-fill: auto; 
-    
-    /* 🔥 [핵심] 스크롤바 숨김 및 '사용자' 스크롤 차단 */
     overflow-x: hidden !important; 
     overflow-y: hidden !important;
-    
-    /* 스크롤 애니메이션 제거 */
     scroll-behavior: auto !important;
 }
 
-/* [중요] 페이지 번호와 겹치지 않게 하단 여백 대폭 확보 (200px) */
 #write-modal.mode-book .editor-body {
     padding: 20px 40px 200px 40px; 
     box-sizing: border-box;
@@ -201,11 +198,10 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 } 
 .book-nav { display: none !important; }
 
-/* [수정] 페이지 번호 우측 하단 고정 */
 .page-indicator { 
     position: fixed; 
-    bottom: 40px;       /* 40px로 올려서 여유 확보 */
-    right: 30px;        /* 우측 하단 */
+    bottom: 40px;
+    right: 30px;
     left: auto;
     transform: none;
     font-family: var(--text-sans); 
@@ -272,7 +268,6 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
         overflow-x: hidden !important; 
         overflow-y: hidden !important;
     }
-    /* 모바일 하단 여백도 200px로 증가 */
     #write-modal.mode-book .editor-body {
         padding: 20px 20px 200px 20px; 
     }
@@ -293,12 +288,12 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     font-weight: 600;
     padding: 6px 12px;
     border-radius: 6px;
-    background-color: #FEE2E2; /* 연한 빨강 배경 */
+    background-color: #FEE2E2;
     border: none;
     cursor: pointer;
     transition: background 0.2s;
     font-family: var(--text-sans);
-    margin-left: auto; /* 우측 정렬 보장 */
+    margin-left: auto;
 }
 
 #btn-empty-trash:hover {

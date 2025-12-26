@@ -6,7 +6,7 @@
     <meta name="referrer" content="origin"> 
     
     <title>신앙일지 | Faith Log</title>
-    <link rel="stylesheet" href="style.css?v=3.3">
+    <link rel="stylesheet" href="style.css?v=3.5">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
@@ -114,10 +114,8 @@
                 <div class="tool-group">
                     <button class="tool-btn" id="toolbar-color-btn"><i class="ph ph-palette" style="color:#F59E0B;"></i></button>
                     <button class="tool-btn" id="toolbar-hilite-btn"><i class="ph ph-highlighter" style="color:#FDE047;"></i></button>
-                    
                     <button class="tool-btn" id="toolbar-image-btn"><i class="ph ph-image"></i></button>
                     <input type="file" id="image-upload-input" accept="image/*" style="display: none;">
-                    
                     <button class="tool-btn" id="sticker-btn"><i class="ph ph-smiley"></i></button>
                 </div>
                 <div class="toolbar-divider"></div>
@@ -192,34 +190,12 @@
     <div id="trash-modal" class="full-screen-modal hidden">
         <div class="write-header">
             <button id="close-trash-btn" class="text-btn nav-back-btn"><i class="ph ph-arrow-left"></i> 뒤로</button>
-            <span style="font-weight:600; font-size:16px;">휴지통</span>
+            <span class="modal-title-center">휴지통</span>
             <button id="btn-empty-trash" class="text-btn" style="font-size:13px; color:#EF4444; font-weight:600;">비우기</button>
         </div>
         <div class="trash-container" id="trash-list"></div>
     </div>
 
-    <div id="reset-pw-modal" class="modal-overlay hidden">
-        <div class="simple-modal">
-            <h3>비밀번호 재설정</h3>
-            <p style="font-size:13px; color:#666; margin-bottom:15px;">가입한 이메일을 입력하세요.</p>
-            <input type="email" id="reset-email" placeholder="email@example.com">
-            <div class="modal-btns">
-                <button id="send-reset-email-btn" class="primary-btn">전송</button>
-                <button id="close-reset-btn" class="cancel-btn">닫기</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="context-menu" class="context-menu hidden">
-        <button id="ctx-move" class="ctx-item"><i class="ph ph-folder-notch"></i> 주제 이동</button>
-        <button id="ctx-copy" class="ctx-item"><i class="ph ph-copy"></i> 복제</button>
-        <div style="height:1px; background:#eee; margin:4px 0;"></div>
-        <button id="ctx-delete" class="ctx-item danger"><i class="ph ph-trash"></i> 삭제</button>
-    </div>
-    <div id="category-context-menu" class="context-menu hidden">
-        <button id="ctx-cat-rename" class="ctx-item"><i class="ph ph-pencil"></i> 이름 변경</button>
-        <button id="ctx-cat-delete" class="ctx-item danger"><i class="ph ph-trash"></i> 주제 삭제</button>
-    </div>
     <div id="move-modal" class="modal-overlay hidden">
         <div class="simple-modal" style="width: 280px;">
             <h3>주제 이동</h3>
@@ -228,6 +204,6 @@
         </div>
     </div>
 
-    <script type="module" src="script.js?v=2.7"></script>
+    <script type="module" src="script.js?v=2.9"></script>
 </body>
 </html>
