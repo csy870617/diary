@@ -17,9 +17,8 @@ export async function saveEntry() {
     const title = titleEl.value;
     const body = bodyEl.innerHTML; 
     const subtitle = subtitleEl ? subtitleEl.value : '';
-    const nowISO = new Date().toISOString();
+    const nowISO = new Date().toISOString(); // 동기화의 기준이 되는 시간
 
-    // 제목과 내용이 모두 비어있으면 저장하지 않음 (단, ID는 유지)
     if(!title.trim() && !bodyEl.innerText.trim()) return;
 
     if (!state.editingId) state.editingId = Date.now().toString();
@@ -42,24 +41,23 @@ export async function saveEntry() {
         };
         state.entries.unshift(newEntry);
     } else {
-        // 기존 글 업데이트 (수정 시간 갱신)
         state.entries[index] = {
             ...state.entries[index],
             title, subtitle, body,
-            modifiedAt: nowISO,
+            modifiedAt: nowISO, // 수정 시각 무조건 갱신
             fontFamily: state.currentFontFamily,
             fontSize: state.currentFontSize
         };
     }
     
-    // 로컬 스토리지 저장
     localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-    // 참고: 클라우드 동기화는 editor.js의 triggerAutoSave에서 별도로 호출함
+    renderEntries();
+    // editor.js의 자동저장 로직에서 saveToDrive를 별도로 호출함
 }
 
 export function saveData() {
     localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-    saveToDrive(false); 
+    saveToDrive(); 
 }
 
 export async function updateEntryField(id, fields) {

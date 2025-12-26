@@ -31,15 +31,15 @@ async function triggerAutoSave() {
         const editBody = document.getElementById('editor-body');
         if (!editBody || state.currentViewMode !== 'default') return;
 
-        console.log("작성 중인 내용을 자동 저장 및 클라우드 동기화 중...");
+        console.log("작성 중인 내용을 로컬 저장 및 클라우드 동기화 중...");
         
-        // 1. 로컬 상태 업데이트
+        // 1. 로컬 상태 업데이트 (data.js의 saveEntry 호출)
         await saveEntry(); 
         
-        // 2. 즉시 클라우드 전송 (작성 중인 글은 강제로 밀어넣음)
-        // 리스트를 리렌더링하지 않고 백그라운드에서 조용히 전송
-        if (gapi.client && gapi.client.getToken()) {
-            await saveToDrive(false); 
+        // 2. 즉시 클라우드 전송 (작성 중인 글을 실시간으로 밀어넣음)
+        if (window.gapi && gapi.client && gapi.client.getToken()) {
+            // Pull 없이 현재 기기의 내용을 최신으로 간주하고 Push
+            await saveToDrive(); 
         }
     }, 3000);
 }

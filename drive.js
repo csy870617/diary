@@ -5,11 +5,8 @@ import { renderEntries, renderTabs } from './ui.js';
 let tokenClient;
 let gapiInited = false;
 let gisInited = false;
-
-// 동기화 상태 제어
 let isSyncing = false;
 let pendingSync = false;
-let lastCloudModifiedTime = null; // 클라우드 파일의 마지막 수정 시간 저장
 
 export function initGoogleDrive(callback) {
     if (typeof gapi === 'undefined' || typeof google === 'undefined' || !google.accounts) {
@@ -100,16 +97,11 @@ async function checkAuthAndSync(callback) {
             if(msgWrapper) msgWrapper.style.display = 'none';
         }
 
-        // 로그인 직후 강제 동기화
-        await syncFromDrive(true);
+        await syncFromDrive();
         if(callback) callback(true);
 
     } catch (err) {
         console.error("Auth Check Error", err);
-        if(err.status === 401) {
-            localStorage.removeItem('faith_token');
-            state.currentUser = null;
-        }
         if(callback) callback(false);
     }
 }
@@ -126,8 +118,10 @@ function toggleSpinners(active) {
     }
 }
 
-// core sync function
-export async function saveToDrive(isForce = false) {
+/**
+ * 완벽 동기화 (Pull -> Merge -> Push)
+ */
+export async function saveToDrive() {
     if (!gapi.client.getToken()) return;
 
     if (isSyncing) {
@@ -139,61 +133,59 @@ export async function saveToDrive(isForce = false) {
     toggleSpinners(true);
 
     try {
+        console.log("동기화 시작: 클라우드 데이터 확인 중...");
         const folderId = await ensureAppFolder();
         const fileMeta = await findDBFileMeta(folderId);
         
-        // 클라우드 수정 시간이 로컬 기록과 같다면 (변경사항이 없다면) 업로드만 진행하거나 스킵
-        if (!isForce && fileMeta && lastCloudModifiedTime === fileMeta.modifiedTime) {
-            // 로컬 데이터만 업로드 (최적화: Pull 생략)
-            await uploadToDrive(folderId, fileMeta.id);
-        } else {
-            // Pull & Merge & Push 전체 프로세스
-            let cloudData = { entries: [], categories: [], categoryOrder: [], categoryUpdatedAt: "1970-01-01T00:00:00.000Z" };
-            
-            if (fileMeta) {
-                const response = await gapi.client.drive.files.get({
-                    fileId: fileMeta.id,
-                    alt: 'media'
-                });
-                cloudData = typeof response.result === 'string' ? JSON.parse(response.result) : response.result;
-            }
-
-            // 정밀 병합
-            const mergedEntries = mergeEntries(state.entries, cloudData.entries || []);
-            const mergedCats = mergeCategories(state, cloudData);
-
-            state.entries = mergedEntries;
-            state.allCategories = mergedCats.categories;
-            state.categoryOrder = mergedCats.order;
-            state.categoryUpdatedAt = mergedCats.updatedAt;
-
-            localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-            saveCategoriesToLocal();
-
-            await uploadToDrive(folderId, fileMeta ? fileMeta.id : null);
-        }
+        let cloudData = { entries: [], categories: [], categoryOrder: [], categoryUpdatedAt: "1970-01-01T00:00:00.000Z" };
         
-        // 동기화 후 시점 기록
-        const updatedMeta = await findDBFileMeta(folderId);
-        if(updatedMeta) lastCloudModifiedTime = updatedMeta.modifiedTime;
+        // 1. 클라우드 데이터 Pull (캐시 방지를 위해 랜덤 쿼리 추가)
+        if (fileMeta) {
+            const response = await gapi.client.drive.files.get({
+                fileId: fileMeta.id,
+                alt: 'media',
+                // API 내부적으로 최신본을 가져오도록 보장
+                fields: '*' 
+            });
+            cloudData = typeof response.result === 'string' ? JSON.parse(response.result) : response.result;
+            console.log("클라우드 데이터 획득 성공.");
+        }
 
+        // 2. 정밀 병합 (ModifiedAt 기준)
+        const mergedEntries = mergeEntries(state.entries, cloudData.entries || []);
+        const mergedCats = mergeCategories(state, cloudData);
+
+        // 3. 병합 결과 반영
+        state.entries = mergedEntries;
+        state.allCategories = mergedCats.categories;
+        state.categoryOrder = mergedCats.order;
+        state.categoryUpdatedAt = mergedCats.updatedAt;
+
+        localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+        saveCategoriesToLocal();
+
+        // 4. 최종 데이터 Push
+        await uploadToDrive(folderId, fileMeta ? fileMeta.id : null);
+        console.log("클라우드 업로드 완료. 동기화 성공.");
+
+        // UI 즉시 업데이트
         renderTabs();
         renderEntries();
 
     } catch (err) {
-        console.error("Sync Process Error", err);
+        console.error("동기화 실패:", err);
     } finally {
         isSyncing = false;
         toggleSpinners(false);
         if (pendingSync) {
             pendingSync = false;
-            setTimeout(() => saveToDrive(false), 500);
+            setTimeout(saveToDrive, 500);
         }
     }
 }
 
-export async function syncFromDrive(isForce = false) {
-    await saveToDrive(isForce);
+export async function syncFromDrive() {
+    await saveToDrive();
 }
 
 async function uploadToDrive(folderId, fileId) {
@@ -226,11 +218,16 @@ async function uploadToDrive(folderId, fileId) {
     });
 }
 
+/**
+ * 시간 기반 정밀 병합
+ */
 function mergeEntries(localList, cloudList) {
     const entryMap = new Map();
-    // 클라우드 우선 로드
+    
+    // 1. 클라우드 데이터를 먼저 담습니다.
     cloudList.forEach(item => { if(item && item.id) entryMap.set(item.id, item); });
     
+    // 2. 로컬 데이터를 비교합니다.
     localList.forEach(localItem => {
         if(!localItem || !localItem.id) return;
         const cloudItem = entryMap.get(localItem.id);
@@ -238,25 +235,25 @@ function mergeEntries(localList, cloudList) {
         if (!cloudItem) {
             entryMap.set(localItem.id, localItem);
         } else {
-            const localTime = new Date(localItem.modifiedAt || localItem.timestamp || 0).getTime();
-            const cloudTime = new Date(cloudItem.modifiedAt || cloudItem.timestamp || 0).getTime();
+            // ISO 문자열을 밀리초 단위 숫자로 변환하여 비교
+            const localTime = Date.parse(localItem.modifiedAt || localItem.timestamp || 0);
+            const cloudTime = Date.parse(cloudItem.modifiedAt || cloudItem.timestamp || 0);
             
-            // 더 최신 수정본을 선택
+            // 로컬 시간이 더 최신일 때만 교체, 아니면 클라우드 데이터 유지
             if (localTime > cloudTime) {
                 entryMap.set(localItem.id, localItem);
             }
-            // 같거나 클라우드가 크면 클라우드 유지
         }
     });
     
     return Array.from(entryMap.values()).sort((a, b) => {
-        return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+        return Date.parse(b.timestamp) - Date.parse(a.timestamp);
     });
 }
 
 function mergeCategories(localState, cloudData) {
-    const localTime = new Date(localState.categoryUpdatedAt || 0).getTime();
-    const cloudTime = new Date(cloudData.categoryUpdatedAt || 0).getTime();
+    const localTime = Date.parse(localState.categoryUpdatedAt || 0);
+    const cloudTime = Date.parse(cloudData.categoryUpdatedAt || 0);
 
     if (cloudTime > localTime && cloudData.categories && cloudData.categories.length > 0) {
         return {
@@ -286,6 +283,7 @@ async function ensureAppFolder() {
 }
 
 async function findDBFileMeta(folderId) {
+    // 쿼리 시점에 최신 메타데이터를 가져오도록 trashed=false 유지
     const q = `name='${DB_FILE_NAME}' and '${folderId}' in parents and trashed=false`;
     const response = await gapi.client.drive.files.list({ 
         q, 
