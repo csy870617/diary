@@ -1,7 +1,6 @@
 import { state } from './state.js';
 import { saveEntry } from './data.js';
 import { saveToDrive } from './drive.js';
-import { openModal } from './ui.js';
 
 // ============================================
 // [1] 전역 변수 및 상태
@@ -206,12 +205,9 @@ function toggleBookEventListeners(enable) {
 export function openEditor(isEdit, entryData) { 
     state.isEditMode = isEdit; 
     const writeModal = document.getElementById('write-modal');
-    if(!writeModal) return;
-    
-    // [수정] openModal을 사용하여 히스토리 상태를 관리
-    openModal(writeModal);
-
+    writeModal.classList.remove('hidden');
     writeModal.scrollTop = 0;
+    
     currentBookPageIndex = 0;
     setupBasicHandling();
     
@@ -233,10 +229,27 @@ export function openEditor(isEdit, entryData) {
     toggleViewMode('default');
 }
 
+/**
+ * 뷰 모드(기본, 읽기전용, 책모드) 전환
+ */
 export function toggleViewMode(mode) {
     const container = document.getElementById('editor-container');
     state.currentViewMode = mode;
-    const writeModal = document.getElementById('write-modal'), editBody = document.getElementById('editor-body'), editTitle = document.getElementById('edit-title'), editSubtitle = document.getElementById('edit-subtitle'), editorToolbar = document.getElementById('editor-toolbar');
+    const writeModal = document.getElementById('write-modal'), 
+          editBody = document.getElementById('editor-body'), 
+          editTitle = document.getElementById('edit-title'), 
+          editSubtitle = document.getElementById('edit-subtitle'), 
+          editorToolbar = document.getElementById('editor-toolbar');
+
+    // [수정] 모드 버튼 활성화(active) 표시 제어
+    const btnReadOnly = document.getElementById('btn-readonly');
+    const btnBookMode = document.getElementById('btn-bookmode');
+    if(btnReadOnly) btnReadOnly.classList.toggle('active', mode === 'readOnly');
+    if(btnBookMode) btnBookMode.classList.toggle('active', mode === 'book');
+
+    // [추가] 툴바 토글 버튼 아이콘 상태 동기화용
+    const toggleBtn = document.getElementById('toolbar-toggle-btn');
+    const icon = toggleBtn ? toggleBtn.querySelector('i') : null;
 
     if(container) {
         container.style.height = ''; container.style.overflow = ''; 
@@ -250,14 +263,28 @@ export function toggleViewMode(mode) {
 
     if (mode === 'book') {
         editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false";
-        linkifyContents(editBody); writeModal.classList.add('mode-book');
+        linkifyContents(editBody); 
+        writeModal.classList.add('mode-book');
+        
+        // [수정] 책 모드 시작 시 툴바 접기 및 아이콘 변경
+        editorToolbar?.classList.add('collapsed');
+        if (icon) icon.className = 'ph ph-caret-down';
+
         updateBookLayout(); toggleBookEventListeners(true); updateBookNav();
     } else if (mode === 'readOnly') {
         editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false";
-        writeModal.classList.add('mode-read-only'); editorToolbar?.classList.add('collapsed');
+        linkifyContents(editBody); // 읽기 전용에서도 링크 활성화
+        writeModal.classList.add('mode-read-only'); 
+        
+        // 툴바 접기 및 아이콘 변경
+        editorToolbar?.classList.add('collapsed');
+        if (icon) icon.className = 'ph ph-caret-down';
     } else {
         editTitle.readOnly = false; editSubtitle.readOnly = false; editBody.contentEditable = "true";
+        
+        // 기본 모드 시 툴바 펼치기 및 아이콘 변경
         editorToolbar?.classList.remove('collapsed');
+        if (icon) icon.className = 'ph ph-caret-up';
     }
 }
 
