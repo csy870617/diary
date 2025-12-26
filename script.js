@@ -5,6 +5,7 @@ import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertStic
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, saveToDrive, syncFromDrive } from './drive.js';
 
+// 전역 윈도우 함수 등록 (HTML 인라인 호출용)
 window.addNewCategory = addNewCategory;
 window.restoreEntry = restoreEntry;
 window.permanentDelete = permanentDelete;
@@ -25,6 +26,9 @@ const stickers = [
     '💡','🔔','🎁','🎀','💌','🏠','🚪'
 ];
 
+/**
+ * 앱 초기화 실행
+ */
 function init() {
     loadCategoriesFromLocal(); 
     loadDataFromLocal();
@@ -33,21 +37,36 @@ function init() {
     state.isLoading = false;
     renderEntries();
 
+    // 1. Google Drive 초기화 및 동기화 설정
     initGoogleDrive((isLoggedIn) => {
         updateAuthUI(isLoggedIn);
         if (isLoggedIn) {
             renderTabs();
             renderEntries(); 
+
+            // [추가] 백그라운드 실시간 동기화 (1분마다 체크)
+            setInterval(() => {
+                if (!document.hidden && gapi.client && gapi.client.getToken()) {
+                    syncFromDrive(false);
+                }
+            }, 60000);
         }
     });
 
+    // 2. [추가] 브라우저/앱으로 다시 돌아왔을 때 즉시 최신 데이터 확인
+    window.addEventListener('focus', () => {
+        if (gapi.client && gapi.client.getToken()) {
+            syncFromDrive(false);
+        }
+    });
+
+    // 3. 온라인 상태가 되면 동기화 시도
     window.addEventListener('online', () => {
         const refreshBtn = document.getElementById('refresh-btn');
         if(refreshBtn && !refreshBtn.classList.contains('hidden')) {
             refreshBtn.classList.add('rotating');
-            syncFromDrive(() => {
-                refreshBtn.classList.remove('rotating');
-            });
+            syncFromDrive(true); // 강제 동기화
+            setTimeout(() => refreshBtn.classList.remove('rotating'), 2000);
         }
     });
 
@@ -56,6 +75,9 @@ function init() {
     makeDraggable(document.getElementById('color-palette-popup'), document.querySelector('.palette-header'));
 }
 
+/**
+ * 로그인 상태에 따른 UI 업데이트
+ */
 function updateAuthUI(isLoggedIn) {
     const logoutBtn = document.getElementById('logout-btn');
     const loginTriggerBtn = document.getElementById('login-trigger-btn');
@@ -78,6 +100,9 @@ function updateAuthUI(isLoggedIn) {
     }
 }
 
+/**
+ * 드래그 가능한 팝업 설정 (색상 팔레트용)
+ */
 function makeDraggable(element, handle) {
     if (!element) return;
     const dragHandle = handle || element;
@@ -107,6 +132,9 @@ function makeDraggable(element, handle) {
     window.addEventListener('mouseup', () => isDragging = false);
 }
 
+/**
+ * 주요 이벤트 리스너 설정
+ */
 function setupListeners() {
     const tabContainer = document.getElementById('tab-container');
     if (typeof Sortable !== 'undefined' && tabContainer) {
@@ -117,11 +145,9 @@ function setupListeners() {
                 const newOrder = [];
                 tabContainer.querySelectorAll('.tab-btn').forEach(btn => { if(btn.dataset.id) newOrder.push(btn.dataset.id); });
                 state.categoryOrder = newOrder;
-                
-                // [수정] 순서 변경 시 업데이트 시간 갱신 및 클라우드 즉시 동기화
                 state.categoryUpdatedAt = new Date().toISOString();
                 saveCategoriesToLocal();
-                await saveToDrive();
+                await saveToDrive(true); // 순서 변경 후 클라우드 즉시 업로드
             }
         });
         tabContainer.addEventListener('wheel', (evt) => {
@@ -160,6 +186,9 @@ function setupListeners() {
     setupUIListeners();
 }
 
+/**
+ * UI 버튼 리스너 설정
+ */
 function setupUIListeners() {
     const toolbarScroll = document.getElementById('toolbar-scroll-area');
     if (toolbarScroll) {
@@ -173,11 +202,11 @@ function setupUIListeners() {
         editorSyncBtn.onclick = async function() {
             this.classList.add('rotating');
             try {
-                await saveEntry(); 
+                await saveEntry(); // data.js에서 saveEntry 후 자동으로 saveToDrive 호출
             } catch (err) {
                 console.error("Sync Error:", err);
             } finally {
-                this.classList.remove('rotating');
+                setTimeout(() => this.classList.remove('rotating'), 1000);
             }
         };
     }
@@ -199,18 +228,15 @@ function setupUIListeners() {
     if (refreshBtn) {
         refreshBtn.onclick = async function() {
             this.classList.add('rotating');
-            await saveToDrive();
+            await syncFromDrive(true);
             this.classList.remove('rotating');
         };
     }
 
     document.getElementById('font-selector')?.addEventListener('change', (e) => applyFontStyle(e.target.value, state.currentFontSize));
     
-    const sizeUpBtn = document.getElementById('btn-global-size-up');
-    if (sizeUpBtn) sizeUpBtn.onclick = () => changeGlobalFontSize(2);
-    
-    const sizeDownBtn = document.getElementById('btn-global-size-down');
-    if (sizeDownBtn) sizeDownBtn.onclick = () => changeGlobalFontSize(-2);
+    document.getElementById('btn-global-size-up')?.addEventListener('click', () => changeGlobalFontSize(2));
+    document.getElementById('btn-global-size-down')?.addEventListener('click', () => changeGlobalFontSize(-2));
 
     document.querySelectorAll('.editor-toolbar .tool-btn[data-cmd]').forEach(btn => {
         btn.onclick = () => formatDoc(btn.dataset.cmd);
