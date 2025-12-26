@@ -11,12 +11,10 @@ let deleteBtn = null;
 let resizeBtnGroup = null;
 
 // 책 모드 상태
-let isTurningPage = false;    // 페이지 넘김 락
-let currentBookPageIndex = 0; // 현재 페이지 번호
-let touchStartX = 0;          // 터치 시작 좌표
-
-// 휠 쿨타임 (관성 제어용)
-let wheelLockTimer = null;
+let isTurningPage = false;    
+let currentBookPageIndex = 0; 
+let touchStartX = 0;          
+let wheelLockTimer = null;    
 
 // ============================================
 // [2] 이벤트 핸들러
@@ -25,27 +23,23 @@ let wheelLockTimer = null;
 function handleBookWheel(e) {
     if (state.currentViewMode !== 'book') return;
 
-    // 1. 기본 스크롤 동작 차단
     e.preventDefault();
+    e.stopPropagation();
 
-    // 2. 락이 걸려있으면 무시
-    if (isTurningPage) return;
-
-    // 3. 휠 감도 설정 (임계값 이상일 때만 동작)
-    if (Math.abs(e.deltaY) < 20) return;
-
-    // 4. 방향 결정 및 페이지 이동
-    const direction = e.deltaY > 0 ? 1 : -1;
-    
-    // 5. 즉시 락을 걸어 연속 동작 방지
-    isTurningPage = true;
-    turnPage(direction);
-    
     if (wheelLockTimer) clearTimeout(wheelLockTimer);
+
+    if (!isTurningPage) {
+        if (Math.abs(e.deltaY) > 20) {
+            const direction = e.deltaY > 0 ? 1 : -1;
+            turnPage(direction);
+            isTurningPage = true; 
+        }
+    }
+
     wheelLockTimer = setTimeout(() => {
         isTurningPage = false;
         wheelLockTimer = null;
-    }, 400); // 0.4초 쿨타임
+    }, 500);
 }
 
 function handleBookTouchStart(e) {
@@ -67,8 +61,8 @@ function handleBookTouchEnd(e) {
 
     if (Math.abs(diff) > 50) {
         const direction = diff > 0 ? 1 : -1;
-        isTurningPage = true;
         turnPage(direction);
+        isTurningPage = true;
         setTimeout(() => isTurningPage = false, 300);
     }
 }
@@ -78,7 +72,7 @@ function handleBookResize() {
         updateBookLayout();
         const container = document.getElementById('editor-container');
         if(container) {
-            const stride = container.clientWidth;
+            const stride = Math.floor(container.clientWidth);
             container.scrollLeft = currentBookPageIndex * stride;
             updateBookNav();
         }
@@ -86,15 +80,15 @@ function handleBookResize() {
 }
 
 // ============================================
-// [3] 페이지 이동 (정밀 스냅 방식)
+// [3] 페이지 이동
 // ============================================
 
 export function turnPage(direction) { 
     const container = document.getElementById('editor-container');
     if (!container) return;
 
-    const stride = container.clientWidth;
-    const maxPage = Math.max(0, Math.ceil(container.scrollWidth / stride) - 1);
+    const stride = Math.floor(container.clientWidth);
+    const maxPage = Math.ceil(container.scrollWidth / stride) - 1;
 
     let nextIndex = currentBookPageIndex + direction;
 
@@ -104,10 +98,7 @@ export function turnPage(direction) {
     if (nextIndex === currentBookPageIndex) return;
 
     currentBookPageIndex = nextIndex;
-
-    // 정확한 페이지 배수로 스크롤 위치 강제 지정
     container.scrollLeft = currentBookPageIndex * stride;
-
     updateBookNav();
 }
 
@@ -115,7 +106,7 @@ function updateBookLayout() {
     const container = document.getElementById('editor-container');
     if (!container) return;
     
-    const width = container.clientWidth;
+    const width = Math.floor(container.clientWidth);
     container.style.columnWidth = `${width}px`;
     container.style.columnGap = '0px';
     
@@ -133,11 +124,11 @@ export function updateBookNav() {
 
     if(!container) return;
 
-    const stride = container.clientWidth;
+    const stride = Math.floor(container.clientWidth);
     const scrollWidth = container.scrollWidth; 
     
     const currentPage = currentBookPageIndex + 1;
-    const totalPages = Math.max(1, Math.ceil(scrollWidth / stride)); 
+    const totalPages = Math.ceil(scrollWidth / stride) || 1; 
     
     if (bookNavLeft) {
         if (currentBookPageIndex > 0) bookNavLeft.classList.remove('hidden'); 
@@ -222,7 +213,6 @@ function toggleBookEventListeners(enable) {
     if (!container) return;
 
     container.removeEventListener('wheel', handleBookWheel);
-    container.removeEventListener('touchstart', handleBookWheel); // 기존 중복 제거
     container.removeEventListener('touchstart', handleBookTouchStart);
     container.removeEventListener('touchmove', handleBookTouchMove);
     container.removeEventListener('touchend', handleBookTouchEnd);
@@ -249,6 +239,7 @@ export function openEditor(isEdit, entryData) {
     
     currentBookPageIndex = 0;
     isTurningPage = false;
+    if(wheelLockTimer) clearTimeout(wheelLockTimer);
     
     if (!history.state || history.state.modal !== 'open') {
         history.pushState({ modal: 'open' }, null, '');
@@ -274,7 +265,9 @@ export function openEditor(isEdit, entryData) {
         linkifyContents(editBody);
         applyFontStyle(entryData.fontFamily || 'Pretendard', entryData.fontSize || 16); 
     } else { 
-        state.editingId = null; 
+        // [핵심] 새 글 작성 시 ID를 미리 발급하여 중복 생성 방지
+        state.editingId = Date.now().toString(); 
+        
         editTitle.value = ''; 
         editSubtitle.value = ''; 
         editBody.innerHTML = ''; 
@@ -294,8 +287,11 @@ export function toggleViewMode(mode) {
     let savedPageIndex = 0;
 
     if (container) {
-        if (previousMode === 'book') savedPageIndex = currentBookPageIndex;
-        else savedScrollTop = container.scrollTop;
+        if (previousMode === 'book') {
+            savedPageIndex = currentBookPageIndex;
+        } else {
+            savedScrollTop = container.scrollTop;
+        }
     }
 
     state.currentViewMode = mode;
@@ -350,9 +346,10 @@ export function toggleViewMode(mode) {
         setTimeout(() => {
             if(container) {
                 const pageHeight = container.clientHeight; 
-                const stride = container.clientWidth;
+                const stride = Math.floor(container.clientWidth);
                 if(pageHeight > 0) {
-                    currentBookPageIndex = Math.floor(savedScrollTop / pageHeight);
+                    const targetIndex = Math.floor(savedScrollTop / pageHeight);
+                    currentBookPageIndex = targetIndex;
                     container.scrollLeft = currentBookPageIndex * stride;
                     updateBookNav();
                 }
