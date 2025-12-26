@@ -1,7 +1,7 @@
 import { state, saveCategoriesToLocal } from './state.js';
 import { updateEntryField, emptyTrash, saveEntry, restoreEntry, permanentDelete } from './data.js';
 import { openEditor, toggleViewMode, applyFontStyle, turnPage, formatDoc, changeGlobalFontSize, insertSticker, insertImage } from './editor.js';
-import { saveToDrive } from './drive.js';
+import { saveToDrive, syncFromDrive } from './drive.js'; // syncFromDrive 임포트 추가
 
 const getEl = (id) => document.getElementById(id);
 
@@ -45,10 +45,21 @@ export function renderEntries(keyword = '') {
             ? `수정: ${new Date(entry.modifiedAt || entry.timestamp).toLocaleDateString()}` 
             : entry.date;
         div.innerHTML = `<h3 class="card-title">${entry.title}</h3>${entry.subtitle ? `<p class="card-subtitle">${entry.subtitle}</p>` : ''}<div class="card-meta"><span>${dateStr}</span></div>`;
-        div.onclick = () => {
-            openEditor(true, entry);
+        
+        // [수정] 클릭 시 동기화 후 에디터 진입
+        div.onclick = async () => {
+            // 구글 로그인이 되어 있는 경우에만 사전 동기화 진행
+            if (window.gapi && gapi.client && gapi.client.getToken()) {
+                await syncFromDrive();
+            }
+            
+            // 동기화로 인해 state.entries가 바뀌었을 수 있으므로 최신 entry 객체를 다시 찾음
+            const latestEntry = state.entries.find(e => e.id === entry.id) || entry;
+            
+            openEditor(true, latestEntry);
             toggleViewMode('readOnly');
         };
+        
         attachContextMenu(div, entry.id);
         entryList.appendChild(div);
     });
@@ -119,19 +130,14 @@ export function closeAllModals(goBack = true) {
 
     toggleViewMode('default'); 
     
-    // [중요] UI 버튼으로 닫은 경우에만 history.back() 실행
     if(goBack && history.state && history.state.modal === 'open') {
         history.back();
     }
     renderEntries();
 }
 
-/**
- * 모달 열기 (히스토리 상태 push)
- */
 export function openModal(modal) {
     if(!modal) return;
-    // [중요] 모달 오픈 시 히스토리 상태 추가 (뒤로가기 방어용)
     if (!history.state || history.state.modal !== 'open') {
         history.pushState({ modal: 'open' }, null, '');
     }
@@ -226,7 +232,6 @@ export function openMoveModal() {
     getEl('context-menu')?.classList.add('hidden');
     const moveModal = getEl('move-modal');
     const moveCategoryList = getEl('move-category-list');
-    // [중요] 이동 모달도 히스토리 관리 적용
     openModal(moveModal);
     moveCategoryList.innerHTML = '';
     state.allCategories.forEach(cat => {

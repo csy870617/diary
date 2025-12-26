@@ -5,7 +5,6 @@ import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertStic
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, saveToDrive, syncFromDrive } from './drive.js';
 
-// 전역 윈도우 함수 등록
 window.addNewCategory = addNewCategory;
 window.restoreEntry = restoreEntry;
 window.permanentDelete = permanentDelete;
@@ -18,11 +17,10 @@ const stickers = [
     '☁️','☀️','🌙','⭐','✨','🌈','🔥','💧','🌱','🌿','🍂','🌻','🌷','🌹',
     '❤️','🧡','💛','💚','💙','💜','🤍','🤎','🖤','💔','❣️','💕','💞','💓',
     '😊','🥰','😭','🥺','🤔','🫡','👏','👍','🤝','🙇','🙆','🙅','💪','🎉',
-    '📝','✏️','🖍️','📌','📎','📅','⏳','💡','🔔','🎁','🎀','💌','🏠','🚪'
+    '📝','✏️','🖍️','📌','📎','📅','⏳','💡','🔔','🎁','🎀','💌','🏠',' DOOR'
 ];
 
 function init() {
-    // [중요] 초기 히스토리 상태 설정 (뒤로가기 방지용)
     if (!history.state) {
         history.replaceState({ modal: 'main' }, null, '');
     }
@@ -39,19 +37,17 @@ function init() {
         if (isLoggedIn) {
             renderTabs();
             renderEntries(); 
-            // 주기적 동기화 간격을 30초로 단축하여 실시간성 강화
+            // [최적화] 주기적 동기화 간격을 15초로 더 단축
             setInterval(() => {
                 if (!document.hidden && window.gapi?.client?.getToken()) syncFromDrive();
-            }, 30000);
+            }, 15000); 
         }
     });
 
-    // 화면 포커스를 얻거나, 다른 앱에서 돌아올 때(모바일) 즉시 동기화
     window.addEventListener('focus', () => {
         if (window.gapi?.client?.getToken()) syncFromDrive();
     });
 
-    // [추가] 브라우저 가시성 상태 감지 (모바일 앱 전환 시 매우 중요)
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible' && window.gapi?.client?.getToken()) {
             syncFromDrive();
@@ -106,11 +102,10 @@ function setupListeners() {
         tabContainer.addEventListener('wheel', (evt) => { if (evt.deltaY !== 0) { evt.preventDefault(); tabContainer.scrollLeft += evt.deltaY; } });
     }
 
-    // [중요] 브라우저 뒤로가기 발생 시 모달 닫기
     window.addEventListener('popstate', async (event) => {
         const writeModal = document.getElementById('write-modal');
         if (writeModal && !writeModal.classList.contains('hidden')) {
-            await saveEntry(); // 작성 내용 자동 저장
+            await saveEntry();
         }
         closeAllModals(false); 
     });

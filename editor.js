@@ -14,6 +14,7 @@ let currentBookPageIndex = 0;
 let touchStartX = 0;          
 let wheelLockTimer = null;    
 
+// [최적화] 자동 저장 대기 시간을 3초에서 2초로 단축하여 동기화 속도 향상
 async function triggerAutoSave() {
     if (autoSaveTimer) clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(async () => {
@@ -21,7 +22,7 @@ async function triggerAutoSave() {
         if (!editBody || state.currentViewMode !== 'default') return;
         await saveEntry(); 
         if (window.gapi && gapi.client && gapi.client.getToken()) await saveToDrive(); 
-    }, 3000);
+    }, 2000); 
 }
 
 function handleBookWheel(e) {
@@ -166,7 +167,6 @@ export function toggleViewMode(mode) {
     state.currentViewMode = mode;
     const writeModal = document.getElementById('write-modal'), editBody = document.getElementById('editor-body'), editTitle = document.getElementById('edit-title'), editSubtitle = document.getElementById('edit-subtitle'), editorToolbar = document.getElementById('editor-toolbar');
     
-    // 버튼 활성화 표시 추가
     const btnReadOnly = document.getElementById('btn-readonly');
     const btnBookMode = document.getElementById('btn-bookmode');
     if(btnReadOnly) btnReadOnly.classList.toggle('active', mode === 'readOnly');
