@@ -83,23 +83,8 @@ async function checkAuthAndSync(callback) {
     try {
         const userInfo = await gapi.client.drive.about.get({ fields: 'user' });
         state.currentUser = userInfo.result.user;
-        
-        const loginBtn = document.getElementById('login-trigger-btn');
-        const logoutBtn = document.getElementById('logout-btn');
-        if (loginBtn) loginBtn.classList.add('hidden');
-        if (logoutBtn) {
-            logoutBtn.classList.remove('hidden');
-            logoutBtn.innerHTML = `
-                <div style="display:flex; align-items:center; gap:6px;">
-                    <img src="${state.currentUser.photoLink}" style="width:20px; height:20px; border-radius:50%;">
-                    <span>로그아웃</span>
-                </div>
-            `;
-        }
-
         await saveToDrive(); 
         if(callback) callback(true);
-
     } catch (err) {
         console.error("Auth Check Error", err);
         if(callback) callback(false);
@@ -119,7 +104,7 @@ function toggleSpinners(active) {
 }
 
 /**
- * 완벽 동기화 프로세스
+ * 완벽 동기화 프로세스 (Pull -> Merge -> Push)
  */
 export async function saveToDrive() {
     if (!gapi.client.getToken()) return;
@@ -129,7 +114,7 @@ export async function saveToDrive() {
     toggleSpinners(true);
 
     try {
-        console.log("--- 동기화 시작 ---");
+        console.log("동기화 시작...");
         const folderId = await ensureAppFolder();
         const fileMeta = await findDBFileMeta(folderId);
         
@@ -144,10 +129,9 @@ export async function saveToDrive() {
         }
 
         // 정밀 병합
-        const mergedEntries = mergeEntries(state.entries, cloudData.entries || []);
+        state.entries = mergeEntries(state.entries, cloudData.entries || []);
         const mergedCats = mergeCategories(state, cloudData);
 
-        state.entries = mergedEntries;
         state.allCategories = mergedCats.categories;
         state.categoryOrder = mergedCats.order;
         state.categoryUpdatedAt = mergedCats.updatedAt;
@@ -155,9 +139,9 @@ export async function saveToDrive() {
         localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
         saveCategoriesToLocal();
 
-        // 업로드
+        // 클라우드 업로드
         await uploadToDrive(folderId, fileMeta ? fileMeta.id : null);
-        console.log("--- 동기화 및 클라우드 업로드 완료 ---");
+        console.log("동기화 완료.");
 
         renderTabs();
         renderEntries();
@@ -208,20 +192,16 @@ async function uploadToDrive(folderId, fileId) {
 
 function mergeEntries(localList, cloudList) {
     const entryMap = new Map();
-    // 1. 클라우드 데이터 먼저 등록
     cloudList.forEach(item => { if(item && item.id) entryMap.set(item.id, item); });
     
-    // 2. 로컬 데이터를 비교하여 더 최신이면 교체
     localList.forEach(localItem => {
         if(!localItem || !localItem.id) return;
         const cloudItem = entryMap.get(localItem.id);
-        
         if (!cloudItem) {
             entryMap.set(localItem.id, localItem);
         } else {
             const localTime = new Date(localItem.modifiedAt || localItem.timestamp || 0).getTime();
             const cloudTime = new Date(cloudItem.modifiedAt || cloudItem.timestamp || 0).getTime();
-            
             if (localTime > cloudTime) {
                 entryMap.set(localItem.id, localItem);
             }

@@ -1,6 +1,7 @@
 import { state } from './state.js';
 import { saveEntry } from './data.js';
 import { saveToDrive } from './drive.js';
+import { openModal } from './ui.js';
 
 // ============================================
 // [1] 전역 변수 및 상태
@@ -205,9 +206,12 @@ function toggleBookEventListeners(enable) {
 export function openEditor(isEdit, entryData) { 
     state.isEditMode = isEdit; 
     const writeModal = document.getElementById('write-modal');
-    writeModal.classList.remove('hidden');
-    writeModal.scrollTop = 0;
+    if(!writeModal) return;
     
+    // [수정] openModal을 사용하여 히스토리 상태를 관리
+    openModal(writeModal);
+
+    writeModal.scrollTop = 0;
     currentBookPageIndex = 0;
     setupBasicHandling();
     

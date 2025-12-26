@@ -5,7 +5,7 @@ import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertStic
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, saveToDrive, syncFromDrive } from './drive.js';
 
-// 전역 윈도우 함수 등록
+// 전역 윈도우 함수 등록 (HTML 인라인 호출용)
 window.addNewCategory = addNewCategory;
 window.restoreEntry = restoreEntry;
 window.permanentDelete = permanentDelete;
@@ -14,11 +14,16 @@ window.changeGlobalFontSize = changeGlobalFontSize;
 window.insertSticker = insertSticker;
 
 const stickers = [ 
-    '✝️','⛪','🛐','📖','🙏','🕊️','🕯️','🩸','🐑','🍞','🍷','🍇','👼','🙌',
-    '☁️','☀️','🌙','⭐','✨','🌈','🔥','💧','🌱','🌿','🍂','🌻','🌷','🌹',
-    '❤️','🧡','💛','💚','💙','💜','🤍','🤎','🖤','💔','❣️','💕','💞','💓',
-    '😊','🥰','😭','🥺','🤔','🫡','👏','👍','🤝','🙇','🙆','🙅','💪','🎉',
-    '📝','✏️','🖍️','📌','📎','📅','⏳','💡','🔔','🎁','🎀','💌','🏠','🚪'
+    '✝️','⛪','🛐','📖','🙏','🕊️','🕯️',
+    '🩸','🐑','🍞','🍷','🍇','👼','🙌',
+    '☁️','☀️','🌙','⭐','✨','🌈','🔥',
+    '💧','🌱','🌿','🍂','🌻','🌷','🌹',
+    '❤️','🧡','💛','💚','💙','💜','🤍',
+    '🤎','🖤','💔','❣️','💕','💞','💓',
+    '😊','🥰','😭','🥺','🤔','🫡','👏',
+    '👍','🤝','🙇','🙆','🙅','💪','🎉',
+    '📝','✏️','🖍️','📌','📎','📅','⏳',
+    '💡','🔔','🎁','🎀','💌','🏠','🚪'
 ];
 
 function init() {
@@ -29,32 +34,39 @@ function init() {
     state.isLoading = false;
     renderEntries();
 
-    // Google Drive 초기화 및 백그라운드 동기화 설정
+    // 1. Google Drive 초기화 및 동기화 설정
     initGoogleDrive((isLoggedIn) => {
-        updateAuthUI(isLoggedIn); // 로그인 상태 UI 업데이트 (문구 숨김 등)
+        updateAuthUI(isLoggedIn);
         if (isLoggedIn) {
             renderTabs();
             renderEntries(); 
-            // 1분마다 주기적 자동 동기화
+
+            // 백그라운드 실시간 동기화 (1분마다 체크)
             setInterval(() => {
-                if (!document.hidden && window.gapi?.client?.getToken()) syncFromDrive();
+                if (!document.hidden && window.gapi?.client?.getToken()) {
+                    syncFromDrive();
+                }
             }, 60000);
         }
     });
 
-    // [동기화 강화] 앱/브라우저 탭으로 다시 돌아올 때 즉시 최신 데이터 체크
+    // 2. 앱으로 다시 돌아왔을 때 즉시 최신 데이터 확인
     window.addEventListener('focus', () => {
-        if (window.gapi?.client?.getToken()) syncFromDrive();
+        if (window.gapi?.client?.getToken()) {
+            syncFromDrive();
+        }
     });
 
+    // 3. 온라인 상태가 되면 동기화
     window.addEventListener('online', () => syncFromDrive());
 
     setupListeners();
     renderStickers();
+    makeDraggable(document.getElementById('color-palette-popup'), document.querySelector('.palette-header'));
 }
 
 /**
- * 로그인 상태에 따른 UI 업데이트 (안내 문구 숨기기 포함)
+ * 로그인 상태에 따른 UI 업데이트 (안내 문구 제어 포함)
  */
 function updateAuthUI(isLoggedIn) {
     const logoutBtn = document.getElementById('logout-btn');
@@ -68,37 +80,82 @@ function updateAuthUI(isLoggedIn) {
         if (loginTriggerBtn) loginTriggerBtn.classList.add('hidden');
         if (loginModal) loginModal.classList.add('hidden');
         if (refreshBtn) refreshBtn.classList.remove('hidden');
-        // 로그인 성공 시 안내 문구 숨김
+        // 로그인 시 "여러 대의 기기에서..." 문구 숨김
         if (loginMsgArea) loginMsgArea.classList.add('hidden'); 
     } else {
         state.currentUser = null;
         if (logoutBtn) logoutBtn.classList.add('hidden');
         if (loginTriggerBtn) loginTriggerBtn.classList.remove('hidden');
         if (refreshBtn) refreshBtn.classList.add('hidden');
-        // 로그아웃 시 안내 문구 다시 표시
+        // 로그아웃 시 문구 다시 표시
         if (loginMsgArea) loginMsgArea.classList.remove('hidden');
     }
 }
 
+/**
+ * 드래그 가능한 팝업 설정
+ */
+function makeDraggable(element, handle) {
+    if (!element) return;
+    const dragHandle = handle || element;
+    let isDragging = false;
+    let startX, startY, initialLeft, initialTop;
+
+    const moveAt = (clientX, clientY) => {
+        const dx = clientX - startX;
+        const dy = clientY - startY;
+        element.style.left = `${initialLeft + dx}px`;
+        element.style.top = `${initialTop + dy}px`;
+    };
+
+    dragHandle.onmousedown = (e) => {
+        if(e.target.tagName === 'BUTTON' || e.target.closest('button')) return; 
+        e.preventDefault(); 
+        isDragging = true;
+        startX = e.clientX; startY = e.clientY;
+        const rect = element.getBoundingClientRect();
+        initialLeft = rect.left; initialTop = rect.top;
+        element.style.transform = 'none';
+        element.style.left = `${initialLeft}px`;
+        element.style.top = `${initialTop}px`;
+    };
+
+    window.addEventListener('mousemove', (e) => { if (isDragging) moveAt(e.clientX, e.clientY); });
+    window.addEventListener('mouseup', () => isDragging = false);
+}
+
+/**
+ * 주요 이벤트 리스너 설정
+ */
 function setupListeners() {
     const tabContainer = document.getElementById('tab-container');
     if (typeof Sortable !== 'undefined' && tabContainer) {
         new Sortable(tabContainer, {
-            animation: 150, onEnd: async () => {
+            animation: 150, ghostClass: 'sortable-ghost', dragClass: 'sortable-drag',
+            filter: '.add-cat-btn', 
+            delay: 200, // [수정] 모바일에서 터치(클릭)와 드래그를 구분하기 위해 지연시간 추가
+            delayOnTouchOnly: true,
+            onEnd: async () => {
                 const newOrder = [];
                 tabContainer.querySelectorAll('.tab-btn').forEach(btn => { if(btn.dataset.id) newOrder.push(btn.dataset.id); });
                 state.categoryOrder = newOrder;
                 state.categoryUpdatedAt = new Date().toISOString();
-                saveCategoriesToLocal(); 
-                await saveToDrive(); // 탭 순서 변경 시 즉시 동기화
+                saveCategoriesToLocal();
+                await saveToDrive();
             }
         });
-        tabContainer.addEventListener('wheel', (evt) => { if (evt.deltaY !== 0) { evt.preventDefault(); tabContainer.scrollLeft += evt.deltaY; } });
+        tabContainer.addEventListener('wheel', (evt) => {
+            if (evt.deltaY !== 0) { evt.preventDefault(); tabContainer.scrollLeft += evt.deltaY; }
+        });
     }
 
+    // [수정] 뒤로가기 시 페이지가 완전히 닫히지 않고 모달만 닫히도록 처리
     window.addEventListener('popstate', async (event) => {
-        if (document.getElementById('write-modal')?.classList.contains('hidden') === false) await saveEntry();
-        if (!event.state || event.state.modal !== 'open') closeAllModals(false); 
+        const writeModal = document.getElementById('write-modal');
+        if (writeModal && !writeModal.classList.contains('hidden')) {
+            await saveEntry(); // 작성 중이던 내용 저장
+        }
+        closeAllModals(false); // history.back()을 다시 호출하지 않도록 false 전달
     });
 
     const editorBody = document.getElementById('editor-body');
@@ -114,7 +171,7 @@ function setupListeners() {
     window.addEventListener('click', (e) => {
         const link = e.target.closest('#editor-body a');
         if (link && link.href && document.getElementById('editor-body').getAttribute('contenteditable') === "false") {
-            e.preventDefault(); window.open(link.href, '_blank')?.focus(); return;
+            e.preventDefault(); e.stopPropagation(); window.open(link.href, '_blank')?.focus(); return;
         }
         ['context-menu', 'category-context-menu', 'color-palette-popup', 'sticker-palette'].forEach(id => {
             const el = document.getElementById(id);
@@ -127,31 +184,68 @@ function setupListeners() {
 }
 
 function setupUIListeners() {
-    document.getElementById('editor-sync-btn')?.addEventListener('click', async function() {
-        this.classList.add('rotating');
-        await saveEntry(); 
-        if(window.gapi?.client?.getToken()) await saveToDrive();
-        this.classList.remove('rotating');
-    });
+    const toolbarScroll = document.getElementById('toolbar-scroll-area');
+    if (toolbarScroll) {
+        toolbarScroll.addEventListener('wheel', (e) => {
+            if (e.deltaY !== 0) { e.preventDefault(); toolbarScroll.scrollLeft += e.deltaY; }
+        }, { passive: false });
+    }
+
+    const editorSyncBtn = document.getElementById('editor-sync-btn');
+    if (editorSyncBtn) {
+        editorSyncBtn.onclick = async function() {
+            this.classList.add('rotating');
+            try {
+                await saveEntry(); 
+                if(window.gapi?.client?.getToken()) await saveToDrive();
+            } catch (err) {
+                console.error("Sync Error:", err);
+            } finally {
+                setTimeout(() => this.classList.remove('rotating'), 1000);
+            }
+        };
+    }
 
     document.getElementById('sort-criteria')?.addEventListener('change', (e) => { state.currentSortBy = e.target.value; renderEntries(); });
     document.getElementById('sort-order-btn')?.addEventListener('click', () => { 
         state.currentSortOrder = state.currentSortOrder === 'desc' ? 'asc' : 'desc'; 
         const icon = document.getElementById('sort-icon');
-        if (icon) { icon.classList.toggle('ph-sort-descending'); icon.classList.toggle('ph-sort-ascending'); }
+        if (icon) {
+            icon.classList.toggle('ph-sort-descending'); icon.classList.toggle('ph-sort-ascending');
+        }
         renderEntries(); 
     });
     
     document.getElementById('search-input')?.addEventListener('input', (e) => renderEntries(e.target.value));
-    document.getElementById('refresh-btn')?.addEventListener('click', () => syncFromDrive());
+    document.getElementById('search-trigger')?.addEventListener('click', () => document.getElementById('search-input').focus());
 
-    document.getElementById('btn-global-size-up')?.addEventListener('click', () => changeGlobalFontSize(2));
-    document.getElementById('btn-global-size-down')?.addEventListener('click', () => changeGlobalFontSize(-2));
+    const refreshBtn = document.getElementById('refresh-btn');
+    if (refreshBtn) {
+        refreshBtn.onclick = async function() {
+            this.classList.add('rotating');
+            await syncFromDrive();
+            this.classList.remove('rotating');
+        };
+    }
+
+    document.getElementById('font-selector')?.addEventListener('change', (e) => applyFontStyle(e.target.value, state.currentFontSize));
+    
+    const sizeUpBtn = document.getElementById('btn-global-size-up');
+    if (sizeUpBtn) sizeUpBtn.onclick = () => changeGlobalFontSize(2);
+    
+    const sizeDownBtn = document.getElementById('btn-global-size-down');
+    if (sizeDownBtn) sizeDownBtn.onclick = () => changeGlobalFontSize(-2);
+
+    document.querySelectorAll('.editor-toolbar .tool-btn[data-cmd]').forEach(btn => {
+        btn.onclick = () => formatDoc(btn.dataset.cmd);
+    });
 
     document.getElementById('sticker-btn')?.addEventListener('click', (e) => { 
         e.stopPropagation();
         const palette = document.getElementById('sticker-palette');
-        if (palette) { palette.style.top = '110px'; palette.classList.toggle('hidden'); }
+        if (palette) {
+            palette.style.top = '110px'; palette.classList.toggle('hidden');
+        }
     });
     
     const imageInput = document.getElementById('image-upload-input');
@@ -159,57 +253,131 @@ function setupUIListeners() {
         document.getElementById('editor-body')?.focus();
         imageInput?.click();
     });
-    imageInput?.addEventListener('change', (e) => { if (e.target.files[0]) processImage(e.target.files[0]); e.target.value = ''; });
-
-    document.getElementById('toolbar-toggle-btn')?.addEventListener('click', function() {
-        const toolbar = document.getElementById('editor-toolbar');
-        if (toolbar) {
-            toolbar.classList.toggle('collapsed');
-            const icon = this.querySelector('i');
-            if (icon) icon.className = toolbar.classList.contains('collapsed') ? 'ph ph-caret-down' : 'ph ph-caret-up';
-        }
+    imageInput?.addEventListener('change', (e) => {
+        if (e.target.files[0]) processImage(e.target.files[0]);
+        e.target.value = '';
     });
 
-    document.getElementById('toolbar-color-btn')?.addEventListener('click', (e) => { e.stopPropagation(); state.activeColorMode = 'foreColor'; openColorPalette(); });
-    document.getElementById('toolbar-hilite-btn')?.addEventListener('click', (e) => { e.stopPropagation(); state.activeColorMode = 'hiliteColor'; openColorPalette(); });
+    const toggleBtn = document.getElementById('toolbar-toggle-btn');
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', function() {
+            const toolbar = document.getElementById('editor-toolbar');
+            if (toolbar) {
+                toolbar.classList.toggle('collapsed');
+                const icon = this.querySelector('i');
+                if (icon) {
+                    icon.className = toolbar.classList.contains('collapsed') ? 'ph ph-caret-down' : 'ph ph-caret-up';
+                }
+            }
+        });
+    }
+
+    const colorBtn = document.getElementById('toolbar-color-btn');
+    if (colorBtn) colorBtn.onclick = (e) => { e.stopPropagation(); state.activeColorMode = 'foreColor'; openColorPalette(); };
+    
+    const hiliteBtn = document.getElementById('toolbar-hilite-btn');
+    if (hiliteBtn) hiliteBtn.onclick = (e) => { e.stopPropagation(); state.activeColorMode = 'hiliteColor'; openColorPalette(); };
 
     document.querySelectorAll('.color-dot').forEach(btn => { 
         btn.onmousedown = (e) => { 
             e.preventDefault(); 
             if(btn.dataset.color) formatDoc(state.activeColorMode, btn.dataset.color);
-            document.getElementById('color-palette-popup')?.classList.add('hidden'); 
+            const popup = document.getElementById('color-palette-popup');
+            if (popup) popup.classList.add('hidden'); 
         }; 
     });
 
-    document.getElementById('write-btn')?.addEventListener('click', () => openEditor(false));
-    document.getElementById('close-write-btn')?.addEventListener('click', async () => { 
-        await saveEntry(); 
-        await saveToDrive(); // 닫을 때 동기화 보장
-        closeAllModals(true); 
+    document.getElementById('btn-remove-color')?.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        if(state.activeColorMode === 'hiliteColor') {
+             document.execCommand('hiliteColor', false, 'transparent');
+             document.execCommand('backColor', false, 'transparent'); 
+        } else formatDoc('foreColor', '#111827');
+        const popup = document.getElementById('color-palette-popup');
+        if (popup) popup.classList.add('hidden'); 
     });
-    document.getElementById('btn-readonly')?.addEventListener('click', () => toggleViewMode(state.currentViewMode === 'readOnly' ? 'default' : 'readOnly'));
-    document.getElementById('btn-bookmode')?.addEventListener('click', () => toggleViewMode(state.currentViewMode === 'book' ? 'default' : 'book'));
-    document.getElementById('trash-btn')?.addEventListener('click', openTrashModal);
-    
-    document.getElementById('book-nav-left')?.addEventListener('click', () => turnPage(-1));
-    document.getElementById('book-nav-right')?.addEventListener('click', () => turnPage(1));
 
-    document.getElementById('ctx-move')?.addEventListener('click', openMoveModal);
-    document.getElementById('ctx-copy')?.addEventListener('click', () => { duplicateEntry(state.contextTargetId); document.getElementById('context-menu').classList.add('hidden'); });
-    document.getElementById('ctx-delete')?.addEventListener('click', () => { moveToTrash(state.contextTargetId); document.getElementById('context-menu').classList.add('hidden'); });
-    document.getElementById('ctx-cat-rename')?.addEventListener('click', renameCategoryAction);
-    document.getElementById('ctx-cat-delete')?.addEventListener('click', deleteCategoryAction);
-    document.getElementById('btn-empty-trash')?.addEventListener('click', emptyTrash);
+    const editBody = document.getElementById('editor-body');
+    if(editBody) {
+        editBody.onfocus = () => state.lastFocusedEdit = editBody;
+        editBody.onkeydown = (e) => { if (e.ctrlKey && e.key === 's') { e.preventDefault(); saveEntry(); } };
+    }
+
+    const trashBtn = document.getElementById('trash-btn');
+    if (trashBtn) trashBtn.onclick = openTrashModal;
+    
+    const closeTrashBtn = document.getElementById('close-trash-btn');
+    if (closeTrashBtn) closeTrashBtn.onclick = () => closeAllModals(true);
+    
+    const writeBtn = document.getElementById('write-btn');
+    if (writeBtn) writeBtn.onclick = () => openEditor(false);
+    
+    const closeWriteBtn = document.getElementById('close-write-btn');
+    if (closeWriteBtn) closeWriteBtn.onclick = async () => { await saveEntry(); closeAllModals(true); };
+    
+    const readOnlyBtn = document.getElementById('btn-readonly');
+    if (readOnlyBtn) readOnlyBtn.onclick = () => toggleViewMode(state.currentViewMode === 'readOnly' ? 'default' : 'readOnly');
+    
+    const bookModeBtn = document.getElementById('btn-bookmode');
+    if (bookModeBtn) bookModeBtn.onclick = () => toggleViewMode(state.currentViewMode === 'book' ? 'default' : 'book');
+    
+    const copyBtn = document.getElementById('btn-copy-text');
+    if (copyBtn) {
+        copyBtn.onclick = async () => {
+            const title = document.getElementById('edit-title')?.value || "";
+            const body = document.getElementById('editor-body')?.innerText || "";
+            const text = `${title}\n\n${body}`;
+            await navigator.clipboard.writeText(text); alert("복사되었습니다.");
+        };
+    }
+
+    const navLeft = document.getElementById('book-nav-left');
+    if (navLeft) navLeft.onclick = () => turnPage(-1);
+    
+    const navRight = document.getElementById('book-nav-right');
+    if (navRight) navRight.onclick = () => turnPage(1);
+    
+    document.addEventListener('keydown', (e) => { 
+        if(state.currentViewMode === 'book' && !document.getElementById('write-modal').classList.contains('hidden')) { 
+            if(e.key === 'ArrowLeft') turnPage(-1); 
+            if(e.key === 'ArrowRight') turnPage(1); 
+        } 
+    });
+
+    const moveBtn = document.getElementById('ctx-move');
+    if (moveBtn) moveBtn.onclick = openMoveModal;
+    
+    const copyCtxBtn = document.getElementById('ctx-copy');
+    if (copyCtxBtn) copyCtxBtn.onclick = () => { duplicateEntry(state.contextTargetId); document.getElementById('context-menu').classList.add('hidden'); };
+    
+    const deleteCtxBtn = document.getElementById('ctx-delete');
+    if (deleteCtxBtn) deleteCtxBtn.onclick = () => { moveToTrash(state.contextTargetId); document.getElementById('context-menu').classList.add('hidden'); };
+    
+    const renameCatBtn = document.getElementById('ctx-cat-rename');
+    if (renameCatBtn) renameCatBtn.onclick = renameCategoryAction;
+    
+    const deleteCatBtn = document.getElementById('ctx-cat-delete');
+    if (deleteCatBtn) deleteCatBtn.onclick = deleteCategoryAction;
+    
+    const closeMoveBtn = document.getElementById('close-move-btn');
+    if (closeMoveBtn) closeMoveBtn.onclick = () => document.getElementById('move-modal').classList.add('hidden');
+    
+    const emptyTrashBtn = document.getElementById('btn-empty-trash');
+    if (emptyTrashBtn) emptyTrashBtn.onclick = emptyTrash;
 }
 
 function openColorPalette() {
     const popup = document.getElementById('color-palette-popup');
-    if (popup) { popup.style.top = '110px'; popup.classList.toggle('hidden'); }
+    if (popup) {
+        popup.style.top = '110px'; popup.classList.toggle('hidden');
+    }
 }
 
 function renderStickers() { 
     const grid = document.getElementById('sticker-grid');
-    if (grid) grid.innerHTML = stickers.map(s => `<span class="sticker-item" onmousedown="event.preventDefault(); insertSticker('${s}')">${s}</span>`).join(''); 
+    if (grid) {
+        grid.innerHTML = stickers.map(s => `<span class="sticker-item" onmousedown="event.preventDefault(); insertSticker('${s}')">${s}</span>`).join(''); 
+    }
 }
 
 function processImage(file) {
@@ -218,7 +386,8 @@ function processImage(file) {
         const img = new Image();
         img.onload = () => {
             const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d'), maxWidth = 800;
+            const ctx = canvas.getContext('2d');
+            const maxWidth = 800;
             let { width, height } = img;
             if (width > maxWidth) { height *= maxWidth / width; width = maxWidth; }
             canvas.width = width; canvas.height = height;
