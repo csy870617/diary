@@ -17,7 +17,7 @@ export async function saveEntry() {
     const title = titleEl.value;
     const body = bodyEl.innerHTML; 
     const subtitle = subtitleEl ? subtitleEl.value : '';
-    const nowISO = new Date().toISOString(); // 동기화의 기준이 되는 시간
+    const nowISO = new Date().toISOString(); 
 
     if(!title.trim() && !bodyEl.innerText.trim()) return;
 
@@ -44,7 +44,7 @@ export async function saveEntry() {
         state.entries[index] = {
             ...state.entries[index],
             title, subtitle, body,
-            modifiedAt: nowISO, // 수정 시각 무조건 갱신
+            modifiedAt: nowISO, 
             fontFamily: state.currentFontFamily,
             fontSize: state.currentFontSize
         };
@@ -52,12 +52,14 @@ export async function saveEntry() {
     
     localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
     renderEntries();
-    // editor.js의 자동저장 로직에서 saveToDrive를 별도로 호출함
 }
 
-export function saveData() {
+/**
+ * 변경사항 저장 및 즉시 동기화
+ */
+export async function saveData() {
     localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-    saveToDrive(); 
+    await saveToDrive(); 
 }
 
 export async function updateEntryField(id, fields) {
@@ -65,7 +67,7 @@ export async function updateEntryField(id, fields) {
     if(entry) {
         Object.assign(entry, fields);
         entry.modifiedAt = new Date().toISOString();
-        saveData();
+        await saveData();
     }
 }
 
@@ -84,7 +86,7 @@ export async function permanentDelete(id) {
         if(index !== -1) {
             state.entries[index].isPurged = true;
             state.entries[index].modifiedAt = new Date().toISOString();
-            saveData();
+            await saveData();
         }
         renderTrash();
     }
@@ -97,7 +99,7 @@ export async function emptyTrash() {
     if(confirm(`휴지통의 ${trashItems.length}개 항목을 모두 영구 삭제하시겠습니까?`)) {
         const now = new Date().toISOString();
         trashItems.forEach(e => { e.isPurged = true; e.modifiedAt = now; });
-        saveData();
+        await saveData();
         renderTrash();
     }
 }
@@ -126,5 +128,5 @@ export async function duplicateEntry(id) {
         timestamp: nowISO, modifiedAt: nowISO, isDeleted: false, isPurged: false
     };
     state.entries.unshift(newEntry);
-    saveData();
+    await saveData();
 }
