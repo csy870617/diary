@@ -146,7 +146,13 @@
         </div>
         <div id="book-nav-left" class="book-nav prev hidden"><i class="ph ph-caret-left"></i></div>
         <div id="book-nav-right" class="book-nav next hidden"><i class="ph ph-caret-right"></i></div>
+        
+        <div id="book-slider-container" class="book-slider-container hidden">
+            <input type="range" id="book-page-slider" min="0" value="0" step="1">
+        </div>
+        
         <div id="page-indicator" class="page-indicator hidden"></div>
+        
         <div id="sticker-palette" class="sticker-palette hidden"><div id="sticker-grid" class="sticker-grid"></div></div>
         
         <div id="color-palette-popup" class="color-palette-popup hidden">
@@ -202,6 +208,17 @@
             <div id="move-category-list" class="category-select-list"></div>
             <button id="close-move-btn" class="cancel-btn" style="width:100%;">취소</button>
         </div>
+    </div>
+
+    <div id="context-menu" class="context-menu hidden">
+        <button class="ctx-item" id="ctx-move"><i class="ph ph-folder-open"></i> 주제 이동</button>
+        <button class="ctx-item" id="ctx-copy"><i class="ph ph-copy"></i> 복제하기</button>
+        <button class="ctx-item danger" id="ctx-delete"><i class="ph ph-trash"></i> 삭제하기</button>
+    </div>
+
+    <div id="category-context-menu" class="context-menu hidden">
+        <button class="ctx-item" id="ctx-cat-rename"><i class="ph ph-pencil-line"></i> 이름 변경</button>
+        <button class="ctx-item danger" id="ctx-cat-delete"><i class="ph ph-trash"></i> 주제 삭제</button>
     </div>
 
     <script type="module" src="script.js?v=2.9"></script>

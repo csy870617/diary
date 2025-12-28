@@ -1,7 +1,7 @@
 import { state, loadCategoriesFromLocal, saveCategoriesToLocal } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
 import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameCategoryAction, deleteCategoryAction, addNewCategory } from './ui.js';
-import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, insertImage } from './editor.js';
+import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, saveToDrive, syncFromDrive } from './drive.js';
 
@@ -125,6 +125,14 @@ function setupListeners() {
         if (link && link.href && document.getElementById('editor-body').getAttribute('contenteditable') === "false") {
             e.preventDefault(); e.stopPropagation(); window.open(link.href, '_blank')?.focus(); return;
         }
+        
+        // 슬라이더 외부 클릭 시 숨기기
+        const sliderContainer = document.getElementById('book-slider-container');
+        if (sliderContainer && !sliderContainer.classList.contains('hidden') && 
+            !sliderContainer.contains(e.target) && !e.target.closest('#page-indicator')) {
+            sliderContainer.classList.add('hidden');
+        }
+
         ['context-menu', 'category-context-menu', 'color-palette-popup', 'sticker-palette'].forEach(id => {
             const el = document.getElementById(id);
             if (el && !el.contains(e.target) && !e.target.closest('.tool-btn')) el.classList.add('hidden');
@@ -207,6 +215,21 @@ function setupUIListeners() {
     
     document.getElementById('book-nav-left')?.addEventListener('click', () => turnPage(-1));
     document.getElementById('book-nav-right')?.addEventListener('click', () => turnPage(1));
+
+    // [추가] 페이지 표시기 클릭 시 슬라이더 토글
+    document.getElementById('page-indicator')?.addEventListener('click', (e) => {
+        if (state.currentViewMode !== 'book') return;
+        e.stopPropagation();
+        const sliderContainer = document.getElementById('book-slider-container');
+        if (sliderContainer) {
+            sliderContainer.classList.toggle('hidden');
+        }
+    });
+
+    // [추가] 슬라이더 조작 시 페이지 점프
+    document.getElementById('book-page-slider')?.addEventListener('input', (e) => {
+        jumpToPage(parseInt(e.target.value));
+    });
 
     document.getElementById('ctx-move')?.addEventListener('click', openMoveModal);
     document.getElementById('ctx-copy')?.addEventListener('click', () => { duplicateEntry(state.contextTargetId); document.getElementById('context-menu').classList.add('hidden'); });

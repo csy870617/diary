@@ -68,6 +68,20 @@ export function turnPage(direction) {
     updateBookNav();
 }
 
+/**
+ * 특정 인덱스의 페이지로 즉시 이동
+ */
+export function jumpToPage(index) {
+    const container = document.getElementById('editor-container');
+    if (!container) return;
+    const stride = Math.floor(container.clientWidth);
+    const maxPage = Math.ceil(container.scrollWidth / stride) - 1;
+    let nextIndex = Math.max(0, Math.min(maxPage, index));
+    currentBookPageIndex = nextIndex;
+    container.scrollLeft = currentBookPageIndex * stride;
+    updateBookNav();
+}
+
 function updateBookLayout() {
     const container = document.getElementById('editor-container');
     if (!container) return;
@@ -83,10 +97,22 @@ export function updateBookNav() {
     if(!container) return;
     const stride = Math.floor(container.clientWidth);
     const totalPages = Math.ceil(container.scrollWidth / stride) || 1; 
+    
     document.getElementById('book-nav-left')?.classList.toggle('hidden', currentBookPageIndex <= 0);
     document.getElementById('book-nav-right')?.classList.toggle('hidden', currentBookPageIndex + 1 >= totalPages);
+    
     const pageIndicator = document.getElementById('page-indicator');
-    if (pageIndicator) { pageIndicator.innerText = `${currentBookPageIndex + 1} / ${totalPages}`; pageIndicator.classList.remove('hidden'); }
+    if (pageIndicator) { 
+        pageIndicator.innerText = `${currentBookPageIndex + 1} / ${totalPages}`; 
+        pageIndicator.classList.remove('hidden'); 
+    }
+
+    // 슬라이더 상태 동기화
+    const slider = document.getElementById('book-page-slider');
+    if (slider) {
+        slider.max = totalPages - 1;
+        slider.value = currentBookPageIndex;
+    }
 }
 
 function linkifyContents(element) {
@@ -174,7 +200,7 @@ export function toggleViewMode(mode) {
 
     if(container) { container.style.height = ''; container.style.overflow = ''; container.style.columnWidth = ''; container.style.columnGap = ''; container.scrollLeft = 0; }
     writeModal.classList.remove('mode-read-only', 'mode-book');
-    document.querySelectorAll('.book-nav, #page-indicator').forEach(el => el.classList.add('hidden'));
+    document.querySelectorAll('.book-nav, #page-indicator, #book-slider-container').forEach(el => el.classList.add('hidden'));
     hideImageSelection(); toggleBookEventListeners(false);
     if (mode === 'book') {
         editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false"; linkifyContents(editBody);
