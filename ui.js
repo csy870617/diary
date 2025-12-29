@@ -1,7 +1,7 @@
 import { state, saveCategoriesToLocal } from './state.js';
 import { updateEntryField, emptyTrash, saveEntry, restoreEntry, permanentDelete } from './data.js';
 import { openEditor, toggleViewMode, applyFontStyle, turnPage, formatDoc, changeGlobalFontSize, insertSticker, insertImage } from './editor.js';
-import { saveToDrive, syncFromDrive } from './drive.js'; // syncFromDrive 임포트 추가
+import { saveToDrive, syncFromDrive } from './drive.js'; 
 
 const getEl = (id) => document.getElementById(id);
 
@@ -46,18 +46,16 @@ export function renderEntries(keyword = '') {
             : entry.date;
         div.innerHTML = `<h3 class="card-title">${entry.title}</h3>${entry.subtitle ? `<p class="card-subtitle">${entry.subtitle}</p>` : ''}<div class="card-meta"><span>${dateStr}</span></div>`;
         
-        // [수정] 클릭 시 동기화 후 에디터 진입
-        div.onclick = async () => {
-            // 구글 로그인이 되어 있는 경우에만 사전 동기화 진행
-            if (window.gapi && gapi.client && gapi.client.getToken()) {
-                await syncFromDrive();
-            }
-            
-            // 동기화로 인해 state.entries가 바뀌었을 수 있으므로 최신 entry 객체를 다시 찾음
-            const latestEntry = state.entries.find(e => e.id === entry.id) || entry;
-            
-            openEditor(true, latestEntry);
+        // [개선] await를 제거하여 즉시 실행되게 함
+        div.onclick = () => {
+            // 일단 로컬 데이터로 즉시 열기
+            openEditor(true, entry);
             toggleViewMode('readOnly');
+
+            // 백그라운드에서 동기화 시작 (기다리지 않음)
+            if (window.gapi && gapi.client && gapi.client.getToken()) {
+                syncFromDrive();
+            }
         };
         
         attachContextMenu(div, entry.id);

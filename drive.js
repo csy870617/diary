@@ -1,6 +1,7 @@
 import { GOOGLE_CONFIG, APP_FOLDER_NAME, DB_FILE_NAME } from './config.js';
 import { state, saveCategoriesToLocal } from './state.js';
 import { renderEntries, renderTabs } from './ui.js';
+import { refreshEditorContent } from './editor.js'; // refreshEditorContent 임포트 추가
 
 let tokenClient;
 let gapiInited = false;
@@ -9,48 +10,32 @@ let isSyncing = false;
 let pendingSync = false;
 let lastCloudModifiedTime = null; 
 
-/**
- * [추가] 토큰 유효성을 검사하고 필요 시 갱신하는 함수
- * 동기화 작업 직전에 실행되어 인증 오류를 방지합니다.
- */
 async function ensureValidToken() {
     const storedToken = localStorage.getItem('faith_token');
     const storedExp = localStorage.getItem('faith_token_exp');
     const now = Date.now();
 
-    // 토큰이 없거나 만료 1분 전이라면 갱신 필요
     if (!storedToken || !storedExp || now >= (parseInt(storedExp) - 60000)) {
-        console.log("토큰이 만료되었거나 곧 만료됩니다. 갱신을 시도합니다...");
         return new Promise((resolve) => {
-            // 기존 콜백을 유지하면서 새로운 토큰을 받으면 처리할 수 있도록 재설정
             tokenClient.callback = async (resp) => {
-                if (resp.error) {
-                    console.error("토큰 갱신 실패:", resp.error);
-                    resolve(false);
-                    return;
-                }
+                if (resp.error) { resolve(false); return; }
                 const expiresIn = resp.expires_in || 3599; 
                 const expTime = Date.now() + (expiresIn * 1000);
                 localStorage.setItem('faith_token', resp.access_token);
                 localStorage.setItem('faith_token_exp', expTime);
                 gapi.client.setToken({ access_token: resp.access_token });
-                console.log("토큰 갱신 성공.");
                 resolve(true);
             };
-            // prompt: '' 또는 prompt: 'none'은 이미 허가된 경우 팝업 없이 갱신을 시도하지만, 
-            // 환경에 따라 사용자 확인이 필요할 수 있습니다.
             tokenClient.requestAccessToken({ prompt: '' });
         });
     }
     
-    // 현재 토큰이 유효하면 gapi에 설정 확인 후 통과
     if (!gapi.client.getToken()) {
         gapi.client.setToken({ access_token: storedToken });
     }
     return true;
 }
 
-// 1. Google API 초기화
 export function initGoogleDrive(callback) {
     if (typeof gapi === 'undefined' || typeof google === 'undefined' || !google.accounts) {
         setTimeout(() => initGoogleDrive(callback), 100);
@@ -135,30 +120,19 @@ async function checkAuthAndSync(callback) {
 
 function toggleSpinners(active) {
     const listBtn = document.getElementById('refresh-btn');
-    const editorBtn = document.getElementById('editor-sync-btn');
     if (active) {
         if(listBtn) listBtn.classList.add('rotating');
-        if(editorBtn) editorBtn.classList.add('rotating');
     } else {
         if(listBtn) listBtn.classList.remove('rotating');
-        if(editorBtn) editorBtn.classList.remove('rotating');
     }
 }
 
-/**
- * 정교한 동기화 프로세스 (토큰 검증 -> 버전 확인 -> 병합 -> 업로드)
- */
 export async function saveToDrive() {
-    if (!localStorage.getItem('faith_token')) return; // 로그인이 안 되어 있으면 중단
-    
+    if (!localStorage.getItem('faith_token')) return; 
     if (isSyncing) { pendingSync = true; return; }
 
-    // [중요] 동기화 시작 전 토큰 유효성 검사 및 자동 갱신
     const isValid = await ensureValidToken();
-    if (!isValid) {
-        console.warn("인증 갱신이 필요하여 동기화를 잠시 대기합니다.");
-        return;
-    }
+    if (!isValid) return;
 
     isSyncing = true;
     toggleSpinners(true);
@@ -168,7 +142,6 @@ export async function saveToDrive() {
         const fileMeta = await findDBFileMeta(folderId);
         
         let cloudData = null;
-        
         if (fileMeta) {
             if (!lastCloudModifiedTime || fileMeta.modifiedTime !== lastCloudModifiedTime) {
                 const response = await gapi.client.drive.files.get({
@@ -191,6 +164,9 @@ export async function saveToDrive() {
             saveCategoriesToLocal();
             renderTabs();
             renderEntries();
+            
+            // [추가] 동기화 후 에디터가 열려있다면 최신 내용으로 갱신
+            refreshEditorContent();
         }
 
         const uploadRes = await uploadToDrive(folderId, fileMeta ? fileMeta.id : null);
@@ -200,7 +176,6 @@ export async function saveToDrive() {
 
     } catch (err) {
         console.error("Sync Error", err);
-        // 만약 401 에러(Unauthorized)가 발생하면 토큰 만료이므로 다시 갱신 시도
         if (err.status === 401) {
             localStorage.removeItem('faith_token_exp'); 
             await saveToDrive(); 
@@ -250,7 +225,6 @@ async function uploadToDrive(folderId, fileId) {
 function mergeEntries(localList, cloudList) {
     const entryMap = new Map();
     cloudList.forEach(item => { if(item && item.id) entryMap.set(item.id, item); });
-    
     localList.forEach(localItem => {
         if(!localItem || !localItem.id) return;
         const cloudItem = entryMap.get(localItem.id);
@@ -259,12 +233,9 @@ function mergeEntries(localList, cloudList) {
         } else {
             const localTime = new Date(localItem.modifiedAt || localItem.timestamp || 0).getTime();
             const cloudTime = new Date(cloudItem.modifiedAt || cloudItem.timestamp || 0).getTime();
-            if (localTime >= cloudTime) {
-                entryMap.set(localItem.id, localItem);
-            }
+            if (localTime >= cloudTime) entryMap.set(localItem.id, localItem);
         }
     });
-    
     return Array.from(entryMap.values()).sort((a, b) => {
         return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
     });
@@ -273,19 +244,10 @@ function mergeEntries(localList, cloudList) {
 function mergeCategories(localState, cloudData) {
     const localTime = new Date(localState.categoryUpdatedAt || 0).getTime();
     const cloudTime = new Date(cloudData.categoryUpdatedAt || 0).getTime();
-
     if (cloudTime > localTime && cloudData.categories && cloudData.categories.length > 0) {
-        return {
-            categories: cloudData.categories,
-            order: cloudData.order || [],
-            updatedAt: cloudData.categoryUpdatedAt
-        };
+        return { categories: cloudData.categories, order: cloudData.order || [], updatedAt: cloudData.categoryUpdatedAt };
     } else {
-        return {
-            categories: localState.allCategories,
-            order: localState.categoryOrder,
-            updatedAt: localState.categoryUpdatedAt
-        };
+        return { categories: localState.allCategories, order: localState.categoryOrder, updatedAt: localState.categoryUpdatedAt };
     }
 }
 
@@ -293,20 +255,12 @@ async function ensureAppFolder() {
     const q = `mimeType='application/vnd.google-apps.folder' and name='${APP_FOLDER_NAME}' and trashed=false`;
     const response = await gapi.client.drive.files.list({ q, fields: 'files(id, name)' });
     if (response.result.files.length > 0) return response.result.files[0].id;
-    
-    const res = await gapi.client.drive.files.create({
-        resource: { name: APP_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' },
-        fields: 'id'
-    });
+    const res = await gapi.client.drive.files.create({ resource: { name: APP_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' }, fields: 'id' });
     return res.result.id;
 }
 
 async function findDBFileMeta(folderId) {
     const q = `name='${DB_FILE_NAME}' and '${folderId}' in parents and trashed=false`;
-    const response = await gapi.client.drive.files.list({ 
-        q, 
-        orderBy: 'modifiedTime desc',
-        fields: 'files(id, name, modifiedTime)' 
-    });
+    const response = await gapi.client.drive.files.list({ q, orderBy: 'modifiedTime desc', fields: 'files(id, name, modifiedTime)' });
     return response.result.files.length > 0 ? response.result.files[0] : null;
 }

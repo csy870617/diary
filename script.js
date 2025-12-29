@@ -21,10 +21,7 @@ const stickers = [
 ];
 
 function init() {
-    if (!history.state) {
-        history.replaceState({ modal: 'main' }, null, '');
-    }
-
+    if (!history.state) history.replaceState({ modal: 'main' }, null, '');
     loadCategoriesFromLocal(); 
     loadDataFromLocal();
     checkOldTrash();
@@ -37,22 +34,15 @@ function init() {
         if (isLoggedIn) {
             renderTabs();
             renderEntries(); 
+            // [최종] 주기적 동기화 간격을 15초(15000ms)로 유지하여 안정성 확보
             setInterval(() => {
                 if (!document.hidden && window.gapi?.client?.getToken()) syncFromDrive();
             }, 15000); 
         }
     });
 
-    window.addEventListener('focus', () => {
-        if (window.gapi?.client?.getToken()) syncFromDrive();
-    });
-
-    document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible' && window.gapi?.client?.getToken()) {
-            syncFromDrive();
-        }
-    });
-
+    window.addEventListener('focus', () => { if (window.gapi?.client?.getToken()) syncFromDrive(); });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && window.gapi?.client?.getToken()) syncFromDrive(); });
     window.addEventListener('online', () => syncFromDrive());
 
     setupListeners();
@@ -60,12 +50,7 @@ function init() {
 }
 
 function updateAuthUI(isLoggedIn) {
-    const logoutBtn = document.getElementById('logout-btn');
-    const loginTriggerBtn = document.getElementById('login-trigger-btn');
-    const loginModal = document.getElementById('login-modal');
-    const refreshBtn = document.getElementById('refresh-btn');
-    const loginMsgArea = document.getElementById('login-msg-area');
-
+    const logoutBtn = document.getElementById('logout-btn'), loginTriggerBtn = document.getElementById('login-trigger-btn'), loginModal = document.getElementById('login-modal'), refreshBtn = document.getElementById('refresh-btn'), loginMsgArea = document.getElementById('login-msg-area');
     if (isLoggedIn) {
         if (logoutBtn) logoutBtn.classList.remove('hidden');
         if (loginTriggerBtn) loginTriggerBtn.classList.add('hidden');
@@ -85,27 +70,20 @@ function setupListeners() {
     const tabContainer = document.getElementById('tab-container');
     if (typeof Sortable !== 'undefined' && tabContainer) {
         new Sortable(tabContainer, {
-            animation: 150,
-            delay: 200, 
-            delayOnTouchOnly: true,
-            touchStartThreshold: 5,
+            animation: 150, delay: 200, delayOnTouchOnly: true, touchStartThreshold: 5,
             onEnd: async () => {
                 const newOrder = [];
                 tabContainer.querySelectorAll('.tab-btn').forEach(btn => { if(btn.dataset.id) newOrder.push(btn.dataset.id); });
-                state.categoryOrder = newOrder;
-                state.categoryUpdatedAt = new Date().toISOString();
-                saveCategoriesToLocal(); 
-                await saveToDrive();
+                state.categoryOrder = newOrder; state.categoryUpdatedAt = new Date().toISOString();
+                saveCategoriesToLocal(); await saveToDrive();
             }
         });
         tabContainer.addEventListener('wheel', (evt) => { if (evt.deltaY !== 0) { evt.preventDefault(); tabContainer.scrollLeft += evt.deltaY; } });
     }
 
-    window.addEventListener('popstate', async (event) => {
+    window.addEventListener('popstate', async () => {
         const writeModal = document.getElementById('write-modal');
-        if (writeModal && !writeModal.classList.contains('hidden')) {
-            await saveEntry();
-        }
+        if (writeModal && !writeModal.classList.contains('hidden')) await saveEntry();
         closeAllModals(false); 
     });
 
@@ -113,8 +91,7 @@ function setupListeners() {
     if (editorBody) {
         editorBody.ondragover = (e) => e.preventDefault();
         editorBody.ondrop = (e) => {
-            e.preventDefault();
-            const files = e.dataTransfer.files;
+            e.preventDefault(); const files = e.dataTransfer.files;
             if (files.length > 0 && files[0].type.startsWith('image/')) processImage(files[0]);
         };
     }
@@ -124,12 +101,8 @@ function setupListeners() {
         if (link && link.href && document.getElementById('editor-body').getAttribute('contenteditable') === "false") {
             e.preventDefault(); e.stopPropagation(); window.open(link.href, '_blank')?.focus(); return;
         }
-        
         const sliderContainer = document.getElementById('book-slider-container');
-        if (sliderContainer && !sliderContainer.classList.contains('hidden') && 
-            !sliderContainer.contains(e.target) && !e.target.closest('#page-indicator')) {
-            sliderContainer.classList.add('hidden');
-        }
+        if (sliderContainer && !sliderContainer.classList.contains('hidden') && !sliderContainer.contains(e.target) && !e.target.closest('#page-indicator')) sliderContainer.classList.add('hidden');
 
         ['context-menu', 'category-context-menu', 'color-palette-popup', 'sticker-palette'].forEach(id => {
             const el = document.getElementById(id);
@@ -145,26 +118,12 @@ function setupUIListeners() {
     const editorContainer = document.getElementById('editor-container');
     const scrollTopBtn = document.getElementById('btn-scroll-top');
 
-    // [추가] 읽기 전용 모드에서 스크롤 양에 따라 상단 이동 버튼 노출
     editorContainer?.addEventListener('scroll', () => {
-        if (state.currentViewMode === 'readOnly' && editorContainer.scrollTop > 300) {
-            scrollTopBtn?.classList.remove('hidden');
-        } else {
-            scrollTopBtn?.classList.add('hidden');
-        }
+        if (state.currentViewMode === 'readOnly' && editorContainer.scrollTop > 300) scrollTopBtn?.classList.remove('hidden');
+        else scrollTopBtn?.classList.add('hidden');
     });
 
-    // [추가] 상단 이동 버튼 클릭 시 부드럽게 스크롤
-    scrollTopBtn?.addEventListener('click', () => {
-        editorContainer.scrollTo({ top: 0, behavior: 'smooth' });
-    });
-
-    document.getElementById('editor-sync-btn')?.addEventListener('click', async function() {
-        this.classList.add('rotating');
-        await saveEntry(); 
-        if(window.gapi?.client?.getToken()) await saveToDrive();
-        this.classList.remove('rotating');
-    });
+    scrollTopBtn?.addEventListener('click', () => { editorContainer.scrollTo({ top: 0, behavior: 'smooth' }); });
 
     document.getElementById('sort-criteria')?.addEventListener('change', (e) => { state.currentSortBy = e.target.value; renderEntries(); });
     document.getElementById('sort-order-btn')?.addEventListener('click', () => { 
@@ -181,16 +140,12 @@ function setupUIListeners() {
     document.getElementById('btn-global-size-down')?.addEventListener('click', () => changeGlobalFontSize(-2));
 
     document.getElementById('sticker-btn')?.addEventListener('click', (e) => { 
-        e.stopPropagation();
-        const palette = document.getElementById('sticker-palette');
+        e.stopPropagation(); const palette = document.getElementById('sticker-palette');
         if (palette) { palette.style.top = '110px'; palette.classList.toggle('hidden'); }
     });
     
     const imageInput = document.getElementById('image-upload-input');
-    document.getElementById('toolbar-image-btn')?.addEventListener('click', () => {
-        document.getElementById('editor-body')?.focus();
-        imageInput?.click();
-    });
+    document.getElementById('toolbar-image-btn')?.addEventListener('click', () => { document.getElementById('editor-body')?.focus(); imageInput?.click(); });
     imageInput?.addEventListener('change', (e) => { if (e.target.files[0]) processImage(e.target.files[0]); e.target.value = ''; });
 
     document.getElementById('toolbar-toggle-btn')?.addEventListener('click', function() {
@@ -207,8 +162,7 @@ function setupUIListeners() {
 
     document.querySelectorAll('.color-dot').forEach(btn => { 
         btn.onmousedown = (e) => { 
-            e.preventDefault(); 
-            if(btn.dataset.color) formatDoc(state.activeColorMode, btn.dataset.color);
+            e.preventDefault(); if(btn.dataset.color) formatDoc(state.activeColorMode, btn.dataset.color);
             document.getElementById('color-palette-popup')?.classList.add('hidden'); 
         }; 
     });
@@ -216,9 +170,7 @@ function setupUIListeners() {
     document.getElementById('write-btn')?.addEventListener('click', () => openEditor(false));
     
     document.getElementById('close-write-btn')?.addEventListener('click', async () => { 
-        await saveEntry(); 
-        await saveToDrive(); 
-        closeAllModals(true); 
+        await saveEntry(); await saveToDrive(); closeAllModals(true); 
     });
 
     document.getElementById('btn-readonly')?.addEventListener('click', () => toggleViewMode(state.currentViewMode === 'readOnly' ? 'default' : 'readOnly'));
@@ -233,16 +185,11 @@ function setupUIListeners() {
 
     document.getElementById('page-indicator')?.addEventListener('click', (e) => {
         if (state.currentViewMode !== 'book') return;
-        e.stopPropagation();
-        const sliderContainer = document.getElementById('book-slider-container');
-        if (sliderContainer) {
-            sliderContainer.classList.toggle('hidden');
-        }
+        e.stopPropagation(); const sliderContainer = document.getElementById('book-slider-container');
+        if (sliderContainer) sliderContainer.classList.toggle('hidden');
     });
 
-    document.getElementById('book-page-slider')?.addEventListener('input', (e) => {
-        jumpToPage(parseInt(e.target.value));
-    });
+    document.getElementById('book-page-slider')?.addEventListener('input', (e) => { jumpToPage(parseInt(e.target.value)); });
 
     document.getElementById('ctx-move')?.addEventListener('click', openMoveModal);
     document.getElementById('ctx-copy')?.addEventListener('click', () => { duplicateEntry(state.contextTargetId); document.getElementById('context-menu').classList.add('hidden'); });
@@ -253,16 +200,12 @@ function setupUIListeners() {
 
 function openColorPalette() {
     const popup = document.getElementById('color-palette-popup');
-    if (popup) {
-        popup.style.top = '110px'; popup.classList.toggle('hidden');
-    }
+    if (popup) { popup.style.top = '110px'; popup.classList.toggle('hidden'); }
 }
 
 function renderStickers() { 
     const grid = document.getElementById('sticker-grid');
-    if (grid) {
-        grid.innerHTML = stickers.map(s => `<span class="sticker-item" onmousedown="event.preventDefault(); insertSticker('${s}')">${s}</span>`).join(''); 
-    }
+    if (grid) grid.innerHTML = stickers.map(s => `<span class="sticker-item" onmousedown="event.preventDefault(); insertSticker('${s}')">${s}</span>`).join(''); 
 }
 
 function processImage(file) {

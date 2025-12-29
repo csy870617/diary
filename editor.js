@@ -14,7 +14,6 @@ let currentBookPageIndex = 0;
 let touchStartX = 0;          
 let wheelLockTimer = null;    
 
-// [최적화] 자동 저장 대기 시간을 3초에서 2초로 단축하여 동기화 속도 향상
 async function triggerAutoSave() {
     if (autoSaveTimer) clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(async () => {
@@ -68,9 +67,6 @@ export function turnPage(direction) {
     updateBookNav();
 }
 
-/**
- * 특정 인덱스의 페이지로 즉시 이동
- */
 export function jumpToPage(index) {
     const container = document.getElementById('editor-container');
     if (!container) return;
@@ -107,7 +103,6 @@ export function updateBookNav() {
         pageIndicator.classList.remove('hidden'); 
     }
 
-    // 슬라이더 상태 동기화
     const slider = document.getElementById('book-page-slider');
     if (slider) {
         slider.max = totalPages - 1;
@@ -189,8 +184,34 @@ export function openEditor(isEdit, entryData) {
 }
 
 /**
- * 양방향 페이지 동기화 기능이 강화된 뷰 모드 전환 함수
+ * [추가] 백그라운드 동기화 완료 후 현재 에디터 내용 갱신
  */
+export function refreshEditorContent() {
+    const writeModal = document.getElementById('write-modal');
+    if (writeModal.classList.contains('hidden') || !state.editingId) return;
+
+    // 최신 state에서 현재 편집중인 데이터 찾기
+    const latestEntry = state.entries.find(e => e.id === state.editingId);
+    if (!latestEntry) return;
+
+    const editTitle = document.getElementById('edit-title');
+    const editSubtitle = document.getElementById('edit-subtitle');
+    const editBody = document.getElementById('editor-body');
+
+    // 사용자가 현재 타이핑 중이 아닐 때(Read Only 모드이거나 포커스가 없을 때)만 자동 갱신
+    if (state.currentViewMode !== 'default' || document.activeElement !== editBody) {
+        if (editTitle.value !== latestEntry.title) editTitle.value = latestEntry.title || '';
+        if (editSubtitle.value !== latestEntry.subtitle) editSubtitle.value = latestEntry.subtitle || '';
+        
+        // 본문 내용이 다를 때만 갱신 (이미지 선택 상자 등 레이아웃 깨짐 방지)
+        if (editBody.innerHTML !== latestEntry.body) {
+            editBody.innerHTML = latestEntry.body || '';
+            linkifyContents(editBody);
+            if (state.currentViewMode === 'book') updateBookNav();
+        }
+    }
+}
+
 export function toggleViewMode(mode) {
     const container = document.getElementById('editor-container');
     const writeModal = document.getElementById('write-modal');
@@ -199,7 +220,6 @@ export function toggleViewMode(mode) {
     const editSubtitle = document.getElementById('edit-subtitle');
     const editorToolbar = document.getElementById('editor-toolbar');
 
-    // [중요] 모드 전환 전 현재 상태 캡처
     const wasBookMode = state.currentViewMode === 'book';
     const oldScrollTop = container ? container.scrollTop : 0;
     const oldHeight = container ? container.clientHeight : 0;
@@ -212,7 +232,6 @@ export function toggleViewMode(mode) {
     if(btnReadOnly) btnReadOnly.classList.toggle('active', mode === 'readOnly');
     if(btnBookMode) btnBookMode.classList.toggle('active', mode === 'book');
 
-    // 기본 레이아웃 리셋
     if(container) { 
         container.style.height = ''; 
         container.style.overflow = ''; 
@@ -222,7 +241,6 @@ export function toggleViewMode(mode) {
     }
     
     writeModal.classList.remove('mode-read-only', 'mode-book');
-    // 특수 UI 초기 숨김
     document.querySelectorAll('.book-nav, #page-indicator, #book-slider-container, #btn-scroll-top').forEach(el => el.classList.add('hidden'));
     
     hideImageSelection(); 
@@ -232,41 +250,23 @@ export function toggleViewMode(mode) {
         editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false"; linkifyContents(editBody);
         writeModal.classList.add('mode-book'); 
         updateBookLayout(); 
-        
-        // [추가] 편집 모드 -> 책 모드 전환 시 현재 읽던 위치로 페이지 설정
-        if (!wasBookMode && oldHeight > 0) {
-            currentBookPageIndex = Math.floor(oldScrollTop / oldHeight);
-        }
-        
+        if (!wasBookMode && oldHeight > 0) currentBookPageIndex = Math.floor(oldScrollTop / oldHeight);
         toggleBookEventListeners(true); 
         updateBookNav();
-        
-        // 스크롤 위치 적용
-        if (container) {
-            container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
-        }
-        
+        if (container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
         editorToolbar?.classList.add('collapsed');
     } else if (mode === 'readOnly') {
         editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false"; linkifyContents(editBody);
         writeModal.classList.add('mode-read-only'); 
         editorToolbar?.classList.add('collapsed');
-        
-        // [추가] 책 모드 -> 읽기 전용 전환 시 위치 동기화
         if (wasBookMode && container) {
-            requestAnimationFrame(() => {
-                container.scrollTop = lastPageIndex * oldHeight;
-            });
+            requestAnimationFrame(() => { container.scrollTop = lastPageIndex * oldHeight; });
         }
     } else {
         editTitle.readOnly = false; editSubtitle.readOnly = false; editBody.contentEditable = "true"; 
         editorToolbar?.classList.remove('collapsed');
-        
-        // [추가] 책 모드 -> 편집 모드 전환 시 위치 동기화
         if (wasBookMode && container) {
-            requestAnimationFrame(() => {
-                container.scrollTop = lastPageIndex * oldHeight;
-            });
+            requestAnimationFrame(() => { container.scrollTop = lastPageIndex * oldHeight; });
         }
     }
 }
