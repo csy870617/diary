@@ -37,7 +37,6 @@ function init() {
         if (isLoggedIn) {
             renderTabs();
             renderEntries(); 
-            // [최적화] 주기적 동기화 간격을 15초로 더 단축
             setInterval(() => {
                 if (!document.hidden && window.gapi?.client?.getToken()) syncFromDrive();
             }, 15000); 
@@ -126,7 +125,6 @@ function setupListeners() {
             e.preventDefault(); e.stopPropagation(); window.open(link.href, '_blank')?.focus(); return;
         }
         
-        // 슬라이더 외부 클릭 시 숨기기
         const sliderContainer = document.getElementById('book-slider-container');
         if (sliderContainer && !sliderContainer.classList.contains('hidden') && 
             !sliderContainer.contains(e.target) && !e.target.closest('#page-indicator')) {
@@ -144,6 +142,23 @@ function setupListeners() {
 }
 
 function setupUIListeners() {
+    const editorContainer = document.getElementById('editor-container');
+    const scrollTopBtn = document.getElementById('btn-scroll-top');
+
+    // [추가] 읽기 전용 모드에서 스크롤 양에 따라 상단 이동 버튼 노출
+    editorContainer?.addEventListener('scroll', () => {
+        if (state.currentViewMode === 'readOnly' && editorContainer.scrollTop > 300) {
+            scrollTopBtn?.classList.remove('hidden');
+        } else {
+            scrollTopBtn?.classList.add('hidden');
+        }
+    });
+
+    // [추가] 상단 이동 버튼 클릭 시 부드럽게 스크롤
+    scrollTopBtn?.addEventListener('click', () => {
+        editorContainer.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
     document.getElementById('editor-sync-btn')?.addEventListener('click', async function() {
         this.classList.add('rotating');
         await saveEntry(); 
@@ -216,7 +231,6 @@ function setupUIListeners() {
     document.getElementById('book-nav-left')?.addEventListener('click', () => turnPage(-1));
     document.getElementById('book-nav-right')?.addEventListener('click', () => turnPage(1));
 
-    // [추가] 페이지 표시기 클릭 시 슬라이더 토글
     document.getElementById('page-indicator')?.addEventListener('click', (e) => {
         if (state.currentViewMode !== 'book') return;
         e.stopPropagation();
@@ -226,7 +240,6 @@ function setupUIListeners() {
         }
     });
 
-    // [추가] 슬라이더 조작 시 페이지 점프
     document.getElementById('book-page-slider')?.addEventListener('input', (e) => {
         jumpToPage(parseInt(e.target.value));
     });

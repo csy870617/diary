@@ -4,10 +4,51 @@ import { renderEntries, renderTabs } from './ui.js';
 
 let tokenClient;
 let gapiInited = false;
-let gisInited = false; // 변수명 대소문자 수정 완료
+let gisInited = false;
 let isSyncing = false;
 let pendingSync = false;
 let lastCloudModifiedTime = null; 
+
+/**
+ * [추가] 토큰 유효성을 검사하고 필요 시 갱신하는 함수
+ * 동기화 작업 직전에 실행되어 인증 오류를 방지합니다.
+ */
+async function ensureValidToken() {
+    const storedToken = localStorage.getItem('faith_token');
+    const storedExp = localStorage.getItem('faith_token_exp');
+    const now = Date.now();
+
+    // 토큰이 없거나 만료 1분 전이라면 갱신 필요
+    if (!storedToken || !storedExp || now >= (parseInt(storedExp) - 60000)) {
+        console.log("토큰이 만료되었거나 곧 만료됩니다. 갱신을 시도합니다...");
+        return new Promise((resolve) => {
+            // 기존 콜백을 유지하면서 새로운 토큰을 받으면 처리할 수 있도록 재설정
+            tokenClient.callback = async (resp) => {
+                if (resp.error) {
+                    console.error("토큰 갱신 실패:", resp.error);
+                    resolve(false);
+                    return;
+                }
+                const expiresIn = resp.expires_in || 3599; 
+                const expTime = Date.now() + (expiresIn * 1000);
+                localStorage.setItem('faith_token', resp.access_token);
+                localStorage.setItem('faith_token_exp', expTime);
+                gapi.client.setToken({ access_token: resp.access_token });
+                console.log("토큰 갱신 성공.");
+                resolve(true);
+            };
+            // prompt: '' 또는 prompt: 'none'은 이미 허가된 경우 팝업 없이 갱신을 시도하지만, 
+            // 환경에 따라 사용자 확인이 필요할 수 있습니다.
+            tokenClient.requestAccessToken({ prompt: '' });
+        });
+    }
+    
+    // 현재 토큰이 유효하면 gapi에 설정 확인 후 통과
+    if (!gapi.client.getToken()) {
+        gapi.client.setToken({ access_token: storedToken });
+    }
+    return true;
+}
 
 // 1. Google API 초기화
 export function initGoogleDrive(callback) {
@@ -56,7 +97,7 @@ export function initGoogleDrive(callback) {
             await checkAuthAndSync(callback);
         },
     });
-    gisInited = true; // 대소문자 일치 확인
+    gisInited = true;
 }
 
 export function handleAuthClick() {
@@ -105,11 +146,19 @@ function toggleSpinners(active) {
 }
 
 /**
- * 정교한 동기화 프로세스 (버전 확인 -> 병합 -> 업로드)
+ * 정교한 동기화 프로세스 (토큰 검증 -> 버전 확인 -> 병합 -> 업로드)
  */
 export async function saveToDrive() {
-    if (!gapi.client.getToken()) return;
+    if (!localStorage.getItem('faith_token')) return; // 로그인이 안 되어 있으면 중단
+    
     if (isSyncing) { pendingSync = true; return; }
+
+    // [중요] 동기화 시작 전 토큰 유효성 검사 및 자동 갱신
+    const isValid = await ensureValidToken();
+    if (!isValid) {
+        console.warn("인증 갱신이 필요하여 동기화를 잠시 대기합니다.");
+        return;
+    }
 
     isSyncing = true;
     toggleSpinners(true);
@@ -121,7 +170,6 @@ export async function saveToDrive() {
         let cloudData = null;
         
         if (fileMeta) {
-            // 클라우드 파일이 변경되었을 때만 데이터 가져오기
             if (!lastCloudModifiedTime || fileMeta.modifiedTime !== lastCloudModifiedTime) {
                 const response = await gapi.client.drive.files.get({
                     fileId: fileMeta.id,
@@ -152,6 +200,11 @@ export async function saveToDrive() {
 
     } catch (err) {
         console.error("Sync Error", err);
+        // 만약 401 에러(Unauthorized)가 발생하면 토큰 만료이므로 다시 갱신 시도
+        if (err.status === 401) {
+            localStorage.removeItem('faith_token_exp'); 
+            await saveToDrive(); 
+        }
     } finally {
         isSyncing = false;
         toggleSpinners(false);

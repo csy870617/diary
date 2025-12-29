@@ -188,29 +188,86 @@ export function openEditor(isEdit, entryData) {
     toggleViewMode('default');
 }
 
+/**
+ * 양방향 페이지 동기화 기능이 강화된 뷰 모드 전환 함수
+ */
 export function toggleViewMode(mode) {
     const container = document.getElementById('editor-container');
+    const writeModal = document.getElementById('write-modal');
+    const editBody = document.getElementById('editor-body');
+    const editTitle = document.getElementById('edit-title');
+    const editSubtitle = document.getElementById('edit-subtitle');
+    const editorToolbar = document.getElementById('editor-toolbar');
+
+    // [중요] 모드 전환 전 현재 상태 캡처
+    const wasBookMode = state.currentViewMode === 'book';
+    const oldScrollTop = container ? container.scrollTop : 0;
+    const oldHeight = container ? container.clientHeight : 0;
+    const lastPageIndex = currentBookPageIndex;
+
     state.currentViewMode = mode;
-    const writeModal = document.getElementById('write-modal'), editBody = document.getElementById('editor-body'), editTitle = document.getElementById('edit-title'), editSubtitle = document.getElementById('edit-subtitle'), editorToolbar = document.getElementById('editor-toolbar');
     
     const btnReadOnly = document.getElementById('btn-readonly');
     const btnBookMode = document.getElementById('btn-bookmode');
     if(btnReadOnly) btnReadOnly.classList.toggle('active', mode === 'readOnly');
     if(btnBookMode) btnBookMode.classList.toggle('active', mode === 'book');
 
-    if(container) { container.style.height = ''; container.style.overflow = ''; container.style.columnWidth = ''; container.style.columnGap = ''; container.scrollLeft = 0; }
+    // 기본 레이아웃 리셋
+    if(container) { 
+        container.style.height = ''; 
+        container.style.overflow = ''; 
+        container.style.columnWidth = ''; 
+        container.style.columnGap = ''; 
+        container.scrollLeft = 0; 
+    }
+    
     writeModal.classList.remove('mode-read-only', 'mode-book');
-    document.querySelectorAll('.book-nav, #page-indicator, #book-slider-container').forEach(el => el.classList.add('hidden'));
-    hideImageSelection(); toggleBookEventListeners(false);
+    // 특수 UI 초기 숨김
+    document.querySelectorAll('.book-nav, #page-indicator, #book-slider-container, #btn-scroll-top').forEach(el => el.classList.add('hidden'));
+    
+    hideImageSelection(); 
+    toggleBookEventListeners(false);
+
     if (mode === 'book') {
         editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false"; linkifyContents(editBody);
-        writeModal.classList.add('mode-book'); updateBookLayout(); toggleBookEventListeners(true); updateBookNav();
+        writeModal.classList.add('mode-book'); 
+        updateBookLayout(); 
+        
+        // [추가] 편집 모드 -> 책 모드 전환 시 현재 읽던 위치로 페이지 설정
+        if (!wasBookMode && oldHeight > 0) {
+            currentBookPageIndex = Math.floor(oldScrollTop / oldHeight);
+        }
+        
+        toggleBookEventListeners(true); 
+        updateBookNav();
+        
+        // 스크롤 위치 적용
+        if (container) {
+            container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
+        }
+        
         editorToolbar?.classList.add('collapsed');
     } else if (mode === 'readOnly') {
         editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false"; linkifyContents(editBody);
-        writeModal.classList.add('mode-read-only'); editorToolbar?.classList.add('collapsed');
+        writeModal.classList.add('mode-read-only'); 
+        editorToolbar?.classList.add('collapsed');
+        
+        // [추가] 책 모드 -> 읽기 전용 전환 시 위치 동기화
+        if (wasBookMode && container) {
+            requestAnimationFrame(() => {
+                container.scrollTop = lastPageIndex * oldHeight;
+            });
+        }
     } else {
-        editTitle.readOnly = false; editSubtitle.readOnly = false; editBody.contentEditable = "true"; editorToolbar?.classList.remove('collapsed');
+        editTitle.readOnly = false; editSubtitle.readOnly = false; editBody.contentEditable = "true"; 
+        editorToolbar?.classList.remove('collapsed');
+        
+        // [추가] 책 모드 -> 편집 모드 전환 시 위치 동기화
+        if (wasBookMode && container) {
+            requestAnimationFrame(() => {
+                container.scrollTop = lastPageIndex * oldHeight;
+            });
+        }
     }
 }
 

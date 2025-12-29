@@ -198,7 +198,6 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 } 
 .book-nav { display: none !important; }
 
-/* 페이지 표시기를 클릭 가능하게 수정 */
 .page-indicator { 
     position: fixed; 
     bottom: 40px;
@@ -215,7 +214,6 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     cursor: pointer;
 }
 
-/* [추가] 책 모드 하단 슬라이더 컨테이너 */
 .book-slider-container {
     position: fixed;
     bottom: 80px;
@@ -236,7 +234,6 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 
 .book-slider-container.hidden { display: none !important; }
 
-/* 슬라이더(input range) 커스텀 스타일 */
 #book-page-slider {
     width: 100%;
     height: 6px;
@@ -258,6 +255,29 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     cursor: pointer;
     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
+
+/* [추가] 맨 위로 가기 버튼 스타일 */
+.btn-scroll-top {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: white;
+    color: var(--gray-900);
+    border: 1px solid var(--gray-200);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 18px;
+    z-index: 2060;
+    transition: opacity 0.3s, transform 0.2s;
+}
+.btn-scroll-top:hover { transform: scale(1.1); background-color: var(--gray-100); }
+.btn-scroll-top:active { transform: scale(0.9); }
 
 /* 기타 UI */
 .trash-container { padding: 20px; }
