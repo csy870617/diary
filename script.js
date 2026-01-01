@@ -34,15 +34,25 @@ function init() {
         if (isLoggedIn) {
             renderTabs();
             renderEntries(); 
-            // [최종] 주기적 동기화 간격을 15초(15000ms)로 유지하여 안정성 확보
+            // 주기적 동기화 (15초)
             setInterval(() => {
                 if (!document.hidden && window.gapi?.client?.getToken()) syncFromDrive();
             }, 15000); 
         }
     });
 
-    window.addEventListener('focus', () => { if (window.gapi?.client?.getToken()) syncFromDrive(); });
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && window.gapi?.client?.getToken()) syncFromDrive(); });
+    // 화면 포커스 시 동기화
+    window.addEventListener('focus', () => { 
+        if (window.gapi?.client?.getToken()) syncFromDrive(); 
+    });
+
+    // 탭 가시성 변화 시 (잠자기 모드 복귀 시 가장 중요)
+    document.addEventListener('visibilitychange', () => { 
+        if (document.visibilityState === 'visible' && window.gapi?.client?.getToken()) {
+            syncFromDrive();
+        } 
+    });
+
     window.addEventListener('online', () => syncFromDrive());
 
     setupListeners();

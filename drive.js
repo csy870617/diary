@@ -1,7 +1,7 @@
 import { GOOGLE_CONFIG, APP_FOLDER_NAME, DB_FILE_NAME } from './config.js';
 import { state, saveCategoriesToLocal } from './state.js';
 import { renderEntries, renderTabs } from './ui.js';
-import { refreshEditorContent } from './editor.js'; // refreshEditorContent 임포트 추가
+import { refreshEditorContent } from './editor.js';
 
 let tokenClient;
 let gapiInited = false;
@@ -9,27 +9,43 @@ let gisInited = false;
 let isSyncing = false;
 let pendingSync = false;
 let lastCloudModifiedTime = null; 
+let syncTimeoutTimer = null; // 동기화 멈춤 방지용 타이머
 
+/**
+ * 토큰 유효성 검사 및 자동 갱신 (오래된 세션 대응 강화)
+ */
 async function ensureValidToken() {
     const storedToken = localStorage.getItem('faith_token');
     const storedExp = localStorage.getItem('faith_token_exp');
     const now = Date.now();
 
-    if (!storedToken || !storedExp || now >= (parseInt(storedExp) - 60000)) {
+    // 토큰이 없거나 만료 5분 전이면 미리 갱신 시도 (안전 마진 확보)
+    if (!storedToken || !storedExp || now >= (parseInt(storedExp) - 300000)) {
         return new Promise((resolve) => {
-            tokenClient.callback = async (resp) => {
-                if (resp.error) { resolve(false); return; }
-                const expiresIn = resp.expires_in || 3599; 
-                const expTime = Date.now() + (expiresIn * 1000);
-                localStorage.setItem('faith_token', resp.access_token);
-                localStorage.setItem('faith_token_exp', expTime);
-                gapi.client.setToken({ access_token: resp.access_token });
-                resolve(true);
-            };
-            tokenClient.requestAccessToken({ prompt: '' });
+            try {
+                tokenClient.callback = async (resp) => {
+                    if (resp.error) {
+                        console.error("인증 갱신 실패:", resp.error);
+                        resolve(false);
+                        return;
+                    }
+                    const expiresIn = resp.expires_in || 3599; 
+                    const expTime = Date.now() + (expiresIn * 1000);
+                    localStorage.setItem('faith_token', resp.access_token);
+                    localStorage.setItem('faith_token_exp', expTime);
+                    gapi.client.setToken({ access_token: resp.access_token });
+                    resolve(true);
+                };
+                // prompt: '' 는 이미 허용된 세션에 대해 팝업 없이 조용히 갱신을 시도함
+                tokenClient.requestAccessToken({ prompt: '' });
+            } catch (err) {
+                console.error("Token Client Error", err);
+                resolve(false);
+            }
         });
     }
     
+    // 로컬엔 있지만 gapi 메모리에 없을 경우 재설정
     if (!gapi.client.getToken()) {
         gapi.client.setToken({ access_token: storedToken });
     }
@@ -64,7 +80,7 @@ export function initGoogleDrive(callback) {
                 if(callback) callback(false);
             }
         } catch (err) {
-            console.error("GAPI Init Error", err);
+            console.error("GAPI 초기화 실패", err);
             state.isLoading = false;
             renderEntries();
         }
@@ -106,27 +122,25 @@ async function checkAuthAndSync(callback) {
         if(callback) callback(false);
         return;
     }
-    
     try {
         const userInfo = await gapi.client.drive.about.get({ fields: 'user' });
         state.currentUser = userInfo.result.user;
         await saveToDrive(); 
         if(callback) callback(true);
     } catch (err) {
-        console.error("Auth Check Error", err);
         if(callback) callback(false);
     }
 }
 
 function toggleSpinners(active) {
     const listBtn = document.getElementById('refresh-btn');
-    if (active) {
-        if(listBtn) listBtn.classList.add('rotating');
-    } else {
-        if(listBtn) listBtn.classList.remove('rotating');
-    }
+    if (active) { if(listBtn) listBtn.classList.add('rotating'); } 
+    else { if(listBtn) listBtn.classList.remove('rotating'); }
 }
 
+/**
+ * 정교한 동기화 프로세스 (인증 오류 시 복구 로직 포함)
+ */
 export async function saveToDrive() {
     if (!localStorage.getItem('faith_token')) return; 
     if (isSyncing) { pendingSync = true; return; }
@@ -136,6 +150,16 @@ export async function saveToDrive() {
 
     isSyncing = true;
     toggleSpinners(true);
+
+    // 동기화가 너무 오래 걸릴 경우(네트워크 행 걸림)를 대비한 타임아웃 설정
+    if (syncTimeoutTimer) clearTimeout(syncTimeoutTimer);
+    syncTimeoutTimer = setTimeout(() => {
+        if (isSyncing) {
+            console.warn("동기화 타임아웃 발생. 상태를 초기화합니다.");
+            isSyncing = false;
+            toggleSpinners(false);
+        }
+    }, 30000);
 
     try {
         const folderId = await ensureAppFolder();
@@ -164,8 +188,6 @@ export async function saveToDrive() {
             saveCategoriesToLocal();
             renderTabs();
             renderEntries();
-            
-            // [추가] 동기화 후 에디터가 열려있다면 최신 내용으로 갱신
             refreshEditorContent();
         }
 
@@ -175,12 +197,15 @@ export async function saveToDrive() {
         }
 
     } catch (err) {
-        console.error("Sync Error", err);
-        if (err.status === 401) {
+        console.error("동기화 중 에러 발생:", err);
+        // [중요] 세션 만료 에러(401) 처리: 로컬 정보를 만료된 것으로 처리 후 재시도
+        if (err.status === 401 || err.status === 403) {
             localStorage.removeItem('faith_token_exp'); 
-            await saveToDrive(); 
+            isSyncing = false; // 재시도를 위해 일시적으로 해제
+            return await saveToDrive(); 
         }
     } finally {
+        if (syncTimeoutTimer) clearTimeout(syncTimeoutTimer);
         isSyncing = false;
         toggleSpinners(false);
         if (pendingSync) {
