@@ -208,7 +208,6 @@ function setupBasicHandling() {
     const editorContainer = document.getElementById('editor-container');
     if (!editorBody) return;
 
-    // [핀포인트 수정] 붙여넣기 시 표 구조 제거 로직 추가
     editorBody.onpaste = (e) => {
         const html = e.clipboardData.getData('text/html');
         if (html && html.includes('<table')) {
@@ -230,7 +229,6 @@ function setupBasicHandling() {
         }
     };
 
-    // 표 테두리 감지
     editorBody.onmousemove = (e) => {
         if (!editorBody.isContentEditable || isColDragging || isRowDragging) return;
         const td = e.target.closest('td');
@@ -390,11 +388,13 @@ function setupBasicHandling() {
         updateSelectionBox(); triggerAutoSave(); 
     });
     
-    // [핀포인트 수정] 에디터 및 표 래퍼 스크롤 발생 시 버튼 위치 동기화
-    const syncButtons = () => { if (currentSelectedElement) updateSelectionBox(); };
-    editorContainer?.addEventListener('scroll', syncButtons);
+    // [핀포인트 수정] 에디터 스크롤 및 표 가로 스크롤 감지 시 버튼 위치 동기화
+    editorContainer?.addEventListener('scroll', () => { if (currentSelectedElement) updateSelectionBox(); });
+    // 이벤트 위임을 사용하여 .table-wrapper의 가로 스크롤 감지
     editorBody.addEventListener('scroll', (e) => {
-        if (e.target.classList.contains('table-wrapper')) syncButtons();
+        if (e.target.classList.contains('table-wrapper')) {
+            if (currentSelectedElement) updateSelectionBox();
+        }
     }, true);
 
     document.getElementById('edit-title')?.addEventListener('input', triggerAutoSave);
@@ -551,10 +551,10 @@ export function changeGlobalFontSize(delta) { state.currentFontSize = Math.max(1
 export function insertSticker(emoji) { recordHistory(); document.execCommand('insertText', false, emoji); triggerAutoSave(); }
 export function insertImage(src) { recordHistory(); document.execCommand('insertImage', false, src); triggerAutoSave(); }
 
-// [수정] 표 생성 시 슬라이드 지원을 위해 .table-wrapper 로 감싸도록 수정
+// [수정] 표 삽입 시 찌그러짐 방지를 위해 min-width 설정 및 슬라이더 박스 감싸기
 export function insertTable(rows, cols) {
     recordHistory();
-    let tableHtml = '<div class="table-wrapper"><table style="width: 100%; table-layout: fixed;"><tbody>';
+    let tableHtml = '<div class="table-wrapper"><table style="width: auto; min-width: 100%; table-layout: fixed;"><tbody>';
     for (let i = 0; i < rows; i++) { 
         tableHtml += '<tr>'; 
         for (let j = 0; j < cols; j++) { tableHtml += '<td><br></td>'; } 
