@@ -9,17 +9,20 @@ let gisInited = false;
 let isSyncing = false;
 let pendingSync = false;
 let lastCloudModifiedTime = null; 
-let syncTimeoutTimer = null; // 동기화 멈춤 방지용 타이머
+let syncTimeoutTimer = null; 
 
 /**
- * 토큰 유효성 검사 및 자동 갱신 (오래된 세션 대응 강화)
+ * 토큰 유효성 검사 및 자동 갱신
+ * [개선] 오프라인 상태일 때는 구글 서버에 요청하지 않고 즉시 종료합니다.
  */
 async function ensureValidToken() {
+    // 인터넷 연결이 없으면 토큰 갱신을 시도하지 않음
+    if (!navigator.onLine) return false;
+
     const storedToken = localStorage.getItem('faith_token');
     const storedExp = localStorage.getItem('faith_token_exp');
     const now = Date.now();
 
-    // 토큰이 없거나 만료 5분 전이면 미리 갱신 시도 (안전 마진 확보)
     if (!storedToken || !storedExp || now >= (parseInt(storedExp) - 300000)) {
         return new Promise((resolve) => {
             try {
@@ -36,7 +39,6 @@ async function ensureValidToken() {
                     gapi.client.setToken({ access_token: resp.access_token });
                     resolve(true);
                 };
-                // prompt: '' 는 이미 허용된 세션에 대해 팝업 없이 조용히 갱신을 시도함
                 tokenClient.requestAccessToken({ prompt: '' });
             } catch (err) {
                 console.error("Token Client Error", err);
@@ -45,7 +47,6 @@ async function ensureValidToken() {
         });
     }
     
-    // 로컬엔 있지만 gapi 메모리에 없을 경우 재설정
     if (!gapi.client.getToken()) {
         gapi.client.setToken({ access_token: storedToken });
     }
@@ -102,6 +103,10 @@ export function initGoogleDrive(callback) {
 }
 
 export function handleAuthClick() {
+    if (!navigator.onLine) {
+        alert("인터넷 연결을 확인해 주세요.");
+        return;
+    }
     if (tokenClient) tokenClient.requestAccessToken({ prompt: 'consent' });
 }
 
@@ -139,10 +144,12 @@ function toggleSpinners(active) {
 }
 
 /**
- * 정교한 동기화 프로세스 (인증 오류 시 복구 로직 포함)
+ * 정교한 동기화 프로세스
  */
 export async function saveToDrive() {
-    if (!localStorage.getItem('faith_token')) return; 
+    // 오프라인이거나 로그인이 안 되어 있으면 중단
+    if (!navigator.onLine || !localStorage.getItem('faith_token')) return; 
+    
     if (isSyncing) { pendingSync = true; return; }
 
     const isValid = await ensureValidToken();
@@ -151,11 +158,9 @@ export async function saveToDrive() {
     isSyncing = true;
     toggleSpinners(true);
 
-    // 동기화가 너무 오래 걸릴 경우(네트워크 행 걸림)를 대비한 타임아웃 설정
     if (syncTimeoutTimer) clearTimeout(syncTimeoutTimer);
     syncTimeoutTimer = setTimeout(() => {
         if (isSyncing) {
-            console.warn("동기화 타임아웃 발생. 상태를 초기화합니다.");
             isSyncing = false;
             toggleSpinners(false);
         }
@@ -197,11 +202,9 @@ export async function saveToDrive() {
         }
 
     } catch (err) {
-        console.error("동기화 중 에러 발생:", err);
-        // [중요] 세션 만료 에러(401) 처리: 로컬 정보를 만료된 것으로 처리 후 재시도
         if (err.status === 401 || err.status === 403) {
             localStorage.removeItem('faith_token_exp'); 
-            isSyncing = false; // 재시도를 위해 일시적으로 해제
+            isSyncing = false;
             return await saveToDrive(); 
         }
     } finally {

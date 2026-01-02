@@ -34,19 +34,16 @@ function init() {
         if (isLoggedIn) {
             renderTabs();
             renderEntries(); 
-            // 주기적 동기화 (15초)
             setInterval(() => {
                 if (!document.hidden && window.gapi?.client?.getToken()) syncFromDrive();
             }, 15000); 
         }
     });
 
-    // 화면 포커스 시 동기화
     window.addEventListener('focus', () => { 
         if (window.gapi?.client?.getToken()) syncFromDrive(); 
     });
 
-    // 탭 가시성 변화 시 (잠자기 모드 복귀 시 가장 중요)
     document.addEventListener('visibilitychange', () => { 
         if (document.visibilityState === 'visible' && window.gapi?.client?.getToken()) {
             syncFromDrive();
@@ -179,8 +176,15 @@ function setupUIListeners() {
 
     document.getElementById('write-btn')?.addEventListener('click', () => openEditor(false));
     
-    document.getElementById('close-write-btn')?.addEventListener('click', async () => { 
-        await saveEntry(); await saveToDrive(); closeAllModals(true); 
+    // [개선] 목록 버튼 클릭 시 즉시 화면을 닫고 백그라운드에서 동기화 수행
+    document.getElementById('close-write-btn')?.addEventListener('click', () => { 
+        saveEntry(); // 로컬 저장은 동기적으로 실행 (매우 빠름)
+        closeAllModals(true); // UI 즉시 닫기
+        
+        // 동기화는 백그라운드에서 실행 (인터넷 연결 확인 포함)
+        if (navigator.onLine && window.gapi?.client?.getToken()) {
+            saveToDrive(); 
+        }
     });
 
     document.getElementById('btn-readonly')?.addEventListener('click', () => toggleViewMode(state.currentViewMode === 'readOnly' ? 'default' : 'readOnly'));
