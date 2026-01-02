@@ -26,7 +26,7 @@ let isRowDragging = false;
 let resizeTargetTd = null;
 let startX, startY, startW, startH;
 
-// [신규] 구조적 변경(줄/칸 추가/삭제) 되돌리기를 위한 히스토리 스택
+// [히스토리] 구조적 변경(줄/칸 추가/삭제) 되돌리기를 위한 스택
 let undoStack = [];
 let redoStack = [];
 const MAX_HISTORY = 50;
@@ -36,11 +36,10 @@ function recordHistory() {
     const editorBody = document.getElementById('editor-body');
     if (!editorBody) return;
     const currentState = editorBody.innerHTML;
-    // 이전 기록과 다를 때만 저장
     if (undoStack.length === 0 || undoStack[undoStack.length - 1] !== currentState) {
         undoStack.push(currentState);
         if (undoStack.length > MAX_HISTORY) undoStack.shift();
-        redoStack = []; // 새로운 동작 발생 시 다시 실행 스택 초기화
+        redoStack = []; 
     }
 }
 
@@ -55,6 +54,7 @@ export async function triggerAutoSave() {
     }, 2000); 
 }
 
+// 책 모드 관련 함수들
 function handleBookWheel(e) {
     if (state.currentViewMode !== 'book') return;
     e.preventDefault(); e.stopPropagation();
@@ -209,6 +209,7 @@ function setupBasicHandling() {
     const editorContainer = document.getElementById('editor-container');
     if (!editorBody) return;
 
+    // 표 테두리 감지
     editorBody.onmousemove = (e) => {
         if (!editorBody.isContentEditable || isColDragging || isRowDragging) return;
         const td = e.target.closest('td');
@@ -301,18 +302,9 @@ function setupBasicHandling() {
     };
 
     editorBody.onkeydown = (e) => {
-        // [중요] 키보드 단축키 되돌리기 처리 통합
-        if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
-            e.preventDefault();
-            formatDoc('undo');
-            return;
-        }
-        if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
-            e.preventDefault();
-            formatDoc('redo');
-            return;
-        }
-
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); formatDoc('undo'); return; }
+        if ((e.ctrlKey || e.metaKey) && e.key === 'y') { e.preventDefault(); formatDoc('redo'); return; }
+        
         if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'i' || e.key === 'u')) {
             const selectedCells = document.querySelectorAll('td.selected-cell');
             if (selectedCells.length > 0) { e.preventDefault(); const cmd = e.key === 'b' ? 'bold' : e.key === 'i' ? 'italic' : 'underline'; formatDoc(cmd); return; }
@@ -345,7 +337,7 @@ function setupBasicHandling() {
             const selectedCells = document.querySelectorAll('td.selected-cell');
             if (selectedCells.length > 0) {
                 e.preventDefault();
-                recordHistory(); // 삭제 전 상태 저장
+                recordHistory();
                 selectedCells.forEach(cell => {
                     const range = document.createRange();
                     range.selectNodeContents(cell);
@@ -370,7 +362,7 @@ function setupBasicHandling() {
     let inputTimer;
     editorBody.addEventListener('input', () => { 
         clearTimeout(inputTimer);
-        inputTimer = setTimeout(recordHistory, 1000); // 텍스트 입력 시 1초 뒤 상태 기록
+        inputTimer = setTimeout(recordHistory, 1000); 
         updateSelectionBox(); triggerAutoSave(); 
     });
     
@@ -403,7 +395,7 @@ export function openEditor(isEdit, entryData) {
     if(isEdit && entryData) { state.editingId = entryData.id; editTitle.value = entryData.title || ''; editSubtitle.value = entryData.subtitle || ''; editBody.innerHTML = entryData.body || ''; linkifyContents(editBody); applyFontStyle(entryData.fontFamily || 'Pretendard', entryData.fontSize || 16); }
     else { state.editingId = Date.now().toString(); editTitle.value = ''; editSubtitle.value = ''; editBody.innerHTML = ''; applyFontStyle('Pretendard', 16); setTimeout(() => editTitle.focus(), 100); }
     toggleViewMode('default');
-    undoStack = []; redoStack = []; // 열 때 초기화
+    undoStack = []; redoStack = []; 
 }
 
 export function refreshEditorContent() {
@@ -480,7 +472,7 @@ function startResize(e) { e.preventDefault(); isResizing = true; startX2 = e.cli
 function resizing(e) { if (!isResizing || !currentSelectedElement) return; const newWidth = startWidth2 + (e.clientX - startX2), newHeight = startHeight2 + (e.clientY - startY2); if (newWidth > 50) currentSelectedElement.style.width = newWidth + 'px'; if (newHeight > 30) currentSelectedElement.style.height = newHeight + 'px'; updateSelectionBox(); }
 function stopResize() { if (isResizing) { recordHistory(); isResizing = false; } document.removeEventListener('mousemove', resizing); document.removeEventListener('mouseup', stopResize); triggerAutoSave(); }
 
-// --- 구조 변경 시 수동 히스토리 기록 연동 ---
+// 구조 변경 시 수동 히스토리 기록 연동
 export function addRow() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE') return; recordHistory(); const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, refRow = targetCell ? targetCell.parentElement : table.rows[table.rows.length - 1], colIdx = targetCell ? targetCell.cellIndex : 0, newRow = table.insertRow(refRow.rowIndex + 1), colCount = table.rows[0].cells.length; let cellToFocus = null; for (let i = 0; i < colCount; i++) { const newCell = newRow.insertCell(i); newCell.innerHTML = '<br>'; if (i === colIdx) cellToFocus = newCell; } if (cellToFocus) focusCell(cellToFocus); }
 export function deleteRow() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE' || table.rows.length <= 1) return; recordHistory(); const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, refRow = targetCell ? targetCell.parentElement : table.rows[table.rows.length - 1]; table.deleteRow(refRow.rowIndex); lastClickedCell = null; }
 export function addColumn() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE') return; recordHistory(); const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1, rowIdx = targetCell ? targetCell.parentElement.rowIndex : 0; let cellToFocus = null; for (let i = 0; i < table.rows.length; i++) { const newCell = table.rows[i].insertCell(colIdx + 1); newCell.innerHTML = '<br>'; if (i === rowIdx) cellToFocus = newCell; } if (cellToFocus) focusCell(cellToFocus); }
@@ -488,27 +480,20 @@ export function deleteColumn() { const table = currentSelectedElement; if (!tabl
 
 export function createHyperlink() { const selection = window.getSelection(); if (selection.rangeCount > 0 && selection.toString().length > 0) { const url = prompt("연결할 주소(URL)를 입력하세요:", "https://"); if (url && url !== "https://") { recordHistory(); document.execCommand('createLink', false, url); const anchor = selection.anchorNode.parentElement; if (anchor && anchor.tagName === 'A') { anchor.target = '_blank'; anchor.style.color = '#2563EB'; anchor.style.textDecoration = 'underline'; anchor.style.cursor = 'pointer'; } triggerAutoSave(); } } else { alert("링크를 걸 문구를 먼저 드래그하여 선택해주세요."); } }
 
-// [수정] formatDoc: 커스텀 히스토리 스택과 브라우저 명령 연동
 export function formatDoc(cmd, value = null) { 
     const editor = document.getElementById('editor-body');
     if (!editor) return;
 
     if (cmd === 'undo') {
-        if (undoStack.length > 0) {
-            redoStack.push(editor.innerHTML); // 현재 상태 보관
-            editor.innerHTML = undoStack.pop(); // 이전 상태 복구
-            triggerAutoSave(); return;
-        } else { document.execCommand('undo', false, null); return; }
+        if (undoStack.length > 0) { redoStack.push(editor.innerHTML); editor.innerHTML = undoStack.pop(); triggerAutoSave(); return; }
+        else { document.execCommand('undo', false, null); return; }
     }
     if (cmd === 'redo') {
-        if (redoStack.length > 0) {
-            undoStack.push(editor.innerHTML);
-            editor.innerHTML = redoStack.pop();
-            triggerAutoSave(); return;
-        } else { document.execCommand('redo', false, null); return; }
+        if (redoStack.length > 0) { undoStack.push(editor.innerHTML); editor.innerHTML = redoStack.pop(); triggerAutoSave(); return; }
+        else { document.execCommand('redo', false, null); return; }
     }
 
-    recordHistory(); // 변경 전 상태 기록
+    recordHistory(); 
     if (!document.activeElement.closest('#editor-body')) editor.focus();
     const selectedCells = document.querySelectorAll('td.selected-cell');
     if (selectedCells.length > 0) {

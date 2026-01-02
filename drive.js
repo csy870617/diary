@@ -12,14 +12,15 @@ let lastCloudModifiedTime = null;
 let syncTimeoutTimer = null; 
 
 /**
- * 토큰 유효성 검사 및 자동 갱신 (안전 마진 5분 확보)
+ * 토큰 유효성 검사 및 자동 갱신
+ * [개선] 자동 저장 시 팝업이 뜨지 않도록 'silent' 모드를 강화했습니다.
  */
-async function ensureValidToken() {
+async function ensureValidToken(isAutoSave = false) {
     const storedToken = localStorage.getItem('faith_token');
     const storedExp = localStorage.getItem('faith_token_exp');
     const now = Date.now();
 
-    // 토큰이 유효하고 만료까지 5분 이상 남았다면 즉시 통과 (네트워크 요청 없음)
+    // 1. 토큰이 유효하고 만료까지 5분 이상 남았다면 즉시 통과
     if (storedToken && storedExp && now < (parseInt(storedExp) - 300000)) {
         if (!gapi.client.getToken()) {
             gapi.client.setToken({ access_token: storedToken });
@@ -27,12 +28,13 @@ async function ensureValidToken() {
         return true;
     }
 
-    // 토큰이 없거나 만료가 임박했다면 조용히 갱신 시도
+    // 2. 만료되었거나 임박한 경우 조용히 갱신 시도
+    // 자동 저장 중일 때는 사용자를 방해하지 않기 위해 팝업을 원천 차단합니다.
     return new Promise((resolve) => {
         try {
             tokenClient.callback = async (resp) => {
                 if (resp.error) {
-                    console.error("인증 갱신 실패:", resp.error);
+                    console.warn("인증 갱신 실패 (조용히 처리됨):", resp.error);
                     resolve(false);
                     return;
                 }
@@ -43,7 +45,16 @@ async function ensureValidToken() {
                 gapi.client.setToken({ access_token: resp.access_token });
                 resolve(true);
             };
-            // prompt: '' 로 사용자 방해 없이 갱신
+
+            // prompt: '' 는 팝업 없이 세션을 연장합니다.
+            // 만약 브라우저 설정으로 인해 팝업이 필요해지는 상황이라면, 
+            // 자동 저장 중(isAutoSave=true)에는 요청 자체를 하지 않고 취소합니다.
+            if (isAutoSave && (!storedToken || now >= parseInt(storedExp))) {
+                console.log("자동 저장 중 세션 만료: 사용자 방해 방지를 위해 동기화 건너뜀");
+                resolve(false);
+                return;
+            }
+
             tokenClient.requestAccessToken({ prompt: '' });
         } catch (err) {
             console.error("Token Client Error", err);
@@ -58,7 +69,6 @@ export function initGoogleDrive(callback) {
         return;
     }
 
-    // [최적화] 라이브러리 로드 전 로컬 토큰이 유효하면 즉시 UI 콜백 실행 (딜레이 제거)
     const storedToken = localStorage.getItem('faith_token');
     const storedExp = localStorage.getItem('faith_token_exp');
     if (storedToken && storedExp && Date.now() < (parseInt(storedExp) - 300000)) {
@@ -129,7 +139,7 @@ async function checkAuthAndSync(callback) {
     try {
         const userInfo = await gapi.client.drive.about.get({ fields: 'user' });
         state.currentUser = userInfo.result.user;
-        await syncFromDrive(); // 초기 접속 시 클라우드 데이터 가져오기
+        await syncFromDrive(); 
         if(callback) callback(true);
     } catch (err) {
         if(callback) callback(false);
@@ -146,7 +156,8 @@ export async function saveToDrive() {
     if (!localStorage.getItem('faith_token')) return; 
     if (isSyncing) { pendingSync = true; return; }
 
-    const isValid = await ensureValidToken();
+    // [중요] 저장 시에는 isAutoSave 파라미터를 true로 전달하여 팝업 발생을 억제합니다.
+    const isValid = await ensureValidToken(true);
     if (!isValid) return;
 
     isSyncing = true;
@@ -199,6 +210,7 @@ export async function saveToDrive() {
         if (err.status === 401 || err.status === 403) {
             localStorage.removeItem('faith_token_exp'); 
             isSyncing = false; 
+            // 401 에러 시에도 팝업 없이 재시도하도록 설정
             return await saveToDrive(); 
         }
     } finally {
@@ -222,15 +234,12 @@ async function uploadToDrive(folderId, fileId) {
         categoryUpdatedAt: state.categoryUpdatedAt,
         lastSync: new Date().toISOString()
     };
-
     const fileContent = JSON.stringify(finalData);
     const fileMetadata = { name: DB_FILE_NAME, mimeType: 'application/json' };
     if (!fileId) fileMetadata.parents = [folderId];
-
     const boundary = '-------314159265358979323846';
     const delimiter = "\r\n--" + boundary + "\r\n";
     const close_delim = "\r\n--" + boundary + "--";
-
     const multipartRequestBody =
         delimiter + 'Content-Type: application/json\r\n\r\n' + JSON.stringify(fileMetadata) +
         delimiter + 'Content-Type: application/json\r\n\r\n' + fileContent + close_delim;
@@ -250,17 +259,14 @@ function mergeEntries(localList, cloudList) {
     localList.forEach(localItem => {
         if(!localItem || !localItem.id) return;
         const cloudItem = entryMap.get(localItem.id);
-        if (!cloudItem) {
-            entryMap.set(localItem.id, localItem);
-        } else {
+        if (!cloudItem) { entryMap.set(localItem.id, localItem); } 
+        else {
             const localTime = new Date(localItem.modifiedAt || localItem.timestamp || 0).getTime();
             const cloudTime = new Date(cloudItem.modifiedAt || cloudItem.timestamp || 0).getTime();
             if (localTime >= cloudTime) entryMap.set(localItem.id, localItem);
         }
     });
-    return Array.from(entryMap.values()).sort((a, b) => {
-        return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
-    });
+    return Array.from(entryMap.values()).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 }
 
 function mergeCategories(localState, cloudData) {
