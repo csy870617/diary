@@ -1,6 +1,7 @@
 /* =========================================
    1. 기본 설정
    ========================================= */
+/* 스크롤바 숨기기 */
 ::-webkit-scrollbar { display: none; }
 body { -ms-overflow-style: none; scrollbar-width: none; }
 
@@ -109,8 +110,11 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .floating-pen:hover { transform: scale(1.1); }
 
 .editor-container { max-width: 700px; margin: 0 auto; padding: 30px 40px 100px; width: 100%; height: auto !important; overflow-y: auto; }
-.editor-title { width: 100%; font-size: 26px; border: none; outline: none; font-family: var(--text-serif); font-weight: 600; margin-bottom: 10px; }
-.editor-subtitle { width: 100%; font-size: 16px; border: none; outline: none; color: var(--gray-500); font-family: var(--text-serif); margin-bottom: 20px; }
+
+/* [수정] 제목 및 소제목: 본문 크기와 차등을 주기 위한 핀포인트 수정 */
+.editor-title { width: 100%; font-size: 26px; border: none; outline: none; font-family: var(--text-serif); font-weight: 600; margin-bottom: 10px; transition: font-size 0.2s ease; }
+.editor-subtitle { width: 100%; font-size: 16px; border: none; outline: none; color: var(--gray-500); font-family: var(--text-serif); margin-bottom: 20px; transition: font-size 0.2s ease; }
+
 .divider { width: 30px; height: 1px; background: var(--gray-200); margin-bottom: 30px; }
 .editor-body, .article-body { line-height: 1.8; outline: none; min-height: 300px; white-space: pre-wrap; font-family: var(--text-serif); font-size: 16px; position: relative; word-break: break-all; overflow-wrap: break-word; }
 .editor-body:empty:before { content: attr(placeholder); color: var(--gray-500); display: block; }
@@ -132,9 +136,26 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 
 /* 이미지 및 표 관련 */
 .editor-body img { max-width: 100%; height: auto; border-radius: 8px; margin: 10px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: inline-block; cursor: pointer; vertical-align: middle; }
-.editor-body table { width: 100%; border-collapse: collapse; margin: 15px 0; table-layout: fixed; cursor: pointer; user-select: text; }
-.editor-body table td { border: 1px solid var(--gray-200); padding: 8px; min-height: 34px; word-break: break-all; }
+
+/* [수정] 표 스타일: 최초 100% 너비 및 독립적 리사이징 지원 */
+.editor-body table { 
+    width: 100%; 
+    border-collapse: collapse; 
+    margin: 15px 0; 
+    table-layout: fixed; 
+    cursor: pointer; 
+    user-select: text; 
+}
+.editor-body table td { 
+    border: 1px solid var(--gray-200); 
+    padding: 8px; 
+    min-height: 34px; 
+    word-break: break-all; 
+    position: relative; 
+    overflow: hidden; /* 칸 조절 시 텍스트 넘침 방지 */
+}
 .editor-body table td.selected-cell { background-color: rgba(59, 130, 246, 0.15) !important; outline: 1px solid var(--selection-color) !important; }
+.editor-body table.selecting-cells { user-select: none !important; -webkit-user-select: none !important; }
 
 .img-selection-box { position: absolute; border: 2px solid var(--selection-color); box-sizing: border-box; pointer-events: none; z-index: 3000; display: none; }
 .resize-handle { position: absolute; width: 20px; height: 20px; background-color: white; border: 2px solid var(--selection-color); border-radius: 50%; pointer-events: auto; z-index: 3001; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
@@ -194,6 +215,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 @media screen and (max-width: 650px) {
     .layout { padding: 0 16px 100px; width: 100%; }
     .brunch-header { padding: 0 4px; margin-top: 50px; margin-bottom: 20px; flex-direction: row; align-items: flex-end; }
+    .header-left { flex-shrink: 0; }
     .logo-area h1 { font-size: 24px; }
     .sub-logo { display: block; font-size: 10px; margin-top: 2px; }
     .header-right { width: auto; flex: 1; justify-content: flex-end; }
@@ -210,9 +232,6 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     #write-modal.mode-book .editor-body { padding: 20px 20px 200px 20px; }
     #write-modal.mode-book .editor-title, #write-modal.mode-book .editor-subtitle { padding: 0 20px; }
     #write-modal.mode-book .meta-info-row, #write-modal.mode-book .divider { margin-left: 20px; margin-right: 20px; }
-    
-    /* 모바일 표 드래그 선택 시 텍스트 선택 방지 */
-    .editor-body table.selecting-cells { user-select: none; }
 }
 
 #btn-empty-trash { font-size: 13px; color: var(--danger); font-weight: 600; padding: 6px 12px; border-radius: 6px; background-color: #FEE2E2; border: none; cursor: pointer; transition: background 0.2s; font-family: var(--text-sans); margin-left: auto; }
