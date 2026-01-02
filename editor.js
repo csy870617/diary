@@ -3,11 +3,13 @@ import { saveEntry } from './data.js';
 import { saveToDrive } from './drive.js';
 import { openModal } from './ui.js';
 
-let currentSelectedElement = null; // 이미지 또는 표
+let currentSelectedElement = null; 
+let lastClickedCell = null; 
 let selectionBox = null;
 let resizeHandle = null;
 let deleteBtn = null;
 let resizeBtnGroup = null;
+let tableControlGroup = null; 
 let autoSaveTimer = null;
 let isTurningPage = false;    
 let currentBookPageIndex = 0; 
@@ -139,6 +141,8 @@ function setupBasicHandling() {
     editorBody.onclick = (e) => {
         if (!editorBody.isContentEditable) return;
         const target = e.target.closest('img, table');
+        if (e.target.tagName === 'TD') lastClickedCell = e.target;
+
         if (target) {
             e.stopPropagation();
             e.preventDefault();
@@ -251,7 +255,8 @@ export function toggleViewMode(mode) {
 }
 
 function selectElement(el) { currentSelectedElement = el; createSelectionUI(); updateSelectionBox(); }
-function hideSelection() { currentSelectedElement = null; if (selectionBox) selectionBox.style.display = 'none'; if (resizeHandle) resizeHandle.style.display = 'none'; if (deleteBtn) deleteBtn.style.display = 'none'; if (resizeBtnGroup) resizeBtnGroup.style.display = 'none'; }
+function hideSelection() { currentSelectedElement = null; if (selectionBox) selectionBox.style.display = 'none'; if (resizeHandle) resizeHandle.style.display = 'none'; if (deleteBtn) deleteBtn.style.display = 'none'; if (resizeBtnGroup) resizeBtnGroup.style.display = 'none'; if(tableControlGroup) tableControlGroup.style.display = 'none'; }
+
 function createSelectionUI() {
     if (!selectionBox) {
         selectionBox = document.createElement('div'); selectionBox.className = 'img-selection-box'; document.body.appendChild(selectionBox);
@@ -259,20 +264,37 @@ function createSelectionUI() {
         resizeHandle.onmousedown = (e) => startResize(e);
         deleteBtn = document.createElement('button'); deleteBtn.className = 'img-delete-btn'; deleteBtn.innerHTML = '<i class="ph ph-trash"></i> 삭제'; document.body.appendChild(deleteBtn);
         deleteBtn.onclick = deleteSelectedElement;
+        
         resizeBtnGroup = document.createElement('div'); resizeBtnGroup.className = 'img-resize-group';
         [25, 50, 75, 100].forEach(size => {
             const btn = document.createElement('button'); btn.className = 'img-resize-btn'; btn.innerText = size + '%';
-            btn.onclick = () => { if (currentSelectedElement) { 
-                currentSelectedElement.style.width = size + '%'; 
-                currentSelectedElement.style.height = 'auto'; // 퍼센트 조정 시 세로는 자동 조정
-                updateSelectionBox(); triggerAutoSave(); 
-            } };
+            btn.onclick = () => { if (currentSelectedElement) { currentSelectedElement.style.width = size + '%'; currentSelectedElement.style.height = 'auto'; updateSelectionBox(); triggerAutoSave(); } };
             resizeBtnGroup.appendChild(btn);
         });
         document.body.appendChild(resizeBtnGroup);
+
+        tableControlGroup = document.createElement('div'); 
+        tableControlGroup.className = 'img-resize-group'; 
+        tableControlGroup.style.bottom = 'auto'; 
+        tableControlGroup.style.top = '-90px'; 
+        
+        const createOpBtn = (label, icon, fn) => {
+            const btn = document.createElement('button'); btn.className = 'img-resize-btn'; 
+            btn.innerHTML = `<i class="ph ${icon}"></i> ${label}`;
+            btn.onclick = (e) => { e.stopPropagation(); fn(); updateSelectionBox(); triggerAutoSave(); };
+            return btn;
+        };
+
+        tableControlGroup.appendChild(createOpBtn('행+', 'ph-rows', addRow));
+        tableControlGroup.appendChild(createOpBtn('행-', 'ph-minus', deleteRow));
+        tableControlGroup.appendChild(createOpBtn('열+', 'ph-columns', addColumn));
+        tableControlGroup.appendChild(createOpBtn('열-', 'ph-minus', deleteColumn));
+        document.body.appendChild(tableControlGroup);
     }
     selectionBox.style.display = 'block'; resizeHandle.style.display = 'block'; deleteBtn.style.display = 'flex'; resizeBtnGroup.style.display = 'flex';
+    if(tableControlGroup) tableControlGroup.style.display = currentSelectedElement.tagName === 'TABLE' ? 'flex' : 'none';
 }
+
 function updateSelectionBox() {
     if (!currentSelectedElement || !selectionBox) return;
     const rect = currentSelectedElement.getBoundingClientRect();
@@ -281,65 +303,66 @@ function updateSelectionBox() {
     resizeHandle.style.top = (rect.bottom + scrollTop - 10) + 'px'; resizeHandle.style.left = (rect.right + scrollLeft - 10) + 'px';
     deleteBtn.style.top = (rect.top + scrollTop - 40) + 'px'; deleteBtn.style.left = (rect.left + scrollLeft + rect.width / 2) + 'px';
     resizeBtnGroup.style.top = (rect.bottom + scrollTop + 10) + 'px'; resizeBtnGroup.style.left = (rect.left + scrollLeft + rect.width / 2) + 'px';
+    if(tableControlGroup) {
+        tableControlGroup.style.top = (rect.top + scrollTop - 90) + 'px';
+        tableControlGroup.style.left = (rect.left + scrollLeft + rect.width / 2) + 'px';
+    }
 }
+
 function deleteSelectedElement() { if (currentSelectedElement) { currentSelectedElement.remove(); hideSelection(); triggerAutoSave(); } }
 
-// 리사이징 변수 확장
 let isResizing = false, startX, startY, startWidth, startHeight;
-function startResize(e) { 
-    e.preventDefault(); 
-    isResizing = true; 
-    startX = e.clientX; 
-    startY = e.clientY;
-    startWidth = currentSelectedElement.clientWidth; 
-    startHeight = currentSelectedElement.clientHeight;
-    document.addEventListener('mousemove', resizing); 
-    document.addEventListener('mouseup', stopResize); 
-}
-
-// [수정] 가로/세로 동시 조정 로직
-function resizing(e) { 
-    if (!isResizing || !currentSelectedElement) return; 
-    const newWidth = startWidth + (e.clientX - startX); 
-    const newHeight = startHeight + (e.clientY - startY);
-    
-    if (newWidth > 50) { 
-        currentSelectedElement.style.width = newWidth + 'px'; 
-    } 
-    // 세로 조정 추가 (최소 높이 30px)
-    if (newHeight > 30) { 
-        currentSelectedElement.style.height = newHeight + 'px'; 
-    }
-    updateSelectionBox(); 
-}
-
+function startResize(e) { e.preventDefault(); isResizing = true; startX = e.clientX; startY = e.clientY; startWidth = currentSelectedElement.clientWidth; startHeight = currentSelectedElement.clientHeight; document.addEventListener('mousemove', resizing); document.addEventListener('mouseup', stopResize); }
+function resizing(e) { if (!isResizing || !currentSelectedElement) return; const newWidth = startWidth + (e.clientX - startX); const newHeight = startHeight + (e.clientY - startY); if (newWidth > 50) currentSelectedElement.style.width = newWidth + 'px'; if (newHeight > 30) currentSelectedElement.style.height = newHeight + 'px'; updateSelectionBox(); }
 function stopResize() { isResizing = false; document.removeEventListener('mousemove', resizing); document.removeEventListener('mouseup', stopResize); triggerAutoSave(); }
 
-export function formatDoc(cmd, value = null) { document.execCommand(cmd, false, value); triggerAutoSave(); }
+function addRow() {
+    const table = currentSelectedElement;
+    if (!table || table.tagName !== 'TABLE') return;
+    const refRow = lastClickedCell ? lastClickedCell.parentElement : table.rows[table.rows.length - 1];
+    const newRow = table.insertRow(refRow.rowIndex + 1);
+    for (let i = 0; i < refRow.cells.length; i++) { newRow.insertCell(i).innerHTML = '<br>'; }
+}
+function deleteRow() {
+    const table = currentSelectedElement;
+    if (!table || table.tagName !== 'TABLE' || table.rows.length <= 1) return;
+    const refRow = lastClickedCell ? lastClickedCell.parentElement : table.rows[table.rows.length - 1];
+    table.deleteRow(refRow.rowIndex);
+}
+function addColumn() {
+    const table = currentSelectedElement;
+    if (!table || table.tagName !== 'TABLE') return;
+    const colIdx = lastClickedCell ? lastClickedCell.cellIndex : table.rows[0].cells.length - 1;
+    for (let i = 0; i < table.rows.length; i++) { table.rows[i].insertCell(colIdx + 1).innerHTML = '<br>'; }
+}
+function deleteColumn() {
+    const table = currentSelectedElement;
+    if (!table || table.tagName !== 'TABLE' || table.rows[0].cells.length <= 1) return;
+    const colIdx = lastClickedCell ? lastClickedCell.cellIndex : table.rows[0].cells.length - 1;
+    for (let i = 0; i < table.rows.length; i++) { table.rows[i].deleteCell(colIdx); }
+}
+
+// [수정] 포커스 보장 로직 추가
+export function formatDoc(cmd, value = null) { 
+    const editor = document.getElementById('editor-body');
+    if (editor) {
+        editor.focus();
+        document.execCommand(cmd, false, value); 
+        triggerAutoSave(); 
+    }
+}
 
 export function applyFontStyle(f, s) { 
     state.currentFontFamily = f; 
     state.currentFontSize = s; 
-    const targets = [document.getElementById('editor-body'), document.getElementById('edit-title'), document.getElementById('edit-subtitle')];
-    targets.forEach(el => { if(el) { el.style.fontFamily = f; el.style.fontSize = (f === 'Nanum Pen Script' ? s + 4 : s) + 'px'; } });
+    const targets = [document.getElementById('editor-body'), document.getElementById('edit-title'), document.getElementById('edit-subtitle')]; targets.forEach(el => { if(el) { el.style.fontFamily = f; el.style.fontSize = (f === 'Nanum Pen Script' ? s + 4 : s) + 'px'; } }); 
 }
-
-export function changeGlobalFontSize(delta) { 
-    state.currentFontSize = Math.max(12, Math.min(60, state.currentFontSize + delta));
-    applyFontStyle(state.currentFontFamily, state.currentFontSize); triggerAutoSave(); 
-}
+export function changeGlobalFontSize(delta) { state.currentFontSize = Math.max(12, Math.min(60, state.currentFontSize + delta)); applyFontStyle(state.currentFontFamily, state.currentFontSize); triggerAutoSave(); }
 export function insertSticker(emoji) { document.execCommand('insertText', false, emoji); triggerAutoSave(); }
 export function insertImage(src) { document.execCommand('insertImage', false, src); triggerAutoSave(); }
-
 export function insertTable(rows, cols) {
     let tableHtml = '<table style="width: 100%;"><tbody>';
-    for (let i = 0; i < rows; i++) {
-        tableHtml += '<tr>';
-        for (let j = 0; j < cols; j++) { tableHtml += '<td><br></td>'; }
-        tableHtml += '</tr>';
-    }
+    for (let i = 0; i < rows; i++) { tableHtml += '<tr>'; for (let j = 0; j < cols; j++) { tableHtml += '<td><br></td>'; } tableHtml += '</tr>'; }
     tableHtml += '</tbody></table><p><br></p>';
-    document.getElementById('editor-body').focus();
-    document.execCommand('insertHTML', false, tableHtml);
-    triggerAutoSave();
+    document.getElementById('editor-body').focus(); document.execCommand('insertHTML', false, tableHtml); triggerAutoSave();
 }

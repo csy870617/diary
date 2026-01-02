@@ -105,7 +105,7 @@ function setupListeners() {
 
         ['context-menu', 'category-context-menu', 'color-palette-popup', 'sticker-palette', 'table-modal'].forEach(id => {
             const el = document.getElementById(id);
-            if (el && !el.contains(e.target) && !e.target.closest('.tool-btn')) el.classList.add('hidden');
+            if (el && !el.contains(e.target) && !el.contains(e.target) && !e.target.closest('.tool-btn')) el.classList.add('hidden');
         });
     }, true);
 
@@ -142,6 +142,15 @@ function setupUIListeners() {
     if (toolbarScrollArea) { toolbarScrollArea.addEventListener('wheel', (e) => { if (e.deltaY !== 0) { e.preventDefault(); toolbarScrollArea.scrollLeft += e.deltaY; } }); }
 
     document.getElementById('font-selector')?.addEventListener('change', (e) => { applyFontStyle(e.target.value, state.currentFontSize); triggerAutoSave(); });
+
+    // [중요] 볼드, 이탤릭, 언더라인, 취소선, 정렬 버튼 리스너 추가
+    document.querySelectorAll('.tool-btn[data-cmd]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            const cmd = btn.dataset.cmd;
+            if (cmd) formatDoc(cmd);
+        });
+    });
 
     // 표 생성 관련 핸들러
     const tableModal = document.getElementById('table-modal');
