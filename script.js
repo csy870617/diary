@@ -17,13 +17,12 @@ const stickers = [
     '☁️','☀️','🌙','⭐','✨','🌈','🔥','💧','🌱','🌿','🍂','🌻','🌷','🌹',
     '❤️','🧡','💛','💚','💙','💜','🤍','🤎','🖤','💔','❣️','💕','💞','💓',
     '😊','🥰','😭','🥺','🤔','🫡','👏','👍','🤝','🙇','🙆','🙅','💪','🎉',
-    '📝','✏️','🖍️','📌','📎','📅','⏳','💡','🔔','🎁','🎀','💌','🏠',' DOOR'
+    '📝','✏️','🖍️','📌','📎','📅','⏳','💡','🔔','🎁','🎀','💌','🏠','🚪'
 ];
 
 function init() {
     if (!history.state) history.replaceState({ modal: 'main' }, null, '');
     
-    // URL 파라미터에서 공유 데이터 체크
     const urlParams = new URLSearchParams(window.location.search);
     const sharedData = urlParams.get('share');
 
@@ -34,11 +33,10 @@ function init() {
     state.isLoading = false;
     renderEntries();
 
-    // [개선] GAPI 로딩 전에 로컬 토큰 유효성을 즉시 검사하여 UI 딜레이 제거
     const fastToken = localStorage.getItem('faith_token');
     const fastExp = localStorage.getItem('faith_token_exp');
     if (fastToken && fastExp && Date.now() < (parseInt(fastExp) - 300000)) {
-        updateAuthUI(true); // 즉시 로그인 상태 UI 적용
+        updateAuthUI(true);
     }
 
     initGoogleDrive((isLoggedIn) => {
@@ -52,10 +50,17 @@ function init() {
         }
     });
 
-    // 공유된 링크로 접속한 경우 처리
     if (sharedData) {
         try {
-            const entry = JSON.parse(decodeURIComponent(atob(sharedData)));
+            const raw = JSON.parse(decodeURIComponent(atob(sharedData)));
+            const entry = {
+                title: raw.t || raw.title || '제목 없음',
+                subtitle: raw.s || raw.subtitle || '',
+                body: raw.b || raw.body || '',
+                date: raw.d || raw.date || new Date().toLocaleDateString('ko-KR'),
+                fontFamily: raw.f || raw.fontFamily || 'Pretendard',
+                fontSize: raw.z || raw.fontSize || 16
+            };
             setTimeout(() => {
                 openEditor(true, entry);
                 toggleViewMode('readOnly');
@@ -111,7 +116,6 @@ function setupListeners() {
         const writeModal = document.getElementById('write-modal');
         if (writeModal && !writeModal.classList.contains('hidden')) await saveEntry();
         closeAllModals(false); 
-        // 공유 모드 해제 시 URL 정리
         if (window.location.search.includes('share')) {
             window.history.replaceState({}, document.title, window.location.pathname);
             const backBtnText = document.getElementById('back-btn-text');
@@ -136,9 +140,12 @@ function setupListeners() {
         const sliderContainer = document.getElementById('book-slider-container');
         if (sliderContainer && !sliderContainer.classList.contains('hidden') && !sliderContainer.contains(e.target) && !e.target.closest('#page-indicator')) sliderContainer.classList.add('hidden');
 
+        // [오류 수정 핀포인트] el.target -> e.target 으로 변경하여 TypeError 해결
         ['context-menu', 'category-context-menu', 'color-palette-popup', 'sticker-palette', 'table-modal'].forEach(id => {
             const el = document.getElementById(id);
-            if (el && !el.contains(e.target) && !e.target.closest('.tool-btn')) el.classList.add('hidden');
+            if (el && !el.contains(e.target) && !e.target.closest('.tool-btn')) {
+                el.classList.add('hidden');
+            }
         });
     }, true);
 
@@ -161,7 +168,7 @@ function setupUIListeners() {
     document.getElementById('sort-order-btn')?.addEventListener('click', () => { 
         state.currentSortOrder = state.currentSortOrder === 'desc' ? 'asc' : 'desc'; 
         const icon = document.getElementById('sort-icon');
-        if (icon) { icon.classList.toggle('ph-sort-descending'); icon.classList.toggle('ph-sort-ascending'); }
+        if (icon) { icon.className = state.currentSortOrder === 'desc' ? 'ph ph-sort-descending' : 'ph ph-sort-ascending'; }
         renderEntries(); 
     });
     
@@ -172,48 +179,43 @@ function setupUIListeners() {
     document.getElementById('btn-global-size-down')?.addEventListener('click', () => changeGlobalFontSize(-2));
 
     const toolbarScrollArea = document.getElementById('toolbar-scroll-area');
-    if (toolbarScrollArea) { 
-        toolbarScrollArea.addEventListener('wheel', (e) => { 
-            if (e.deltaY !== 0) { e.preventDefault(); toolbarScrollArea.scrollLeft += e.deltaY; } 
-        }); 
-    }
+    if (toolbarScrollArea) { toolbarScrollArea.addEventListener('wheel', (e) => { if (e.deltaY !== 0) { e.preventDefault(); toolbarScrollArea.scrollLeft += e.deltaY; } }); }
 
     document.getElementById('font-selector')?.addEventListener('change', (e) => { applyFontStyle(e.target.value, state.currentFontSize); triggerAutoSave(); });
 
-    // 툴바 기본 서식 버튼(볼드, 이탤릭, 되돌리기 등) 리스너
     document.querySelectorAll('.tool-btn[data-cmd]').forEach(btn => {
         btn.addEventListener('click', (e) => { e.preventDefault(); const cmd = btn.dataset.cmd; if (cmd) formatDoc(cmd); });
     });
 
-    // 공유하기 버튼 핸들러
     document.getElementById('btn-share')?.addEventListener('click', () => {
         const title = document.getElementById('edit-title').value;
         const subtitle = document.getElementById('edit-subtitle').value;
         const body = document.getElementById('editor-body').innerHTML;
         const entryData = {
-            title: title || '제목 없음',
-            subtitle: subtitle || '',
-            body: body || '',
-            date: new Date().toLocaleDateString('ko-KR'),
-            fontFamily: state.currentFontFamily,
-            fontSize: state.currentFontSize
+            t: title || '제목 없음',
+            s: subtitle || '',
+            b: body || '',
+            d: new Date().toLocaleDateString('ko-KR'),
+            f: state.currentFontFamily,
+            z: state.currentFontSize
         };
         const encodedData = btoa(unescape(encodeURIComponent(JSON.stringify(entryData))));
         const shareUrl = `${window.location.origin}${window.location.pathname}?share=${encodedData}`;
         
+        if (shareUrl.length > 8000) {
+            alert("내용이 너무 길어 공유 링크를 만들 수 없습니다. 내용을 조금 줄여주세요.");
+            return;
+        }
+
         if (navigator.share) {
             navigator.share({ title: '신앙일지 공유', text: `${title} - Faith Log`, url: shareUrl }).catch(console.error);
         } else {
-            navigator.clipboard.writeText(shareUrl).then(() => { alert('공유 링크가 클립보드에 복사되었습니다.'); });
+            navigator.clipboard.writeText(shareUrl).then(() => { alert('최적화된 공유 링크가 클립보드에 복사되었습니다.'); });
         }
     });
 
-    // 하이퍼링크 버튼 핸들러
-    document.getElementById('toolbar-link-btn')?.addEventListener('click', () => {
-        createHyperlink();
-    });
+    document.getElementById('toolbar-link-btn')?.addEventListener('click', () => { createHyperlink(); });
 
-    // 표 생성 관련 핸들러
     const tableModal = document.getElementById('table-modal');
     document.getElementById('toolbar-table-btn')?.addEventListener('click', () => { tableModal.classList.remove('hidden'); });
     document.getElementById('btn-confirm-table')?.addEventListener('click', () => {
@@ -297,7 +299,7 @@ function openColorPalette() {
 
 function renderStickers() { 
     const grid = document.getElementById('sticker-grid');
-    if (grid) grid.innerHTML = stickers.map(s => `<span class="sticker-item" onmousedown="event.preventDefault(); insertSticker('${s}')">${s}</span>`).join(''); 
+    if (grid) grid.innerHTML = stickers.map(s => `<span class="sticker-item" onmousedown="event.preventDefault(); window.insertSticker('${s}')">${s}</span>`).join(''); 
 }
 
 function processImage(file) {

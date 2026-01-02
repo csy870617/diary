@@ -390,9 +390,15 @@ function setupBasicHandling() {
         updateSelectionBox(); triggerAutoSave(); 
     });
     
+    // [핀포인트 수정] 에디터 및 표 래퍼 스크롤 발생 시 버튼 위치 동기화
+    const syncButtons = () => { if (currentSelectedElement) updateSelectionBox(); };
+    editorContainer?.addEventListener('scroll', syncButtons);
+    editorBody.addEventListener('scroll', (e) => {
+        if (e.target.classList.contains('table-wrapper')) syncButtons();
+    }, true);
+
     document.getElementById('edit-title')?.addEventListener('input', triggerAutoSave);
     document.getElementById('edit-subtitle')?.addEventListener('input', triggerAutoSave);
-    if (editorContainer) editorContainer.addEventListener('scroll', () => { if (currentSelectedElement) updateSelectionBox(); });
     window.addEventListener('resize', () => { updateSelectionBox(); if(state.currentViewMode === 'book') handleBookResize(); });
 }
 
@@ -482,10 +488,15 @@ function createSelectionUI() {
 function updateSelectionBox() {
     if (!currentSelectedElement || !selectionBox) return;
     const rect = currentSelectedElement.getBoundingClientRect(), scrollTop = window.scrollY, scrollLeft = window.scrollX;
-    selectionBox.style.top = (rect.top + scrollTop) + 'px'; selectionBox.style.left = (rect.left + scrollLeft) + 'px'; selectionBox.style.width = rect.width + 'px'; selectionBox.style.height = rect.height + 'px';
-    resizeHandle.style.top = (rect.bottom + scrollTop - 10) + 'px'; resizeHandle.style.left = (rect.right + scrollLeft - 10) + 'px';
+    
+    selectionBox.style.top = (rect.top + scrollTop) + 'px'; 
+    selectionBox.style.left = (rect.left + scrollLeft) + 'px'; 
+    selectionBox.style.width = rect.width + 'px'; 
+    selectionBox.style.height = rect.height + 'px';
+    
+    resizeHandle.style.top = (rect.bottom + scrollTop - 10) + 'px'; 
+    resizeHandle.style.left = (rect.right + scrollLeft - 10) + 'px';
 
-    // [핀포인트 수정] 모든 버튼 그룹을 표/이미지의 하단에 순차적으로 배치
     const centerX = rect.left + scrollLeft + rect.width / 2;
     if (currentSelectedElement.tagName === 'TABLE') {
         tableControlGroup.style.top = (rect.bottom + scrollTop + 15) + 'px';
@@ -509,7 +520,6 @@ function startResize(e) { e.preventDefault(); isResizing = true; startX2 = e.cli
 function resizing(e) { if (!isResizing || !currentSelectedElement) return; const newWidth = startWidth2 + (e.clientX - startX2), newHeight = startHeight2 + (e.clientY - startY2); if (newWidth > 50) currentSelectedElement.style.width = newWidth + 'px'; if (newHeight > 30) currentSelectedElement.style.height = newHeight + 'px'; updateSelectionBox(); }
 function stopResize() { if (isResizing) { recordHistory(); isResizing = false; } document.removeEventListener('mousemove', resizing); document.removeEventListener('mouseup', stopResize); triggerAutoSave(); }
 
-// 구조 변경 시 수동 히스토리 기록 연동
 export function addRow() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE') return; recordHistory(); const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, refRow = targetCell ? targetCell.parentElement : table.rows[table.rows.length - 1], colIdx = targetCell ? targetCell.cellIndex : 0, newRow = table.insertRow(refRow.rowIndex + 1), colCount = table.rows[0].cells.length; let cellToFocus = null; for (let i = 0; i < colCount; i++) { const newCell = newRow.insertCell(i); newCell.innerHTML = '<br>'; if (i === colIdx) cellToFocus = newCell; } if (cellToFocus) focusCell(cellToFocus); }
 export function deleteRow() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE' || table.rows.length <= 1) return; recordHistory(); const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, refRow = targetCell ? targetCell.parentElement : table.rows[table.rows.length - 1]; table.deleteRow(refRow.rowIndex); lastClickedCell = null; }
 export function addColumn() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE') return; recordHistory(); const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1, rowIdx = targetCell ? targetCell.parentElement.rowIndex : 0; let cellToFocus = null; for (let i = 0; i < table.rows.length; i++) { const newCell = table.rows[i].insertCell(colIdx + 1); newCell.innerHTML = '<br>'; if (i === rowIdx) cellToFocus = newCell; } if (cellToFocus) focusCell(cellToFocus); }
@@ -518,28 +528,13 @@ export function deleteColumn() { const table = currentSelectedElement; if (!tabl
 export function createHyperlink() { const selection = window.getSelection(); if (selection.rangeCount > 0 && selection.toString().length > 0) { const url = prompt("연결할 주소(URL)를 입력하세요:", "https://"); if (url && url !== "https://") { recordHistory(); document.execCommand('createLink', false, url); const anchor = selection.anchorNode.parentElement; if (anchor && anchor.tagName === 'A') { anchor.target = '_blank'; anchor.style.color = '#2563EB'; anchor.style.textDecoration = 'underline'; anchor.style.cursor = 'pointer'; } triggerAutoSave(); } } else { alert("링크를 걸 문구를 먼저 드래그하여 선택해주세요."); } }
 
 export function formatDoc(cmd, value = null) { 
-    const editor = document.getElementById('editor-body');
-    if (!editor) return;
-
-    if (cmd === 'undo') {
-        if (undoStack.length > 0) { redoStack.push(editor.innerHTML); editor.innerHTML = undoStack.pop(); triggerAutoSave(); return; }
-        else { document.execCommand('undo', false, null); return; }
-    }
-    if (cmd === 'redo') {
-        if (redoStack.length > 0) { undoStack.push(editor.innerHTML); editor.innerHTML = redoStack.pop(); triggerAutoSave(); return; }
-        else { document.execCommand('redo', false, null); return; }
-    }
-
-    recordHistory(); 
-    if (!document.activeElement.closest('#editor-body')) editor.focus();
+    const editor = document.getElementById('editor-body'); if (!editor) return;
+    if (cmd === 'undo') { if (undoStack.length > 0) { redoStack.push(editor.innerHTML); editor.innerHTML = undoStack.pop(); triggerAutoSave(); return; } else { document.execCommand('undo', false, null); return; } }
+    if (cmd === 'redo') { if (redoStack.length > 0) { undoStack.push(editor.innerHTML); editor.innerHTML = redoStack.pop(); triggerAutoSave(); return; } else { document.execCommand('redo', false, null); return; } }
+    recordHistory(); if (!document.activeElement.closest('#editor-body')) editor.focus();
     const selectedCells = document.querySelectorAll('td.selected-cell');
-    if (selectedCells.length > 0) {
-        selectedCells.forEach(cell => {
-            const range = document.createRange(); range.selectNodeContents(cell);
-            const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
-            document.execCommand(cmd, false, value);
-        });
-    } else { document.execCommand(cmd, false, value); }
+    if (selectedCells.length > 0) { selectedCells.forEach(cell => { const range = document.createRange(); range.selectNodeContents(cell); const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range); document.execCommand(cmd, false, value); }); } 
+    else { document.execCommand(cmd, false, value); }
     triggerAutoSave(); 
 }
 
@@ -556,10 +551,18 @@ export function changeGlobalFontSize(delta) { state.currentFontSize = Math.max(1
 export function insertSticker(emoji) { recordHistory(); document.execCommand('insertText', false, emoji); triggerAutoSave(); }
 export function insertImage(src) { recordHistory(); document.execCommand('insertImage', false, src); triggerAutoSave(); }
 
+// [수정] 표 생성 시 슬라이드 지원을 위해 .table-wrapper 로 감싸도록 수정
 export function insertTable(rows, cols) {
     recordHistory();
-    let tableHtml = '<table style="width: 100%; table-layout: fixed;"><tbody>';
-    for (let i = 0; i < rows; i++) { tableHtml += '<tr>'; for (let j = 0; j < cols; j++) { tableHtml += '<td><br></td>'; } tableHtml += '</tr>'; }
-    tableHtml += '</tbody></table><p><br></p>';
-    const editor = document.getElementById('editor-body'); editor.focus(); document.execCommand('insertHTML', false, tableHtml); triggerAutoSave();
+    let tableHtml = '<div class="table-wrapper"><table style="width: 100%; table-layout: fixed;"><tbody>';
+    for (let i = 0; i < rows; i++) { 
+        tableHtml += '<tr>'; 
+        for (let j = 0; j < cols; j++) { tableHtml += '<td><br></td>'; } 
+        tableHtml += '</tr>'; 
+    }
+    tableHtml += '</tbody></table></div><p><br></p>';
+    const editor = document.getElementById('editor-body'); 
+    editor.focus(); 
+    document.execCommand('insertHTML', false, tableHtml); 
+    triggerAutoSave();
 }
