@@ -54,7 +54,6 @@ export async function triggerAutoSave() {
     }, 2000); 
 }
 
-// 책 모드 관련 함수들
 function handleBookWheel(e) {
     if (state.currentViewMode !== 'book') return;
     e.preventDefault(); e.stopPropagation();
@@ -209,15 +208,39 @@ function setupBasicHandling() {
     const editorContainer = document.getElementById('editor-container');
     if (!editorBody) return;
 
+    // [핀포인트 수정] 붙여넣기 시 표 구조 제거 로직 추가
+    editorBody.onpaste = (e) => {
+        const html = e.clipboardData.getData('text/html');
+        if (html && html.includes('<table')) {
+            e.preventDefault();
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            const cells = doc.querySelectorAll('td');
+            let combinedContent = "";
+            if (cells.length > 0) {
+                cells.forEach((cell, idx) => {
+                    combinedContent += cell.innerHTML + (idx < cells.length - 1 ? " " : "");
+                });
+                document.execCommand('insertHTML', false, combinedContent);
+            } else {
+                document.execCommand('insertText', false, e.clipboardData.getData('text/plain'));
+            }
+            recordHistory();
+            triggerAutoSave();
+        }
+    };
+
     // 표 테두리 감지
     editorBody.onmousemove = (e) => {
         if (!editorBody.isContentEditable || isColDragging || isRowDragging) return;
         const td = e.target.closest('td');
         if (!td) return;
+
         const rect = td.getBoundingClientRect();
         const padding = 10;
         const nearRight = (e.clientX > rect.right - padding);
         const nearBottom = (e.clientY > rect.bottom - padding);
+
         if (nearRight) td.style.cursor = 'col-resize';
         else if (nearBottom) td.style.cursor = 'row-resize';
         else td.style.cursor = 'text';
@@ -226,6 +249,7 @@ function setupBasicHandling() {
     editorBody.onmousedown = (e) => {
         if (!editorBody.isContentEditable) return;
         const td = e.target.closest('td');
+        
         if (td) {
             if (td.style.cursor === 'col-resize') {
                 isColDragging = true; resizeTargetTd = td; startX = e.clientX; startW = td.offsetWidth; e.preventDefault(); return;
