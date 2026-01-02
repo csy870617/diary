@@ -470,7 +470,7 @@ function createSelectionUI() {
         document.body.appendChild(resizeBtnGroup);
     }
     if (!tableControlGroup) {
-        tableControlGroup = document.createElement('div'); tableControlGroup.className = 'img-resize-group'; tableControlGroup.style.bottom = 'auto'; tableControlGroup.style.top = '-90px'; 
+        tableControlGroup = document.createElement('div'); tableControlGroup.className = 'img-resize-group'; 
         const createOpBtn = (label, icon, fn) => { const btn = document.createElement('button'); btn.className = 'img-resize-btn'; btn.innerHTML = `<i class="ph ${icon}"></i> ${label}`; btn.onclick = (e) => { e.stopPropagation(); fn(); updateSelectionBox(); triggerAutoSave(); }; return btn; };
         tableControlGroup.appendChild(createOpBtn('줄+', 'ph-rows', addRow)); tableControlGroup.appendChild(createOpBtn('줄-', 'ph-minus', deleteRow)); tableControlGroup.appendChild(createOpBtn('칸+', 'ph-columns', addColumn)); tableControlGroup.appendChild(createOpBtn('칸-', 'ph-minus', deleteColumn));
         document.body.appendChild(tableControlGroup);
@@ -484,9 +484,22 @@ function updateSelectionBox() {
     const rect = currentSelectedElement.getBoundingClientRect(), scrollTop = window.scrollY, scrollLeft = window.scrollX;
     selectionBox.style.top = (rect.top + scrollTop) + 'px'; selectionBox.style.left = (rect.left + scrollLeft) + 'px'; selectionBox.style.width = rect.width + 'px'; selectionBox.style.height = rect.height + 'px';
     resizeHandle.style.top = (rect.bottom + scrollTop - 10) + 'px'; resizeHandle.style.left = (rect.right + scrollLeft - 10) + 'px';
-    deleteBtn.style.top = (rect.top + scrollTop - 40) + 'px'; deleteBtn.style.left = (rect.left + scrollLeft + rect.width / 2) + 'px';
-    resizeBtnGroup.style.top = (rect.bottom + scrollTop + 10) + 'px'; resizeBtnGroup.style.left = (rect.left + scrollLeft + rect.width / 2) + 'px';
-    if(tableControlGroup) { tableControlGroup.style.top = (rect.top + scrollTop - 90) + 'px'; tableControlGroup.style.left = (rect.left + scrollLeft + rect.width / 2) + 'px'; }
+
+    // [핀포인트 수정] 모든 버튼 그룹을 표/이미지의 하단에 순차적으로 배치
+    const centerX = rect.left + scrollLeft + rect.width / 2;
+    if (currentSelectedElement.tagName === 'TABLE') {
+        tableControlGroup.style.top = (rect.bottom + scrollTop + 15) + 'px';
+        tableControlGroup.style.left = centerX + 'px';
+        resizeBtnGroup.style.top = (rect.bottom + scrollTop + 55) + 'px';
+        resizeBtnGroup.style.left = centerX + 'px';
+        deleteBtn.style.top = (rect.bottom + scrollTop + 95) + 'px';
+        deleteBtn.style.left = centerX + 'px';
+    } else {
+        resizeBtnGroup.style.top = (rect.bottom + scrollTop + 15) + 'px';
+        resizeBtnGroup.style.left = centerX + 'px';
+        deleteBtn.style.top = (rect.bottom + scrollTop + 55) + 'px';
+        deleteBtn.style.left = centerX + 'px';
+    }
 }
 
 function deleteSelectedElement() { if (currentSelectedElement) { currentSelectedElement.remove(); hideSelection(); triggerAutoSave(); } }
