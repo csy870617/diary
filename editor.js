@@ -138,10 +138,14 @@ function linkifyContents(element) {
 function setupBasicHandling() {
     const editorBody = document.getElementById('editor-body');
     if (!editorBody) return;
+
     editorBody.onclick = (e) => {
         if (!editorBody.isContentEditable) return;
         const target = e.target.closest('img, table');
-        if (e.target.tagName === 'TD') lastClickedCell = e.target;
+        
+        // 셀 클릭 시 해당 셀 정보를 lastClickedCell에 저장
+        const cell = e.target.closest('td');
+        if (cell) lastClickedCell = cell;
 
         if (target) {
             e.stopPropagation();
@@ -151,6 +155,45 @@ function setupBasicHandling() {
             hideSelection();
         }
     };
+
+    editorBody.onkeydown = (e) => {
+        // 1. 표 안에서 위/아래 화살표로 셀 이동
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            const selection = window.getSelection();
+            if (!selection.rangeCount) return;
+            const container = selection.anchorNode.nodeType === 3 ? selection.anchorNode.parentElement : selection.anchorNode;
+            const cell = container.closest('td');
+            
+            if (cell) {
+                const row = cell.parentElement;
+                const table = row.closest('table');
+                const colIdx = cell.cellIndex;
+                const targetRow = e.key === 'ArrowDown' ? row.nextElementSibling : row.previousElementSibling;
+                
+                if (targetRow && targetRow.cells[colIdx]) {
+                    e.preventDefault();
+                    const targetCell = targetRow.cells[colIdx];
+                    targetCell.focus();
+                    
+                    const range = document.createRange();
+                    range.selectNodeContents(targetCell);
+                    range.collapse(true);
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                }
+            }
+        }
+
+        // 2. 요소 선택 중 Delete 키로 삭제
+        if (e.key === 'Delete' && currentSelectedElement) {
+            // 셀 내부를 수정 중(포커스 상태)인 경우는 텍스트 삭제, 그 외는 요소 삭제
+            if (document.activeElement.tagName !== 'TD') {
+                e.preventDefault();
+                deleteSelectedElement();
+            }
+        }
+    };
+
     editorBody.addEventListener('input', () => { updateSelectionBox(); triggerAutoSave(); });
     document.getElementById('edit-title')?.addEventListener('input', triggerAutoSave);
     document.getElementById('edit-subtitle')?.addEventListener('input', triggerAutoSave);
@@ -316,33 +359,52 @@ function startResize(e) { e.preventDefault(); isResizing = true; startX = e.clie
 function resizing(e) { if (!isResizing || !currentSelectedElement) return; const newWidth = startWidth + (e.clientX - startX); const newHeight = startHeight + (e.clientY - startY); if (newWidth > 50) currentSelectedElement.style.width = newWidth + 'px'; if (newHeight > 30) currentSelectedElement.style.height = newHeight + 'px'; updateSelectionBox(); }
 function stopResize() { isResizing = false; document.removeEventListener('mousemove', resizing); document.removeEventListener('mouseup', stopResize); triggerAutoSave(); }
 
+// [표 편집 정밀화]
 function addRow() {
     const table = currentSelectedElement;
     if (!table || table.tagName !== 'TABLE') return;
-    const refRow = lastClickedCell ? lastClickedCell.parentElement : table.rows[table.rows.length - 1];
+    // 클릭된 셀이 현재 표 안에 있는지 확인
+    const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null;
+    const refRow = targetCell ? targetCell.parentElement : table.rows[table.rows.length - 1];
     const newRow = table.insertRow(refRow.rowIndex + 1);
-    for (let i = 0; i < refRow.cells.length; i++) { newRow.insertCell(i).innerHTML = '<br>'; }
+    const colCount = table.rows[0].cells.length;
+    for (let i = 0; i < colCount; i++) { newRow.insertCell(i).innerHTML = '<br>'; }
 }
+
 function deleteRow() {
     const table = currentSelectedElement;
     if (!table || table.tagName !== 'TABLE' || table.rows.length <= 1) return;
-    const refRow = lastClickedCell ? lastClickedCell.parentElement : table.rows[table.rows.length - 1];
+    const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null;
+    const refRow = targetCell ? targetCell.parentElement : table.rows[table.rows.length - 1];
+    
+    // 해당 인덱스의 행만 정확하게 삭제
     table.deleteRow(refRow.rowIndex);
+    if (targetCell) lastClickedCell = null;
 }
+
 function addColumn() {
     const table = currentSelectedElement;
     if (!table || table.tagName !== 'TABLE') return;
-    const colIdx = lastClickedCell ? lastClickedCell.cellIndex : table.rows[0].cells.length - 1;
-    for (let i = 0; i < table.rows.length; i++) { table.rows[i].insertCell(colIdx + 1).innerHTML = '<br>'; }
+    const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null;
+    const colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1;
+    for (let i = 0; i < table.rows.length; i++) { 
+        table.rows[i].insertCell(colIdx + 1).innerHTML = '<br>'; 
+    }
 }
+
 function deleteColumn() {
     const table = currentSelectedElement;
     if (!table || table.tagName !== 'TABLE' || table.rows[0].cells.length <= 1) return;
-    const colIdx = lastClickedCell ? lastClickedCell.cellIndex : table.rows[0].cells.length - 1;
-    for (let i = 0; i < table.rows.length; i++) { table.rows[i].deleteCell(colIdx); }
+    const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null;
+    const colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1;
+    
+    // 각 행을 돌며 해당 열 인덱스의 셀만 정확하게 삭제
+    for (let i = 0; i < table.rows.length; i++) { 
+        table.rows[i].deleteCell(colIdx); 
+    }
+    if (targetCell) lastClickedCell = null;
 }
 
-// [수정] 포커스 보장 로직 추가
 export function formatDoc(cmd, value = null) { 
     const editor = document.getElementById('editor-body');
     if (editor) {
@@ -360,9 +422,12 @@ export function applyFontStyle(f, s) {
 export function changeGlobalFontSize(delta) { state.currentFontSize = Math.max(12, Math.min(60, state.currentFontSize + delta)); applyFontStyle(state.currentFontFamily, state.currentFontSize); triggerAutoSave(); }
 export function insertSticker(emoji) { document.execCommand('insertText', false, emoji); triggerAutoSave(); }
 export function insertImage(src) { document.execCommand('insertImage', false, src); triggerAutoSave(); }
+
 export function insertTable(rows, cols) {
     let tableHtml = '<table style="width: 100%;"><tbody>';
     for (let i = 0; i < rows; i++) { tableHtml += '<tr>'; for (let j = 0; j < cols; j++) { tableHtml += '<td><br></td>'; } tableHtml += '</tr>'; }
     tableHtml += '</tbody></table><p><br></p>';
-    document.getElementById('editor-body').focus(); document.execCommand('insertHTML', false, tableHtml); triggerAutoSave();
+    document.getElementById('editor-body').focus(); 
+    document.execCommand('insertHTML', false, tableHtml); 
+    triggerAutoSave();
 }

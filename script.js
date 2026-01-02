@@ -105,7 +105,7 @@ function setupListeners() {
 
         ['context-menu', 'category-context-menu', 'color-palette-popup', 'sticker-palette', 'table-modal'].forEach(id => {
             const el = document.getElementById(id);
-            if (el && !el.contains(e.target) && !el.contains(e.target) && !e.target.closest('.tool-btn')) el.classList.add('hidden');
+            if (el && !el.contains(e.target) && !e.target.closest('.tool-btn')) el.classList.add('hidden');
         });
     }, true);
 
@@ -143,7 +143,7 @@ function setupUIListeners() {
 
     document.getElementById('font-selector')?.addEventListener('change', (e) => { applyFontStyle(e.target.value, state.currentFontSize); triggerAutoSave(); });
 
-    // [중요] 볼드, 이탤릭, 언더라인, 취소선, 정렬 버튼 리스너 추가
+    // 볼드, 이탤릭, 언더라인, 취소선, 정렬 버튼 리스너
     document.querySelectorAll('.tool-btn[data-cmd]').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.preventDefault();
