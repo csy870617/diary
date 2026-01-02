@@ -1,7 +1,7 @@
 import { state, loadCategoriesFromLocal, saveCategoriesToLocal } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
 import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameCategoryAction, deleteCategoryAction, addNewCategory } from './ui.js';
-import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable } from './editor.js';
+import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable, createHyperlink } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, saveToDrive, syncFromDrive } from './drive.js';
 
@@ -22,12 +22,24 @@ const stickers = [
 
 function init() {
     if (!history.state) history.replaceState({ modal: 'main' }, null, '');
+    
+    // URL 파라미터에서 공유 데이터 체크
+    const urlParams = new URLSearchParams(window.location.search);
+    const sharedData = urlParams.get('share');
+
     loadCategoriesFromLocal(); 
     loadDataFromLocal();
     checkOldTrash();
     renderTabs();
     state.isLoading = false;
     renderEntries();
+
+    // [개선] GAPI 로딩 전에 로컬 토큰 유효성을 즉시 검사하여 UI 딜레이 제거
+    const fastToken = localStorage.getItem('faith_token');
+    const fastExp = localStorage.getItem('faith_token_exp');
+    if (fastToken && fastExp && Date.now() < (parseInt(fastExp) - 300000)) {
+        updateAuthUI(true); // 즉시 로그인 상태 UI 적용
+    }
 
     initGoogleDrive((isLoggedIn) => {
         updateAuthUI(isLoggedIn);
@@ -39,6 +51,21 @@ function init() {
             }, 15000); 
         }
     });
+
+    // 공유된 링크로 접속한 경우 처리
+    if (sharedData) {
+        try {
+            const entry = JSON.parse(decodeURIComponent(atob(sharedData)));
+            setTimeout(() => {
+                openEditor(true, entry);
+                toggleViewMode('readOnly');
+                const backBtnText = document.getElementById('back-btn-text');
+                if (backBtnText) backBtnText.innerText = '홈으로';
+            }, 500);
+        } catch (e) {
+            console.error("공유 데이터 해석 실패", e);
+        }
+    }
 
     window.addEventListener('focus', () => { if (window.gapi?.client?.getToken()) syncFromDrive(); });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && window.gapi?.client?.getToken()) syncFromDrive(); });
@@ -84,6 +111,12 @@ function setupListeners() {
         const writeModal = document.getElementById('write-modal');
         if (writeModal && !writeModal.classList.contains('hidden')) await saveEntry();
         closeAllModals(false); 
+        // 공유 모드 해제 시 URL 정리
+        if (window.location.search.includes('share')) {
+            window.history.replaceState({}, document.title, window.location.pathname);
+            const backBtnText = document.getElementById('back-btn-text');
+            if (backBtnText) backBtnText.innerText = '목록';
+        }
     });
 
     const editorBody = document.getElementById('editor-body');
@@ -139,23 +172,48 @@ function setupUIListeners() {
     document.getElementById('btn-global-size-down')?.addEventListener('click', () => changeGlobalFontSize(-2));
 
     const toolbarScrollArea = document.getElementById('toolbar-scroll-area');
-    if (toolbarScrollArea) { toolbarScrollArea.addEventListener('wheel', (e) => { if (e.deltaY !== 0) { e.preventDefault(); toolbarScrollArea.scrollLeft += e.deltaY; } }); }
+    if (toolbarScrollArea) { 
+        toolbarScrollArea.addEventListener('wheel', (e) => { 
+            if (e.deltaY !== 0) { e.preventDefault(); toolbarScrollArea.scrollLeft += e.deltaY; } 
+        }); 
+    }
 
     document.getElementById('font-selector')?.addEventListener('change', (e) => { applyFontStyle(e.target.value, state.currentFontSize); triggerAutoSave(); });
 
+    // 툴바 기본 서식 버튼(볼드, 이탤릭, 되돌리기 등) 리스너
     document.querySelectorAll('.tool-btn[data-cmd]').forEach(btn => {
         btn.addEventListener('click', (e) => { e.preventDefault(); const cmd = btn.dataset.cmd; if (cmd) formatDoc(cmd); });
     });
 
-    // [내용 복사 버튼]
-    document.getElementById('btn-copy-text')?.addEventListener('click', () => {
+    // 공유하기 버튼 핸들러
+    document.getElementById('btn-share')?.addEventListener('click', () => {
         const title = document.getElementById('edit-title').value;
         const subtitle = document.getElementById('edit-subtitle').value;
-        const body = document.getElementById('editor-body').innerText;
-        const textToCopy = `${title}\n${subtitle ? subtitle + '\n' : ''}\n${body}`;
-        navigator.clipboard.writeText(textToCopy).then(() => { alert('내용이 클립보드에 복사되었습니다.'); }).catch(err => { console.error('복사 실패:', err); });
+        const body = document.getElementById('editor-body').innerHTML;
+        const entryData = {
+            title: title || '제목 없음',
+            subtitle: subtitle || '',
+            body: body || '',
+            date: new Date().toLocaleDateString('ko-KR'),
+            fontFamily: state.currentFontFamily,
+            fontSize: state.currentFontSize
+        };
+        const encodedData = btoa(unescape(encodeURIComponent(JSON.stringify(entryData))));
+        const shareUrl = `${window.location.origin}${window.location.pathname}?share=${encodedData}`;
+        
+        if (navigator.share) {
+            navigator.share({ title: '신앙일지 공유', text: `${title} - Faith Log`, url: shareUrl }).catch(console.error);
+        } else {
+            navigator.clipboard.writeText(shareUrl).then(() => { alert('공유 링크가 클립보드에 복사되었습니다.'); });
+        }
     });
 
+    // 하이퍼링크 버튼 핸들러
+    document.getElementById('toolbar-link-btn')?.addEventListener('click', () => {
+        createHyperlink();
+    });
+
+    // 표 생성 관련 핸들러
     const tableModal = document.getElementById('table-modal');
     document.getElementById('toolbar-table-btn')?.addEventListener('click', () => { tableModal.classList.remove('hidden'); });
     document.getElementById('btn-confirm-table')?.addEventListener('click', () => {
@@ -188,7 +246,9 @@ function setupUIListeners() {
     document.getElementById('toolbar-hilite-btn')?.addEventListener('click', (e) => { e.stopPropagation(); state.activeColorMode = 'hiliteColor'; openColorPalette(); });
 
     document.querySelectorAll('.color-dot').forEach(btn => { 
-        btn.onmousedown = (e) => { e.preventDefault(); if(btn.dataset.color) formatDoc(state.activeColorMode, btn.dataset.color); document.getElementById('color-palette-popup')?.classList.add('hidden'); }; 
+        btn.onmousedown = (e) => { 
+            e.preventDefault(); if(btn.dataset.color) formatDoc(state.activeColorMode, btn.dataset.color); document.getElementById('color-palette-popup')?.classList.add('hidden'); 
+        }; 
     });
 
     const removeColorBtn = document.getElementById('btn-remove-color');
@@ -202,7 +262,14 @@ function setupUIListeners() {
     }
 
     document.getElementById('write-btn')?.addEventListener('click', () => openEditor(false));
-    document.getElementById('close-write-btn')?.addEventListener('click', () => { saveEntry(); closeAllModals(true); if (navigator.onLine && window.gapi?.client?.getToken()) saveToDrive(); });
+    document.getElementById('close-write-btn')?.addEventListener('click', () => { 
+        saveEntry(); closeAllModals(true); if (navigator.onLine && window.gapi?.client?.getToken()) saveToDrive(); 
+        if (window.location.search.includes('share')) {
+            window.history.replaceState({}, document.title, window.location.pathname);
+            const backBtnText = document.getElementById('back-btn-text');
+            if (backBtnText) backBtnText.innerText = '목록';
+        }
+    });
     document.getElementById('btn-readonly')?.addEventListener('click', () => toggleViewMode(state.currentViewMode === 'readOnly' ? 'default' : 'readOnly'));
     document.getElementById('btn-bookmode')?.addEventListener('click', () => toggleViewMode(state.currentViewMode === 'book' ? 'default' : 'book'));
     document.getElementById('trash-btn')?.addEventListener('click', openTrashModal);

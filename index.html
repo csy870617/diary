@@ -6,7 +6,7 @@
     <meta name="referrer" content="origin"> 
     
     <title>신앙일지 | Faith Log</title>
-    <link rel="stylesheet" href="style.css?v=3.5">
+    <link rel="stylesheet" href="style.css?v=3.6">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
@@ -84,8 +84,8 @@
                 <button id="btn-bookmode" class="icon-action-btn" title="책 모드">
                     <i class="ph ph-book-open"></i>
                 </button>
-                <button id="btn-copy-text" class="icon-action-btn" title="내용 복사">
-                    <i class="ph ph-copy"></i>
+                <button id="btn-share" class="icon-action-btn" title="공유하기">
+                    <i class="ph ph-share-network"></i>
                 </button>
             </div>
         </div>
@@ -106,6 +106,7 @@
                         <button class="tool-btn small" id="btn-global-size-down">가-</button>
                         <button class="tool-btn small" id="btn-global-size-up">가+</button>
                         <button class="tool-btn" id="toolbar-table-btn" title="표 삽입"><i class="ph ph-table"></i></button>
+                        <button class="tool-btn" id="toolbar-link-btn" title="하이퍼링크"><i class="ph ph-link"></i></button>
                     </div>
                 </div>
                 <div class="toolbar-divider"></div>
@@ -140,21 +141,16 @@
             <input type="text" id="edit-title" class="editor-title" placeholder="제목" autocomplete="off">
             <input type="text" id="edit-subtitle" class="editor-subtitle" placeholder="소제목" autocomplete="off">
             <div class="divider"></div>
-            <div id="editor-body" class="editor-body" contenteditable="true" placeholder="이곳에 은혜를 기록하세요..."></div>
+            <div id="editor-body" class="editor-body" contenteditable="true" placeholder="이곳에 은혜를 기록하세요..."></div >
         </div>
         <div id="book-nav-left" class="book-nav prev hidden"><i class="ph ph-caret-left"></i></div>
         <div id="book-nav-right" class="book-nav next hidden"><i class="ph ph-caret-right"></i></div>
-        
         <div id="book-slider-container" class="book-slider-container hidden">
             <input type="range" id="book-page-slider" min="0" value="0" step="1">
         </div>
-        
         <div id="page-indicator" class="page-indicator hidden"></div>
-        
         <button id="btn-scroll-top" class="btn-scroll-top hidden" title="맨 위로"><i class="ph ph-arrow-up"></i></button>
-
         <div id="sticker-palette" class="sticker-palette hidden"><div id="sticker-grid" class="sticker-grid"></div></div>
-        
         <div id="color-palette-popup" class="color-palette-popup hidden">
             <div class="palette-header"><button class="color-remove-btn" id="btn-remove-color"><i class="ph ph-prohibit"></i> 색상 없음</button></div>
             <div class="color-grid">
@@ -182,11 +178,11 @@
             <h3>표 삽입</h3>
             <div style="display: flex; flex-direction: column; gap: 12px; margin: 20px 0;">
                 <div style="display: flex; align-items: center; justify-content: space-between;">
-                    <label style="font-size: 14px; color: var(--gray-500);">행 (Row)</label>
+                    <label style="font-size: 14px; color: var(--gray-500);">줄 (Row)</label>
                     <input type="number" id="table-rows" value="3" min="1" max="20" style="width: 70px; padding: 6px; border: 1px solid var(--gray-200); border-radius: 6px; text-align: center;">
                 </div>
                 <div style="display: flex; align-items: center; justify-content: space-between;">
-                    <label style="font-size: 14px; color: var(--gray-500);">열 (Column)</label>
+                    <label style="font-size: 14px; color: var(--gray-500);">칸 (Column)</label>
                     <input type="number" id="table-cols" value="3" min="1" max="20" style="width: 70px; padding: 6px; border: 1px solid var(--gray-200); border-radius: 6px; text-align: center;">
                 </div>
             </div>
@@ -241,6 +237,6 @@
         <button class="ctx-item danger" id="ctx-cat-delete"><i class="ph ph-trash"></i> 주제 삭제</button>
     </div>
 
-    <script type="module" src="script.js?v=2.9"></script>
+    <script type="module" src="script.js?v=3.0"></script>
 </body>
 </html>

@@ -19,6 +19,7 @@ let wheelLockTimer = null;
 // 표 셀 선택 관련 변수
 let selectionStartCell = null;
 let isSelectingCells = false;
+let mobileLongPressTimer = null;
 
 // 자동 저장 트리거
 export async function triggerAutoSave() {
@@ -141,7 +142,6 @@ function linkifyContents(element) {
     });
 }
 
-// 셀 범위 선택 하이라이트
 function selectCellRange(startTd, endTd) {
     const startTable = startTd.closest('table');
     const endTable = endTd.closest('table');
@@ -150,43 +150,89 @@ function selectCellRange(startTd, endTd) {
     const endR = endTd.parentElement.rowIndex, endC = endTd.cellIndex;
     const minR = Math.min(startR, endR), maxR = Math.max(startR, endR);
     const minC = Math.min(startC, endC), maxC = Math.max(startC, endC);
+    const isSingleCell = (minR === maxR && minC === maxC);
     startTable.querySelectorAll('td').forEach(td => {
         const r = td.parentElement.rowIndex, c = td.cellIndex;
-        td.classList.toggle('selected-cell', (r >= minR && r <= maxR && c >= minC && c <= maxC));
+        if (!isSingleCell && r >= minR && r <= maxR && c >= minC && c <= maxC) {
+            td.classList.add('selected-cell');
+        } else {
+            td.classList.remove('selected-cell');
+        }
     });
 }
 
 function clearCellSelection() { document.querySelectorAll('td.selected-cell').forEach(td => td.classList.remove('selected-cell')); }
 
+function focusCell(cell) {
+    if (!cell) return;
+    cell.focus();
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(cell);
+    range.collapse(true); 
+    sel.removeAllRanges();
+    sel.addRange(range);
+    lastClickedCell = cell; 
+}
+
 function setupBasicHandling() {
     const editorBody = document.getElementById('editor-body');
+    const editorContainer = document.getElementById('editor-container');
     if (!editorBody) return;
 
     editorBody.onmousedown = (e) => {
         if (!editorBody.isContentEditable) return;
         const cell = e.target.closest('td');
-        if (cell) { isSelectingCells = true; selectionStartCell = cell; clearCellSelection(); cell.classList.add('selected-cell'); }
+        if (cell) { isSelectingCells = true; selectionStartCell = cell; clearCellSelection(); }
     };
 
     editorBody.onmouseover = (e) => {
-        if (isSelectingCells && selectionStartCell) { const cell = e.target.closest('td'); if (cell) selectCellRange(selectionStartCell, cell); }
+        if (isSelectingCells && selectionStartCell) { 
+            const cell = e.target.closest('td'); 
+            if (cell) selectCellRange(selectionStartCell, cell); 
+        }
     };
 
     window.onmouseup = () => { isSelectingCells = false; };
+
+    editorBody.ontouchstart = (e) => {
+        if (!editorBody.isContentEditable) return;
+        const cell = e.target.closest('td');
+        if (cell) {
+            mobileLongPressTimer = setTimeout(() => {
+                isSelectingCells = true;
+                selectionStartCell = cell;
+                clearCellSelection();
+                if (navigator.vibrate) navigator.vibrate(50);
+            }, 600);
+        }
+    };
+
+    editorBody.ontouchmove = (e) => {
+        if (isSelectingCells && selectionStartCell) {
+            e.preventDefault(); 
+            const touch = e.touches[0];
+            const cell = document.elementFromPoint(touch.clientX, touch.clientY)?.closest('td');
+            if (cell) selectCellRange(selectionStartCell, cell);
+        } else {
+            clearTimeout(mobileLongPressTimer);
+        }
+    };
+
+    editorBody.ontouchend = () => {
+        clearTimeout(mobileLongPressTimer);
+        isSelectingCells = false;
+    };
 
     editorBody.onclick = (e) => {
         if (!editorBody.isContentEditable) return;
         const target = e.target.closest('img, table');
         const cell = e.target.closest('td');
         if (cell) lastClickedCell = cell;
-
         if (target) {
-            // [개선] 드래그 선택된 셀이 하나 이하일 때만 요소 전체 선택 UI(삭제/크기조정)를 표시합니다.
             const selectedCells = document.querySelectorAll('td.selected-cell');
             if (selectedCells.length <= 1) {
-                e.stopPropagation();
-                e.preventDefault();
-                selectElement(target);
+                e.stopPropagation(); e.preventDefault(); selectElement(target);
             }
         } else {
             hideSelection();
@@ -206,7 +252,7 @@ function setupBasicHandling() {
                 let targetCell = e.shiftKey ? cell.previousElementSibling : cell.nextElementSibling;
                 if (!targetCell && e.shiftKey && row.previousElementSibling) targetCell = row.previousElementSibling.cells[row.previousElementSibling.cells.length - 1];
                 else if (!targetCell && !e.shiftKey && row.nextElementSibling) targetCell = row.nextElementSibling.cells[0];
-                if (targetCell) { targetCell.focus(); const range = document.createRange(); range.selectNodeContents(targetCell); range.collapse(false); sel.removeAllRanges(); sel.addRange(range); lastClickedCell = targetCell; }
+                if (targetCell) { focusCell(targetCell); }
             }
         }
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -217,15 +263,25 @@ function setupBasicHandling() {
             if (cell) {
                 const row = cell.parentElement, colIdx = cell.cellIndex;
                 const targetRow = e.key === 'ArrowDown' ? row.nextElementSibling : row.previousElementSibling;
-                if (targetRow && targetRow.cells[colIdx]) { e.preventDefault(); clearCellSelection(); const targetCell = targetRow.cells[colIdx]; targetCell.focus(); const range = document.createRange(); range.selectNodeContents(targetCell); range.collapse(true); sel.removeAllRanges(); sel.addRange(range); lastClickedCell = targetCell; }
+                if (targetRow && targetRow.cells[colIdx]) { e.preventDefault(); clearCellSelection(); focusCell(targetRow.cells[colIdx]); }
             }
         }
-        if (e.key === 'Delete' && currentSelectedElement) { if (document.activeElement.tagName !== 'TD') { e.preventDefault(); deleteSelectedElement(); } }
+        if (e.key === 'Delete' && currentSelectedElement) {
+            if (currentSelectedElement.tagName !== 'TABLE' && document.activeElement.tagName !== 'TD') {
+                e.preventDefault();
+                deleteSelectedElement();
+            }
+        }
     };
 
     editorBody.addEventListener('input', () => { updateSelectionBox(); triggerAutoSave(); });
     document.getElementById('edit-title')?.addEventListener('input', triggerAutoSave);
     document.getElementById('edit-subtitle')?.addEventListener('input', triggerAutoSave);
+    
+    if (editorContainer) {
+        editorContainer.addEventListener('scroll', () => { if (currentSelectedElement) updateSelectionBox(); });
+    }
+
     window.addEventListener('resize', () => { updateSelectionBox(); if(state.currentViewMode === 'book') handleBookResize(); });
 }
 
@@ -301,11 +357,10 @@ function createSelectionUI() {
         });
         document.body.appendChild(resizeBtnGroup);
     }
-    // [중요] 테이블 컨트롤 그룹은 매번 필요 시 확인하여 생성/표시합니다.
     if (!tableControlGroup) {
         tableControlGroup = document.createElement('div'); tableControlGroup.className = 'img-resize-group'; tableControlGroup.style.bottom = 'auto'; tableControlGroup.style.top = '-90px'; 
         const createOpBtn = (label, icon, fn) => { const btn = document.createElement('button'); btn.className = 'img-resize-btn'; btn.innerHTML = `<i class="ph ${icon}"></i> ${label}`; btn.onclick = (e) => { e.stopPropagation(); fn(); updateSelectionBox(); triggerAutoSave(); }; return btn; };
-        tableControlGroup.appendChild(createOpBtn('행+', 'ph-rows', addRow)); tableControlGroup.appendChild(createOpBtn('행-', 'ph-minus', deleteRow)); tableControlGroup.appendChild(createOpBtn('열+', 'ph-columns', addColumn)); tableControlGroup.appendChild(createOpBtn('열-', 'ph-minus', deleteColumn));
+        tableControlGroup.appendChild(createOpBtn('줄+', 'ph-rows', addRow)); tableControlGroup.appendChild(createOpBtn('줄-', 'ph-minus', deleteRow)); tableControlGroup.appendChild(createOpBtn('칸+', 'ph-columns', addColumn)); tableControlGroup.appendChild(createOpBtn('칸-', 'ph-minus', deleteColumn));
         document.body.appendChild(tableControlGroup);
     }
     selectionBox.style.display = 'block'; resizeHandle.style.display = 'block'; deleteBtn.style.display = 'flex'; resizeBtnGroup.style.display = 'flex';
@@ -329,29 +384,71 @@ function startResize(e) { e.preventDefault(); isResizing = true; startX = e.clie
 function resizing(e) { if (!isResizing || !currentSelectedElement) return; const newWidth = startWidth + (e.clientX - startX), newHeight = startHeight + (e.clientY - startY); if (newWidth > 50) currentSelectedElement.style.width = newWidth + 'px'; if (newHeight > 30) currentSelectedElement.style.height = newHeight + 'px'; updateSelectionBox(); }
 function stopResize() { isResizing = false; document.removeEventListener('mousemove', resizing); document.removeEventListener('mouseup', stopResize); triggerAutoSave(); }
 
-function addRow() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE') return; const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, refRow = targetCell ? targetCell.parentElement : table.rows[table.rows.length - 1], newRow = table.insertRow(refRow.rowIndex + 1), colCount = table.rows[0].cells.length; for (let i = 0; i < colCount; i++) { newRow.insertCell(i).innerHTML = '<br>'; } }
+function addRow() { 
+    const table = currentSelectedElement; 
+    if (!table || table.tagName !== 'TABLE') return; 
+    const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null;
+    const refRow = targetCell ? targetCell.parentElement : table.rows[table.rows.length - 1];
+    const colIdx = targetCell ? targetCell.cellIndex : 0; 
+    const newRow = table.insertRow(refRow.rowIndex + 1); 
+    const colCount = table.rows[0].cells.length; 
+    let cellToFocus = null;
+    for (let i = 0; i < colCount; i++) { const newCell = newRow.insertCell(i); newCell.innerHTML = '<br>'; if (i === colIdx) cellToFocus = newCell; } 
+    if (cellToFocus) focusCell(cellToFocus); 
+}
+
 function deleteRow() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE' || table.rows.length <= 1) return; const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, refRow = targetCell ? targetCell.parentElement : table.rows[table.rows.length - 1]; table.deleteRow(refRow.rowIndex); if (targetCell) lastClickedCell = null; }
-function addColumn() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE') return; const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1; for (let i = 0; i < table.rows.length; i++) { table.rows[i].insertCell(colIdx + 1).innerHTML = '<br>'; } }
+
+function addColumn() { 
+    const table = currentSelectedElement; 
+    if (!table || table.tagName !== 'TABLE') return; 
+    const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null;
+    const colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1; 
+    const rowIdx = targetCell ? targetCell.parentElement.rowIndex : 0; 
+    let cellToFocus = null;
+    for (let i = 0; i < table.rows.length; i++) { const newCell = table.rows[i].insertCell(colIdx + 1); newCell.innerHTML = '<br>'; if (i === rowIdx) cellToFocus = newCell; } 
+    if (cellToFocus) focusCell(cellToFocus); 
+}
+
 function deleteColumn() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE' || table.rows[0].cells.length <= 1) return; const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1; for (let i = 0; i < table.rows.length; i++) { table.rows[i].deleteCell(colIdx); } if (targetCell) lastClickedCell = null; }
 
+// [추가] 하이퍼링크 생성 함수
+export function createHyperlink() {
+    const selection = window.getSelection();
+    if (selection.rangeCount > 0 && selection.toString().length > 0) {
+        const url = prompt("연결할 주소(URL)를 입력하세요:", "https://");
+        if (url && url !== "https://") {
+            document.execCommand('createLink', false, url);
+            // 방금 생성된 링크에 스타일 및 새 창 열기 적용
+            const anchor = selection.anchorNode.parentElement;
+            if (anchor && anchor.tagName === 'A') {
+                anchor.target = '_blank';
+                anchor.style.color = '#2563EB';
+                anchor.style.textDecoration = 'underline';
+                anchor.style.cursor = 'pointer';
+            }
+            triggerAutoSave();
+        }
+    } else {
+        alert("링크를 걸 문구를 먼저 드래그하여 선택해주세요.");
+    }
+}
+
 export function formatDoc(cmd, value = null) { 
+    const editor = document.getElementById('editor-body');
+    if (!editor) return;
+    if (cmd === 'undo' || cmd === 'redo') { editor.focus(); document.execCommand(cmd, false, value); triggerAutoSave(); return; }
     const selectedCells = document.querySelectorAll('td.selected-cell');
     if (selectedCells.length > 0) {
         selectedCells.forEach(cell => {
             const range = document.createRange(); range.selectNodeContents(cell); const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
             document.execCommand(cmd, false, value);
         });
-    } else {
-        const editor = document.getElementById('editor-body');
-        if (editor) { editor.focus(); document.execCommand(cmd, false, value); }
-    }
+    } else { editor.focus(); document.execCommand(cmd, false, value); }
     triggerAutoSave(); 
 }
 
-export function applyFontStyle(f, s) { 
-    state.currentFontFamily = f; state.currentFontSize = s; 
-    const targets = [document.getElementById('editor-body'), document.getElementById('edit-title'), document.getElementById('edit-subtitle')]; targets.forEach(el => { if(el) { el.style.fontFamily = f; el.style.fontSize = (f === 'Nanum Pen Script' ? s + 4 : s) + 'px'; } }); 
-}
+export function applyFontStyle(f, s) { state.currentFontFamily = f; state.currentFontSize = s; const targets = [document.getElementById('editor-body'), document.getElementById('edit-title'), document.getElementById('edit-subtitle')]; targets.forEach(el => { if(el) { el.style.fontFamily = f; el.style.fontSize = (f === 'Nanum Pen Script' ? s + 4 : s) + 'px'; } }); }
 export function changeGlobalFontSize(delta) { state.currentFontSize = Math.max(12, Math.min(60, state.currentFontSize + delta)); applyFontStyle(state.currentFontFamily, state.currentFontSize); triggerAutoSave(); }
 export function insertSticker(emoji) { document.execCommand('insertText', false, emoji); triggerAutoSave(); }
 export function insertImage(src) { document.execCommand('insertImage', false, src); triggerAutoSave(); }
@@ -359,6 +456,5 @@ export function insertTable(rows, cols) {
     let tableHtml = '<table style="width: 100%;"><tbody>';
     for (let i = 0; i < rows; i++) { tableHtml += '<tr>'; for (let j = 0; j < cols; j++) { tableHtml += '<td><br></td>'; } tableHtml += '</tr>'; }
     tableHtml += '</tbody></table><p><br></p>';
-    const editor = document.getElementById('editor-body');
-    editor.focus(); document.execCommand('insertHTML', false, tableHtml); triggerAutoSave();
+    const editor = document.getElementById('editor-body'); editor.focus(); document.execCommand('insertHTML', false, tableHtml); triggerAutoSave();
 }
