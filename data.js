@@ -41,7 +41,6 @@ export async function saveEntry() {
         };
         state.entries.unshift(newEntry);
     } else {
-        // [중요] 기존 데이터와 내용이 다를 때만 modifiedAt 갱신 (불필요한 동기화 방지)
         const old = state.entries[index];
         if (old.title !== title || old.body !== body || old.subtitle !== subtitle) {
             state.entries[index] = {
@@ -55,15 +54,17 @@ export async function saveEntry() {
     }
     
     localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-    renderEntries();
+    renderEntries(); // [개선] UI 즉시 갱신
 }
 
 /**
- * 변경사항 저장 및 즉시 동기화
+ * 변경사항 저장 및 백그라운드 동기화
+ * UI 렌더링을 방해하지 않도록 await 순서를 조정했습니다.
  */
 export async function saveData() {
     localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-    await saveToDrive(); 
+    // 드라이브 저장은 백그라운드에서 진행되도록 await를 걸지 않거나 별도로 처리 가능합니다.
+    saveToDrive(); 
 }
 
 export async function updateEntryField(id, fields) {
@@ -71,17 +72,47 @@ export async function updateEntryField(id, fields) {
     if(entry) {
         Object.assign(entry, fields);
         entry.modifiedAt = new Date().toISOString();
-        await saveData();
+        
+        // [개선] 로컬 저장과 UI 갱신을 먼저 수행하여 즉시 반영되게 함
+        localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+        renderEntries();
+        renderTrash();
+        
+        // 동기화는 나중에 수행
+        await saveToDrive();
     }
 }
 
 export async function moveToTrash(id) {
-    if(confirm('휴지통으로 이동하시겠습니까?')) await updateEntryField(id, { isDeleted: true });
+    if(confirm('휴지통으로 이동하시겠습니까?')) {
+        const entry = state.entries.find(e => e.id === id);
+        if(entry) {
+            entry.isDeleted = true;
+            entry.modifiedAt = new Date().toISOString();
+            
+            // [개선] 즉시 화면에서 제거
+            localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+            renderEntries();
+            
+            // 백그라운드 동기화
+            saveToDrive();
+        }
+    }
 }
 
 export async function restoreEntry(id) {
-    await updateEntryField(id, { isDeleted: false });
-    renderTrash();
+    const entry = state.entries.find(e => e.id === id);
+    if(entry) {
+        entry.isDeleted = false;
+        entry.modifiedAt = new Date().toISOString();
+        
+        // [개선] 즉시 화면 갱신 (휴지통에서 제거, 목록에 추가)
+        localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+        renderTrash();
+        renderEntries();
+        
+        saveToDrive();
+    }
 }
 
 export async function permanentDelete(id) {
@@ -90,9 +121,13 @@ export async function permanentDelete(id) {
         if(index !== -1) {
             state.entries[index].isPurged = true;
             state.entries[index].modifiedAt = new Date().toISOString();
-            await saveData();
+            
+            // [개선] 즉시 휴지통 화면에서 제거
+            localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+            renderTrash();
+            
+            saveToDrive();
         }
-        renderTrash();
     }
 }
 
@@ -103,8 +138,12 @@ export async function emptyTrash() {
     if(confirm(`휴지통의 ${trashItems.length}개 항목을 모두 영구 삭제하시겠습니까?`)) {
         const now = new Date().toISOString();
         trashItems.forEach(e => { e.isPurged = true; e.modifiedAt = now; });
-        await saveData();
+        
+        // [개선] 즉시 휴지통 화면 비우기
+        localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
         renderTrash();
+        
+        await saveToDrive();
     }
 }
 
@@ -119,7 +158,10 @@ export function checkOldTrash() {
             }
         }
     });
-    if(changed) saveData();
+    if(changed) {
+        localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+        saveToDrive();
+    }
 }
 
 export async function duplicateEntry(id) {
@@ -132,5 +174,10 @@ export async function duplicateEntry(id) {
         timestamp: nowISO, modifiedAt: nowISO, isDeleted: false, isPurged: false
     };
     state.entries.unshift(newEntry);
-    await saveData();
+    
+    // [개선] 즉시 목록 갱신
+    localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+    renderEntries();
+    
+    saveToDrive();
 }

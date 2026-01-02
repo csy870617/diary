@@ -132,10 +132,14 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 
 /* 이미지 및 표 관련 */
 .editor-body img { max-width: 100%; height: auto; border-radius: 8px; margin: 10px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: inline-block; cursor: pointer; vertical-align: middle; }
-
-/* [추가] 표 스타일 */
 .editor-body table { width: 100%; border-collapse: collapse; margin: 15px 0; table-layout: fixed; cursor: pointer; }
 .editor-body table td { border: 1px solid var(--gray-200); padding: 8px; min-height: 34px; word-break: break-all; }
+
+/* [추가] 표 셀 선택 영역 하이라이트 스타일 */
+.editor-body table td.selected-cell {
+    background-color: rgba(59, 130, 246, 0.15) !important;
+    outline: 1px solid var(--selection-color) !important;
+}
 
 .img-selection-box { position: absolute; border: 2px solid var(--selection-color); box-sizing: border-box; pointer-events: none; z-index: 3000; display: none; }
 .img-selection-box.active { display: block; }

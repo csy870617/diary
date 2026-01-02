@@ -143,16 +143,19 @@ function setupUIListeners() {
 
     document.getElementById('font-selector')?.addEventListener('change', (e) => { applyFontStyle(e.target.value, state.currentFontSize); triggerAutoSave(); });
 
-    // 볼드, 이탤릭, 언더라인, 취소선, 정렬 버튼 리스너
     document.querySelectorAll('.tool-btn[data-cmd]').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            const cmd = btn.dataset.cmd;
-            if (cmd) formatDoc(cmd);
-        });
+        btn.addEventListener('click', (e) => { e.preventDefault(); const cmd = btn.dataset.cmd; if (cmd) formatDoc(cmd); });
     });
 
-    // 표 생성 관련 핸들러
+    // [내용 복사 버튼]
+    document.getElementById('btn-copy-text')?.addEventListener('click', () => {
+        const title = document.getElementById('edit-title').value;
+        const subtitle = document.getElementById('edit-subtitle').value;
+        const body = document.getElementById('editor-body').innerText;
+        const textToCopy = `${title}\n${subtitle ? subtitle + '\n' : ''}\n${body}`;
+        navigator.clipboard.writeText(textToCopy).then(() => { alert('내용이 클립보드에 복사되었습니다.'); }).catch(err => { console.error('복사 실패:', err); });
+    });
+
     const tableModal = document.getElementById('table-modal');
     document.getElementById('toolbar-table-btn')?.addEventListener('click', () => { tableModal.classList.remove('hidden'); });
     document.getElementById('btn-confirm-table')?.addEventListener('click', () => {
@@ -185,37 +188,34 @@ function setupUIListeners() {
     document.getElementById('toolbar-hilite-btn')?.addEventListener('click', (e) => { e.stopPropagation(); state.activeColorMode = 'hiliteColor'; openColorPalette(); });
 
     document.querySelectorAll('.color-dot').forEach(btn => { 
-        btn.onmousedown = (e) => { 
-            e.preventDefault(); if(btn.dataset.color) formatDoc(state.activeColorMode, btn.dataset.color);
-            document.getElementById('color-palette-popup')?.classList.add('hidden'); 
-        }; 
+        btn.onmousedown = (e) => { e.preventDefault(); if(btn.dataset.color) formatDoc(state.activeColorMode, btn.dataset.color); document.getElementById('color-palette-popup')?.classList.add('hidden'); }; 
     });
+
+    const removeColorBtn = document.getElementById('btn-remove-color');
+    if (removeColorBtn) {
+        removeColorBtn.onmousedown = (e) => {
+            e.preventDefault();
+            const resetValue = (state.activeColorMode === 'hiliteColor') ? 'transparent' : '#111827';
+            formatDoc(state.activeColorMode, resetValue);
+            document.getElementById('color-palette-popup')?.classList.add('hidden');
+        };
+    }
 
     document.getElementById('write-btn')?.addEventListener('click', () => openEditor(false));
-    
-    document.getElementById('close-write-btn')?.addEventListener('click', () => { 
-        saveEntry(); closeAllModals(true); 
-        if (navigator.onLine && window.gapi?.client?.getToken()) saveToDrive(); 
-    });
-
+    document.getElementById('close-write-btn')?.addEventListener('click', () => { saveEntry(); closeAllModals(true); if (navigator.onLine && window.gapi?.client?.getToken()) saveToDrive(); });
     document.getElementById('btn-readonly')?.addEventListener('click', () => toggleViewMode(state.currentViewMode === 'readOnly' ? 'default' : 'readOnly'));
     document.getElementById('btn-bookmode')?.addEventListener('click', () => toggleViewMode(state.currentViewMode === 'book' ? 'default' : 'book'));
-    
     document.getElementById('trash-btn')?.addEventListener('click', openTrashModal);
     document.getElementById('close-trash-btn')?.addEventListener('click', () => closeAllModals(true));
     document.getElementById('btn-empty-trash')?.addEventListener('click', emptyTrash);
-    
     document.getElementById('book-nav-left')?.addEventListener('click', () => turnPage(-1));
     document.getElementById('book-nav-right')?.addEventListener('click', () => turnPage(1));
-
     document.getElementById('page-indicator')?.addEventListener('click', (e) => {
         if (state.currentViewMode !== 'book') return;
         e.stopPropagation(); const sliderContainer = document.getElementById('book-slider-container');
         if (sliderContainer) sliderContainer.classList.toggle('hidden');
     });
-
     document.getElementById('book-page-slider')?.addEventListener('input', (e) => { jumpToPage(parseInt(e.target.value)); });
-
     document.getElementById('ctx-move')?.addEventListener('click', openMoveModal);
     document.getElementById('ctx-copy')?.addEventListener('click', () => { duplicateEntry(state.contextTargetId); document.getElementById('context-menu').classList.add('hidden'); });
     document.getElementById('ctx-delete')?.addEventListener('click', () => { moveToTrash(state.contextTargetId); document.getElementById('context-menu').classList.add('hidden'); });
