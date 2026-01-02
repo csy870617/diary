@@ -117,9 +117,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .meta-info-row { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 13px; color: var(--gray-500); font-family: var(--text-sans); }
 .write-category { color: var(--accent); font-weight: 600; }
 
-/* [수정] 헤더 중앙 정렬 지원을 위해 relative 추가 */
 .write-header { display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-bottom: 1px solid var(--gray-100); flex-shrink: 0; position: relative; }
-/* [추가] 모달 제목 중앙 정렬 클래스 */
 .modal-title-center { position: absolute; left: 50%; transform: translateX(-50%); font-weight: 600; font-size: 16px; pointer-events: none; }
 
 .header-actions { display: flex; gap: 10px; align-items: center; }
@@ -132,8 +130,13 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 #write-modal.mode-read-only .editor-container { padding-top: 40px; }
 #write-modal.mode-read-only .editor-title, #write-modal.mode-read-only .editor-subtitle { pointer-events: none; }
 
-/* 이미지 */
+/* 이미지 및 표 관련 */
 .editor-body img { max-width: 100%; height: auto; border-radius: 8px; margin: 10px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: inline-block; cursor: pointer; vertical-align: middle; }
+
+/* [추가] 표 스타일 */
+.editor-body table { width: 100%; border-collapse: collapse; margin: 15px 0; table-layout: fixed; cursor: pointer; }
+.editor-body table td { border: 1px solid var(--gray-200); padding: 8px; min-height: 34px; word-break: break-all; }
+
 .img-selection-box { position: absolute; border: 2px solid var(--selection-color); box-sizing: border-box; pointer-events: none; z-index: 3000; display: none; }
 .img-selection-box.active { display: block; }
 .resize-handle { position: absolute; width: 20px; height: 20px; background-color: white; border: 2px solid var(--selection-color); border-radius: 50%; pointer-events: auto; z-index: 3001; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
@@ -256,7 +259,6 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
 
-/* [추가] 맨 위로 가기 버튼 스타일 */
 .btn-scroll-top {
     position: fixed;
     bottom: 30px;
@@ -326,46 +328,12 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     .editor-container { padding: 20px 20px 100px; }
     .full-screen-modal { padding-top: var(--safe-top); padding-bottom: var(--safe-bottom); }
     
-    #write-modal.mode-book .editor-container { 
-        padding: 0 !important;
-        column-width: auto;
-        column-gap: 0 !important; 
-        height: 100% !important;
-        overflow-x: hidden !important; 
-        overflow-y: hidden !important;
-    }
-    #write-modal.mode-book .editor-body {
-        padding: 20px 20px 200px 20px; 
-    }
-    #write-modal.mode-book .editor-title,
-    #write-modal.mode-book .editor-subtitle {
-        padding: 0 20px;
-    }
-    #write-modal.mode-book .meta-info-row,
-    #write-modal.mode-book .divider {
-        margin-left: 20px;
-        margin-right: 20px;
-    }
+    #write-modal.mode-book .editor-container { padding: 0 !important; column-width: auto; column-gap: 0 !important; height: 100% !important; overflow-x: hidden !important; overflow-y: hidden !important; }
+    #write-modal.mode-book .editor-body { padding: 20px 20px 200px 20px; }
+    #write-modal.mode-book .editor-title, #write-modal.mode-book .editor-subtitle { padding: 0 20px; }
+    #write-modal.mode-book .meta-info-row, #write-modal.mode-book .divider { margin-left: 20px; margin-right: 20px; }
 }
 
-#btn-empty-trash {
-    font-size: 13px;
-    color: var(--danger);
-    font-weight: 600;
-    padding: 6px 12px;
-    border-radius: 6px;
-    background-color: #FEE2E2;
-    border: none;
-    cursor: pointer;
-    transition: background 0.2s;
-    font-family: var(--text-sans);
-    margin-left: auto;
-}
-
-#btn-empty-trash:hover {
-    background-color: #FECACA;
-}
-
-#btn-empty-trash:active {
-    background-color: #FCA5A5;
-}
+#btn-empty-trash { font-size: 13px; color: var(--danger); font-weight: 600; padding: 6px 12px; border-radius: 6px; background-color: #FEE2E2; border: none; cursor: pointer; transition: background 0.2s; font-family: var(--text-sans); margin-left: auto; }
+#btn-empty-trash:hover { background-color: #FECACA; }
+#btn-empty-trash:active { background-color: #FCA5A5; }

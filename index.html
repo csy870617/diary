@@ -105,6 +105,7 @@
                     <div class="font-size-controls">
                         <button class="tool-btn small" id="btn-global-size-down">가-</button>
                         <button class="tool-btn small" id="btn-global-size-up">가+</button>
+                        <button class="tool-btn" id="toolbar-table-btn" title="표 삽입"><i class="ph ph-table"></i></button>
                     </div>
                 </div>
                 <div class="toolbar-divider"></div>
@@ -172,6 +173,26 @@
                 <button class="color-dot" style="background-color: #BFDBFE;" data-color="#BFDBFE"></button>
                 <button class="color-dot" style="background-color: #E9D5FF;" data-color="#E9D5FF"></button>
                 <button class="color-dot" style="background-color: #FBCFE8;" data-color="#FBCFE8"></button>
+            </div>
+        </div>
+    </div>
+
+    <div id="table-modal" class="modal-overlay hidden">
+        <div class="simple-modal" style="width: 240px;">
+            <h3>표 삽입</h3>
+            <div style="display: flex; flex-direction: column; gap: 12px; margin: 20px 0;">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <label style="font-size: 14px; color: var(--gray-500);">행 (가로)</label>
+                    <input type="number" id="table-rows" value="3" min="1" max="20" style="width: 70px; padding: 6px; border: 1px solid var(--gray-200); border-radius: 6px; text-align: center;">
+                </div>
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <label style="font-size: 14px; color: var(--gray-500);">열 (세로)</label>
+                    <input type="number" id="table-cols" value="3" min="1" max="20" style="width: 70px; padding: 6px; border: 1px solid var(--gray-200); border-radius: 6px; text-align: center;">
+                </div>
+            </div>
+            <div class="modal-btns">
+                <button id="btn-confirm-table" class="primary-btn">만들기</button>
+                <button id="btn-cancel-table" class="cancel-btn">취소</button>
             </div>
         </div>
     </div>

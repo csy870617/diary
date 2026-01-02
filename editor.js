@@ -3,7 +3,7 @@ import { saveEntry } from './data.js';
 import { saveToDrive } from './drive.js';
 import { openModal } from './ui.js';
 
-let currentSelectedImg = null;
+let currentSelectedElement = null; // 이미지 또는 표
 let selectionBox = null;
 let resizeHandle = null;
 let deleteBtn = null;
@@ -14,7 +14,7 @@ let currentBookPageIndex = 0;
 let touchStartX = 0;          
 let wheelLockTimer = null;    
 
-async function triggerAutoSave() {
+export async function triggerAutoSave() {
     if (autoSaveTimer) clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(async () => {
         const editBody = document.getElementById('editor-body');
@@ -138,8 +138,14 @@ function setupBasicHandling() {
     if (!editorBody) return;
     editorBody.onclick = (e) => {
         if (!editorBody.isContentEditable) return;
-        if (e.target.tagName === 'IMG') { e.stopPropagation(); e.preventDefault(); selectImage(e.target); }
-        else hideImageSelection();
+        const target = e.target.closest('img, table');
+        if (target) {
+            e.stopPropagation();
+            e.preventDefault();
+            selectElement(target);
+        } else {
+            hideSelection();
+        }
     };
     editorBody.addEventListener('input', () => { updateSelectionBox(); triggerAutoSave(); });
     document.getElementById('edit-title')?.addEventListener('input', triggerAutoSave);
@@ -183,27 +189,17 @@ export function openEditor(isEdit, entryData) {
     toggleViewMode('default');
 }
 
-/**
- * [추가] 백그라운드 동기화 완료 후 현재 에디터 내용 갱신
- */
 export function refreshEditorContent() {
     const writeModal = document.getElementById('write-modal');
     if (writeModal.classList.contains('hidden') || !state.editingId) return;
-
-    // 최신 state에서 현재 편집중인 데이터 찾기
     const latestEntry = state.entries.find(e => e.id === state.editingId);
     if (!latestEntry) return;
-
     const editTitle = document.getElementById('edit-title');
     const editSubtitle = document.getElementById('edit-subtitle');
     const editBody = document.getElementById('editor-body');
-
-    // 사용자가 현재 타이핑 중이 아닐 때(Read Only 모드이거나 포커스가 없을 때)만 자동 갱신
     if (state.currentViewMode !== 'default' || document.activeElement !== editBody) {
         if (editTitle.value !== latestEntry.title) editTitle.value = latestEntry.title || '';
         if (editSubtitle.value !== latestEntry.subtitle) editSubtitle.value = latestEntry.subtitle || '';
-        
-        // 본문 내용이 다를 때만 갱신 (이미지 선택 상자 등 레이아웃 깨짐 방지)
         if (editBody.innerHTML !== latestEntry.body) {
             editBody.innerHTML = latestEntry.body || '';
             linkifyContents(editBody);
@@ -219,33 +215,20 @@ export function toggleViewMode(mode) {
     const editTitle = document.getElementById('edit-title');
     const editSubtitle = document.getElementById('edit-subtitle');
     const editorToolbar = document.getElementById('editor-toolbar');
-
     const wasBookMode = state.currentViewMode === 'book';
     const oldScrollTop = container ? container.scrollTop : 0;
     const oldHeight = container ? container.clientHeight : 0;
     const lastPageIndex = currentBookPageIndex;
-
     state.currentViewMode = mode;
-    
     const btnReadOnly = document.getElementById('btn-readonly');
     const btnBookMode = document.getElementById('btn-bookmode');
     if(btnReadOnly) btnReadOnly.classList.toggle('active', mode === 'readOnly');
     if(btnBookMode) btnBookMode.classList.toggle('active', mode === 'book');
-
-    if(container) { 
-        container.style.height = ''; 
-        container.style.overflow = ''; 
-        container.style.columnWidth = ''; 
-        container.style.columnGap = ''; 
-        container.scrollLeft = 0; 
-    }
-    
+    if(container) { container.style.height = ''; container.style.overflow = ''; container.style.columnWidth = ''; container.style.columnGap = ''; container.scrollLeft = 0; }
     writeModal.classList.remove('mode-read-only', 'mode-book');
     document.querySelectorAll('.book-nav, #page-indicator, #book-slider-container, #btn-scroll-top').forEach(el => el.classList.add('hidden'));
-    
-    hideImageSelection(); 
+    hideSelection(); 
     toggleBookEventListeners(false);
-
     if (mode === 'book') {
         editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false"; linkifyContents(editBody);
         writeModal.classList.add('mode-book'); 
@@ -259,31 +242,31 @@ export function toggleViewMode(mode) {
         editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false"; linkifyContents(editBody);
         writeModal.classList.add('mode-read-only'); 
         editorToolbar?.classList.add('collapsed');
-        if (wasBookMode && container) {
-            requestAnimationFrame(() => { container.scrollTop = lastPageIndex * oldHeight; });
-        }
+        if (wasBookMode && container) { requestAnimationFrame(() => { container.scrollTop = lastPageIndex * oldHeight; }); }
     } else {
         editTitle.readOnly = false; editSubtitle.readOnly = false; editBody.contentEditable = "true"; 
         editorToolbar?.classList.remove('collapsed');
-        if (wasBookMode && container) {
-            requestAnimationFrame(() => { container.scrollTop = lastPageIndex * oldHeight; });
-        }
+        if (wasBookMode && container) { requestAnimationFrame(() => { container.scrollTop = lastPageIndex * oldHeight; }); }
     }
 }
 
-function selectImage(img) { currentSelectedImg = img; createSelectionUI(); updateSelectionBox(); }
-function hideImageSelection() { currentSelectedImg = null; if (selectionBox) selectionBox.style.display = 'none'; if (resizeHandle) resizeHandle.style.display = 'none'; if (deleteBtn) deleteBtn.style.display = 'none'; if (resizeBtnGroup) resizeBtnGroup.style.display = 'none'; }
+function selectElement(el) { currentSelectedElement = el; createSelectionUI(); updateSelectionBox(); }
+function hideSelection() { currentSelectedElement = null; if (selectionBox) selectionBox.style.display = 'none'; if (resizeHandle) resizeHandle.style.display = 'none'; if (deleteBtn) deleteBtn.style.display = 'none'; if (resizeBtnGroup) resizeBtnGroup.style.display = 'none'; }
 function createSelectionUI() {
     if (!selectionBox) {
         selectionBox = document.createElement('div'); selectionBox.className = 'img-selection-box'; document.body.appendChild(selectionBox);
         resizeHandle = document.createElement('div'); resizeHandle.className = 'resize-handle se'; document.body.appendChild(resizeHandle);
         resizeHandle.onmousedown = (e) => startResize(e);
         deleteBtn = document.createElement('button'); deleteBtn.className = 'img-delete-btn'; deleteBtn.innerHTML = '<i class="ph ph-trash"></i> 삭제'; document.body.appendChild(deleteBtn);
-        deleteBtn.onclick = deleteSelectedImage;
+        deleteBtn.onclick = deleteSelectedElement;
         resizeBtnGroup = document.createElement('div'); resizeBtnGroup.className = 'img-resize-group';
         [25, 50, 75, 100].forEach(size => {
             const btn = document.createElement('button'); btn.className = 'img-resize-btn'; btn.innerText = size + '%';
-            btn.onclick = () => { if (currentSelectedImg) { currentSelectedImg.style.width = size + '%'; currentSelectedImg.style.height = 'auto'; updateSelectionBox(); triggerAutoSave(); } };
+            btn.onclick = () => { if (currentSelectedElement) { 
+                currentSelectedElement.style.width = size + '%'; 
+                currentSelectedElement.style.height = 'auto'; // 퍼센트 조정 시 세로는 자동 조정
+                updateSelectionBox(); triggerAutoSave(); 
+            } };
             resizeBtnGroup.appendChild(btn);
         });
         document.body.appendChild(resizeBtnGroup);
@@ -291,25 +274,72 @@ function createSelectionUI() {
     selectionBox.style.display = 'block'; resizeHandle.style.display = 'block'; deleteBtn.style.display = 'flex'; resizeBtnGroup.style.display = 'flex';
 }
 function updateSelectionBox() {
-    if (!currentSelectedImg || !selectionBox) return;
-    const rect = currentSelectedImg.getBoundingClientRect();
+    if (!currentSelectedElement || !selectionBox) return;
+    const rect = currentSelectedElement.getBoundingClientRect();
     const scrollTop = window.scrollY, scrollLeft = window.scrollX;
     selectionBox.style.top = (rect.top + scrollTop) + 'px'; selectionBox.style.left = (rect.left + scrollLeft) + 'px'; selectionBox.style.width = rect.width + 'px'; selectionBox.style.height = rect.height + 'px';
     resizeHandle.style.top = (rect.bottom + scrollTop - 10) + 'px'; resizeHandle.style.left = (rect.right + scrollLeft - 10) + 'px';
     deleteBtn.style.top = (rect.top + scrollTop - 40) + 'px'; deleteBtn.style.left = (rect.left + scrollLeft + rect.width / 2) + 'px';
     resizeBtnGroup.style.top = (rect.bottom + scrollTop + 10) + 'px'; resizeBtnGroup.style.left = (rect.left + scrollLeft + rect.width / 2) + 'px';
 }
-function deleteSelectedImage() { if (currentSelectedImg) { currentSelectedImg.remove(); hideImageSelection(); triggerAutoSave(); } }
-let isResizing = false, startX, startWidth;
-function startResize(e) { e.preventDefault(); isResizing = true; startX = e.clientX; startWidth = currentSelectedImg.clientWidth; document.addEventListener('mousemove', resizing); document.addEventListener('mouseup', stopResize); }
-function resizing(e) { if (!isResizing || !currentSelectedImg) return; const newWidth = startWidth + (e.clientX - startX); if (newWidth > 50) { currentSelectedImg.style.width = newWidth + 'px'; updateSelectionBox(); } }
+function deleteSelectedElement() { if (currentSelectedElement) { currentSelectedElement.remove(); hideSelection(); triggerAutoSave(); } }
+
+// 리사이징 변수 확장
+let isResizing = false, startX, startY, startWidth, startHeight;
+function startResize(e) { 
+    e.preventDefault(); 
+    isResizing = true; 
+    startX = e.clientX; 
+    startY = e.clientY;
+    startWidth = currentSelectedElement.clientWidth; 
+    startHeight = currentSelectedElement.clientHeight;
+    document.addEventListener('mousemove', resizing); 
+    document.addEventListener('mouseup', stopResize); 
+}
+
+// [수정] 가로/세로 동시 조정 로직
+function resizing(e) { 
+    if (!isResizing || !currentSelectedElement) return; 
+    const newWidth = startWidth + (e.clientX - startX); 
+    const newHeight = startHeight + (e.clientY - startY);
+    
+    if (newWidth > 50) { 
+        currentSelectedElement.style.width = newWidth + 'px'; 
+    } 
+    // 세로 조정 추가 (최소 높이 30px)
+    if (newHeight > 30) { 
+        currentSelectedElement.style.height = newHeight + 'px'; 
+    }
+    updateSelectionBox(); 
+}
+
 function stopResize() { isResizing = false; document.removeEventListener('mousemove', resizing); document.removeEventListener('mouseup', stopResize); triggerAutoSave(); }
 
 export function formatDoc(cmd, value = null) { document.execCommand(cmd, false, value); triggerAutoSave(); }
-export function applyFontStyle(f, s) { state.currentFontFamily = f; state.currentFontSize = s; const editBody = document.getElementById('editor-body'); if(editBody) { editBody.style.fontFamily = f; editBody.style.fontSize = (f==='Nanum Pen Script' ? s+4 : s) + 'px'; } }
+
+export function applyFontStyle(f, s) { 
+    state.currentFontFamily = f; 
+    state.currentFontSize = s; 
+    const targets = [document.getElementById('editor-body'), document.getElementById('edit-title'), document.getElementById('edit-subtitle')];
+    targets.forEach(el => { if(el) { el.style.fontFamily = f; el.style.fontSize = (f === 'Nanum Pen Script' ? s + 4 : s) + 'px'; } });
+}
+
 export function changeGlobalFontSize(delta) { 
     state.currentFontSize = Math.max(12, Math.min(60, state.currentFontSize + delta));
     applyFontStyle(state.currentFontFamily, state.currentFontSize); triggerAutoSave(); 
 }
 export function insertSticker(emoji) { document.execCommand('insertText', false, emoji); triggerAutoSave(); }
 export function insertImage(src) { document.execCommand('insertImage', false, src); triggerAutoSave(); }
+
+export function insertTable(rows, cols) {
+    let tableHtml = '<table style="width: 100%;"><tbody>';
+    for (let i = 0; i < rows; i++) {
+        tableHtml += '<tr>';
+        for (let j = 0; j < cols; j++) { tableHtml += '<td><br></td>'; }
+        tableHtml += '</tr>';
+    }
+    tableHtml += '</tbody></table><p><br></p>';
+    document.getElementById('editor-body').focus();
+    document.execCommand('insertHTML', false, tableHtml);
+    triggerAutoSave();
+}

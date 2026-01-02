@@ -1,7 +1,7 @@
 import { state, loadCategoriesFromLocal, saveCategoriesToLocal } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
 import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameCategoryAction, deleteCategoryAction, addNewCategory } from './ui.js';
-import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage } from './editor.js';
+import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, saveToDrive, syncFromDrive } from './drive.js';
 
@@ -40,16 +40,8 @@ function init() {
         }
     });
 
-    window.addEventListener('focus', () => { 
-        if (window.gapi?.client?.getToken()) syncFromDrive(); 
-    });
-
-    document.addEventListener('visibilitychange', () => { 
-        if (document.visibilityState === 'visible' && window.gapi?.client?.getToken()) {
-            syncFromDrive();
-        } 
-    });
-
+    window.addEventListener('focus', () => { if (window.gapi?.client?.getToken()) syncFromDrive(); });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && window.gapi?.client?.getToken()) syncFromDrive(); });
     window.addEventListener('online', () => syncFromDrive());
 
     setupListeners();
@@ -111,7 +103,7 @@ function setupListeners() {
         const sliderContainer = document.getElementById('book-slider-container');
         if (sliderContainer && !sliderContainer.classList.contains('hidden') && !sliderContainer.contains(e.target) && !e.target.closest('#page-indicator')) sliderContainer.classList.add('hidden');
 
-        ['context-menu', 'category-context-menu', 'color-palette-popup', 'sticker-palette'].forEach(id => {
+        ['context-menu', 'category-context-menu', 'color-palette-popup', 'sticker-palette', 'table-modal'].forEach(id => {
             const el = document.getElementById(id);
             if (el && !el.contains(e.target) && !e.target.closest('.tool-btn')) el.classList.add('hidden');
         });
@@ -146,6 +138,22 @@ function setupUIListeners() {
     document.getElementById('btn-global-size-up')?.addEventListener('click', () => changeGlobalFontSize(2));
     document.getElementById('btn-global-size-down')?.addEventListener('click', () => changeGlobalFontSize(-2));
 
+    const toolbarScrollArea = document.getElementById('toolbar-scroll-area');
+    if (toolbarScrollArea) { toolbarScrollArea.addEventListener('wheel', (e) => { if (e.deltaY !== 0) { e.preventDefault(); toolbarScrollArea.scrollLeft += e.deltaY; } }); }
+
+    document.getElementById('font-selector')?.addEventListener('change', (e) => { applyFontStyle(e.target.value, state.currentFontSize); triggerAutoSave(); });
+
+    // 표 생성 관련 핸들러
+    const tableModal = document.getElementById('table-modal');
+    document.getElementById('toolbar-table-btn')?.addEventListener('click', () => { tableModal.classList.remove('hidden'); });
+    document.getElementById('btn-confirm-table')?.addEventListener('click', () => {
+        const r = parseInt(document.getElementById('table-rows').value) || 3;
+        const c = parseInt(document.getElementById('table-cols').value) || 3;
+        insertTable(r, c);
+        tableModal.classList.add('hidden');
+    });
+    document.getElementById('btn-cancel-table')?.addEventListener('click', () => { tableModal.classList.add('hidden'); });
+
     document.getElementById('sticker-btn')?.addEventListener('click', (e) => { 
         e.stopPropagation(); const palette = document.getElementById('sticker-palette');
         if (palette) { palette.style.top = '110px'; palette.classList.toggle('hidden'); }
@@ -176,15 +184,9 @@ function setupUIListeners() {
 
     document.getElementById('write-btn')?.addEventListener('click', () => openEditor(false));
     
-    // [개선] 목록 버튼 클릭 시 즉시 화면을 닫고 백그라운드에서 동기화 수행
     document.getElementById('close-write-btn')?.addEventListener('click', () => { 
-        saveEntry(); // 로컬 저장은 동기적으로 실행 (매우 빠름)
-        closeAllModals(true); // UI 즉시 닫기
-        
-        // 동기화는 백그라운드에서 실행 (인터넷 연결 확인 포함)
-        if (navigator.onLine && window.gapi?.client?.getToken()) {
-            saveToDrive(); 
-        }
+        saveEntry(); closeAllModals(true); 
+        if (navigator.onLine && window.gapi?.client?.getToken()) saveToDrive(); 
     });
 
     document.getElementById('btn-readonly')?.addEventListener('click', () => toggleViewMode(state.currentViewMode === 'readOnly' ? 'default' : 'readOnly'));
