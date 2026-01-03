@@ -52,7 +52,6 @@ function init() {
 
     if (sharedData) {
         try {
-            // [최적화] 짧은 키 기반 데이터 복원
             const raw = JSON.parse(decodeURIComponent(atob(sharedData)));
             const entry = {
                 title: raw.t || raw.title || '제목 없음',
@@ -185,22 +184,18 @@ function setupUIListeners() {
         btn.addEventListener('click', (e) => { e.preventDefault(); const cmd = btn.dataset.cmd; if (cmd) formatDoc(cmd); });
     });
 
-    // [최적화] 공유하기 버튼: URL 길이 한계 극복을 위한 검사 로직 추가
+    // [최적화] 공유하기 버튼: URL 길이 한계 극복을 위한 압축 키 사용
     document.getElementById('btn-share')?.addEventListener('click', () => {
         const bodyHtml = document.getElementById('editor-body').innerHTML;
-        
-        // 이미지가 포함되어 있는지 검사 (Base64 이미지는 URL을 너무 길게 만듬)
         if (bodyHtml.includes('src="data:image')) {
-            alert("이미지가 포함된 글은 URL 공유가 불가능합니다. 이미지를 제거하거나 텍스트 위주로 공유해주세요.");
+            alert("이미지가 포함된 글은 URL 공유가 불가능합니다. 우측 하단의 다운로드 버튼(PDF)을 이용해 공유해주세요.");
             return;
         }
 
         const title = document.getElementById('edit-title').value;
-        const subtitle = document.getElementById('edit-subtitle').value;
-        
         const entryData = {
             t: title || '제목 없음',
-            s: subtitle || '',
+            s: document.getElementById('edit-subtitle').value || '',
             b: bodyHtml,
             d: new Date().toLocaleDateString('ko-KR'),
             f: state.currentFontFamily,
@@ -210,21 +205,28 @@ function setupUIListeners() {
         try {
             const encodedData = btoa(unescape(encodeURIComponent(JSON.stringify(entryData))));
             const shareUrl = `${window.location.origin}${window.location.pathname}?share=${encodedData}`;
-            
-            // 일반적인 브라우저/앱의 안전한 URL 길이는 약 2000~4000자입니다.
-            if (shareUrl.length > 4000) {
-                alert("내용이 너무 길어 공유 링크를 생성할 수 없습니다. 내용을 조금 줄여주세요.");
-                return;
-            }
+            if (shareUrl.length > 4000) { alert("내용이 너무 길어 공유 링크를 생성할 수 없습니다."); return; }
+            if (navigator.share) { navigator.share({ title: '신앙일지 공유', text: `${title}`, url: shareUrl }).catch(console.error); } 
+            else { navigator.clipboard.writeText(shareUrl).then(() => { alert('공유 링크가 클립보드에 복사되었습니다.'); }); }
+        } catch (e) { alert("공유 링크 생성 실패"); }
+    });
 
-            if (navigator.share) {
-                navigator.share({ title: '신앙일지 공유', text: `${title}`, url: shareUrl }).catch(console.error);
-            } else {
-                navigator.clipboard.writeText(shareUrl).then(() => { alert('공유 링크가 복사되었습니다.'); });
-            }
-        } catch (e) {
-            alert("공유 링크 생성 중 오류가 발생했습니다.");
-        }
+    // [신규] PDF 다운로드 버튼 로직
+    document.getElementById('btn-download')?.addEventListener('click', () => {
+        const element = document.getElementById('editor-container');
+        const title = document.getElementById('edit-title').value || '신앙일지';
+        
+        // PDF 변환 옵션 설정
+        const opt = {
+            margin: 10,
+            filename: `${title}.pdf`,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2, useCORS: true },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        };
+
+        // 변환 실행 전 로딩 상태 표시 (원할 경우 추가)
+        html2pdf().set(opt).from(element).save();
     });
 
     document.getElementById('toolbar-link-btn')?.addEventListener('click', () => { createHyperlink(); });

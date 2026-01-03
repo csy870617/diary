@@ -133,13 +133,13 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 /* 이미지 및 표 관련 */
 .editor-body img { max-width: 100%; height: auto; border-radius: 8px; margin: 10px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: inline-block; cursor: pointer; vertical-align: middle; }
 
-/* [수정] 표 슬라이드 박스 및 스크롤 바 설정 */
+/* [수정] 표 슬라이드 박스 및 너비 설정 */
 .table-wrapper { 
     width: 100%; 
     overflow-x: auto; 
     -webkit-overflow-scrolling: touch; 
     margin: 15px 0;
-    padding-bottom: 10px; /* 스크롤바 공간 */
+    padding-bottom: 10px; 
 }
 
 /* 표 스크롤바 디자인 (PC 전용) */
@@ -148,8 +148,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .table-wrapper::-webkit-scrollbar-thumb { background: var(--gray-400); border-radius: 10px; }
 
 .editor-body table { 
-    width: auto; /* 고정 너비 방지 */
-    min-width: 100%; /* 기본은 꽉 차게 */
+    width: 100%; /* [변경] 기본 시작 너비를 스마트폰 가로 폭으로 설정 */
     border-collapse: collapse; 
     table-layout: fixed; 
     cursor: pointer; 
