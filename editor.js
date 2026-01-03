@@ -209,11 +209,14 @@ function setupBasicHandling() {
     const editorContainer = document.getElementById('editor-container');
     if (!editorBody) return;
 
-    // [핀포인트 수정] 붙여넣기 시 표 구조 제거 로직 추가
+    // [핀포인트 수정] 붙여넣기 시 외부 스타일을 제거하고 현재 에디터 스타일을 상속받도록 수정
     editorBody.onpaste = (e) => {
+        e.preventDefault();
+        // 1. 우선 HTML 데이터가 있는지 확인 (표가 포함된 경우를 대비)
         const html = e.clipboardData.getData('text/html');
+        
         if (html && html.includes('<table')) {
-            e.preventDefault();
+            // 기존의 표 내용만 추출하는 로직 유지
             const parser = new DOMParser();
             const doc = parser.parseFromString(html, 'text/html');
             const cells = doc.querySelectorAll('td');
@@ -226,9 +229,13 @@ function setupBasicHandling() {
             } else {
                 document.execCommand('insertText', false, e.clipboardData.getData('text/plain'));
             }
-            recordHistory();
-            triggerAutoSave();
+        } else {
+            // 일반 글자일 경우 순수 텍스트(Plain Text)만 가져와서 삽입 (현재 스타일 강제 상속)
+            const text = e.clipboardData.getData('text/plain');
+            document.execCommand('insertText', false, text);
         }
+        recordHistory();
+        triggerAutoSave();
     };
 
     // 표 테두리 감지
@@ -236,12 +243,10 @@ function setupBasicHandling() {
         if (!editorBody.isContentEditable || isColDragging || isRowDragging) return;
         const td = e.target.closest('td');
         if (!td) return;
-
         const rect = td.getBoundingClientRect();
         const padding = 10;
         const nearRight = (e.clientX > rect.right - padding);
         const nearBottom = (e.clientY > rect.bottom - padding);
-
         if (nearRight) td.style.cursor = 'col-resize';
         else if (nearBottom) td.style.cursor = 'row-resize';
         else td.style.cursor = 'text';
@@ -250,7 +255,6 @@ function setupBasicHandling() {
     editorBody.onmousedown = (e) => {
         if (!editorBody.isContentEditable) return;
         const td = e.target.closest('td');
-        
         if (td) {
             if (td.style.cursor === 'col-resize') {
                 isColDragging = true; resizeTargetTd = td; startX = e.clientX; startW = td.offsetWidth; e.preventDefault(); return;
@@ -391,7 +395,7 @@ function setupBasicHandling() {
         updateSelectionBox(); triggerAutoSave(); 
     });
     
-    // [핀포인트 수정] 에디터 및 표 개별 슬라이더(table-wrapper) 스크롤 감지 시 버튼 위치 실시간 동기화
+    // 에디터 및 표 개별 슬라이더(table-wrapper) 스크롤 감지 시 버튼 위치 실시간 동기화
     const syncButtons = () => { if (currentSelectedElement) updateSelectionBox(); };
     editorContainer?.addEventListener('scroll', syncButtons);
     editorBody.addEventListener('scroll', (e) => {
@@ -552,7 +556,6 @@ export function changeGlobalFontSize(delta) { state.currentFontSize = Math.max(1
 export function insertSticker(emoji) { recordHistory(); document.execCommand('insertText', false, emoji); triggerAutoSave(); }
 export function insertImage(src) { recordHistory(); document.execCommand('insertImage', false, src); triggerAutoSave(); }
 
-// [핀포인트 수정] 표 삽입 시 초기 너비를 스마트폰 폭(100%)으로 맞추고 슬라이더 박스로 감쌈
 export function insertTable(rows, cols) {
     recordHistory();
     let tableHtml = '<div class="table-wrapper"><table style="width: 100%; table-layout: fixed;"><tbody>';
