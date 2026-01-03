@@ -6,10 +6,12 @@
     <meta name="referrer" content="origin"> 
     
     <title>신앙일지 | Faith Log</title>
-    <link rel="stylesheet" href="style.css?v=3.6">
+    <link rel="stylesheet" href="style.css?v=3.7">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://apis.google.com/js/api.js"></script>
@@ -86,6 +88,9 @@
                 </button>
                 <button id="btn-share" class="icon-action-btn" title="공유하기">
                     <i class="ph ph-share-network"></i>
+                </button>
+                <button id="btn-download" class="icon-action-btn" title="PDF 저장">
+                    <i class="ph ph-download-simple"></i>
                 </button>
             </div>
         </div>
@@ -203,7 +208,7 @@
                 </div>
                 <p style="font-size:14px; color:#666; margin-bottom:30px; line-height:1.6;">'FaithLog' 폴더에 데이터가 저장됩니다.<br>구글 정책으로 동기화는 페이지 종료<br>1시간 후 자동 로그아웃됩니다.</p>
                 <button id="google-login-btn" class="btn-login-submit" style="background:#4285F4; display:flex; align-items:center; justify-content:center; gap:10px;">
-                   <i class="ph ph-google-logo" style="font-size:20px; color:white;"></i> 구글로 계속하기
+                    <i class="ph ph-google-logo" style="font-size:20px; color:white;"></i> 구글로 계속하기
                 </button>
             </div>
         </div>
@@ -237,6 +242,7 @@
         <button class="ctx-item danger" id="ctx-cat-delete"><i class="ph ph-trash"></i> 주제 삭제</button>
     </div>
 
-    <script type="module" src="script.js?v=3.0"></script>
+    <div id="modal-overlay" class="modal-overlay hidden"></div>
+    <script type="module" src="script.js?v=3.1"></script>
 </body>
 </html>
