@@ -54,7 +54,6 @@ export async function triggerAutoSave() {
     }, 2000); 
 }
 
-// 책 모드 관련 함수들
 function handleBookWheel(e) {
     if (state.currentViewMode !== 'book') return;
     e.preventDefault(); e.stopPropagation();
@@ -209,14 +208,11 @@ function setupBasicHandling() {
     const editorContainer = document.getElementById('editor-container');
     if (!editorBody) return;
 
-    // [핀포인트 수정] 붙여넣기 시 외부 스타일을 제거하고 현재 에디터 스타일을 상속받도록 수정
+    // [수정] 붙여넣기 시 외부 스타일 제거 로직 (Plain Text 강제)
     editorBody.onpaste = (e) => {
         e.preventDefault();
-        // 1. 우선 HTML 데이터가 있는지 확인 (표가 포함된 경우를 대비)
         const html = e.clipboardData.getData('text/html');
-        
         if (html && html.includes('<table')) {
-            // 기존의 표 내용만 추출하는 로직 유지
             const parser = new DOMParser();
             const doc = parser.parseFromString(html, 'text/html');
             const cells = doc.querySelectorAll('td');
@@ -230,7 +226,6 @@ function setupBasicHandling() {
                 document.execCommand('insertText', false, e.clipboardData.getData('text/plain'));
             }
         } else {
-            // 일반 글자일 경우 순수 텍스트(Plain Text)만 가져와서 삽입 (현재 스타일 강제 상속)
             const text = e.clipboardData.getData('text/plain');
             document.execCommand('insertText', false, text);
         }
@@ -395,7 +390,6 @@ function setupBasicHandling() {
         updateSelectionBox(); triggerAutoSave(); 
     });
     
-    // 에디터 및 표 개별 슬라이더(table-wrapper) 스크롤 감지 시 버튼 위치 실시간 동기화
     const syncButtons = () => { if (currentSelectedElement) updateSelectionBox(); };
     editorContainer?.addEventListener('scroll', syncButtons);
     editorBody.addEventListener('scroll', (e) => {
@@ -493,28 +487,16 @@ function createSelectionUI() {
 function updateSelectionBox() {
     if (!currentSelectedElement || !selectionBox) return;
     const rect = currentSelectedElement.getBoundingClientRect(), scrollTop = window.scrollY, scrollLeft = window.scrollX;
-    
-    selectionBox.style.top = (rect.top + scrollTop) + 'px'; 
-    selectionBox.style.left = (rect.left + scrollLeft) + 'px'; 
-    selectionBox.style.width = rect.width + 'px'; 
-    selectionBox.style.height = rect.height + 'px';
-    
-    resizeHandle.style.top = (rect.bottom + scrollTop - 10) + 'px'; 
-    resizeHandle.style.left = (rect.right + scrollLeft - 10) + 'px';
-
+    selectionBox.style.top = (rect.top + scrollTop) + 'px'; selectionBox.style.left = (rect.left + scrollLeft) + 'px'; selectionBox.style.width = rect.width + 'px'; selectionBox.style.height = rect.height + 'px';
+    resizeHandle.style.top = (rect.bottom + scrollTop - 10) + 'px'; resizeHandle.style.left = (rect.right + scrollLeft - 10) + 'px';
     const centerX = rect.left + scrollLeft + rect.width / 2;
     if (currentSelectedElement.tagName === 'TABLE') {
-        tableControlGroup.style.top = (rect.bottom + scrollTop + 15) + 'px';
-        tableControlGroup.style.left = centerX + 'px';
-        resizeBtnGroup.style.top = (rect.bottom + scrollTop + 55) + 'px';
-        resizeBtnGroup.style.left = centerX + 'px';
-        deleteBtn.style.top = (rect.bottom + scrollTop + 95) + 'px';
-        deleteBtn.style.left = centerX + 'px';
+        tableControlGroup.style.top = (rect.bottom + scrollTop + 15) + 'px'; tableControlGroup.style.left = centerX + 'px';
+        resizeBtnGroup.style.top = (rect.bottom + scrollTop + 55) + 'px'; resizeBtnGroup.style.left = centerX + 'px';
+        deleteBtn.style.top = (rect.bottom + scrollTop + 95) + 'px'; deleteBtn.style.left = centerX + 'px';
     } else {
-        resizeBtnGroup.style.top = (rect.bottom + scrollTop + 15) + 'px';
-        resizeBtnGroup.style.left = centerX + 'px';
-        deleteBtn.style.top = (rect.bottom + scrollTop + 55) + 'px';
-        deleteBtn.style.left = centerX + 'px';
+        resizeBtnGroup.style.top = (rect.bottom + scrollTop + 15) + 'px'; resizeBtnGroup.style.left = centerX + 'px';
+        deleteBtn.style.top = (rect.bottom + scrollTop + 55) + 'px'; deleteBtn.style.left = centerX + 'px';
     }
 }
 
@@ -532,14 +514,72 @@ export function deleteColumn() { const table = currentSelectedElement; if (!tabl
 
 export function createHyperlink() { const selection = window.getSelection(); if (selection.rangeCount > 0 && selection.toString().length > 0) { const url = prompt("연결할 주소(URL)를 입력하세요:", "https://"); if (url && url !== "https://") { recordHistory(); document.execCommand('createLink', false, url); const anchor = selection.anchorNode.parentElement; if (anchor && anchor.tagName === 'A') { anchor.target = '_blank'; anchor.style.color = '#2563EB'; anchor.style.textDecoration = 'underline'; anchor.style.cursor = 'pointer'; } triggerAutoSave(); } } else { alert("링크를 걸 문구를 먼저 드래그하여 선택해주세요."); } }
 
+// [수정] 되돌리기 기능 개선
 export function formatDoc(cmd, value = null) { 
     const editor = document.getElementById('editor-body'); if (!editor) return;
-    if (cmd === 'undo') { if (undoStack.length > 0) { redoStack.push(editor.innerHTML); editor.innerHTML = undoStack.pop(); triggerAutoSave(); return; } else { document.execCommand('undo', false, null); return; } }
-    if (cmd === 'redo') { if (redoStack.length > 0) { undoStack.push(editor.innerHTML); editor.innerHTML = redoStack.pop(); triggerAutoSave(); return; } else { document.execCommand('redo', false, null); return; } }
-    recordHistory(); if (!document.activeElement.closest('#editor-body')) editor.focus();
+    
+    // 구조적 변경이 아닌 일반 텍스트 변경(Bold 등) 시 Redo 스택 초기화
+    if (cmd !== 'undo' && cmd !== 'redo') { redoStack = []; }
+
+    if (cmd === 'undo') {
+        // 커스텀 스택에 기록이 있다면 사용 (표/이미지 변경 등)
+        if (undoStack.length > 0) {
+            redoStack.push(editor.innerHTML); 
+            editor.innerHTML = undoStack.pop(); 
+            triggerAutoSave(); return;
+        } else { 
+            // 커스텀 기록이 없으면 브라우저 기본 undo 실행
+            document.execCommand('undo', false, null); return; 
+        }
+    }
+    if (cmd === 'redo') {
+        if (redoStack.length > 0) {
+            undoStack.push(editor.innerHTML);
+            editor.innerHTML = redoStack.pop();
+            triggerAutoSave(); return;
+        } else { document.execCommand('redo', false, null); return; }
+    }
+
+    recordHistory(); 
+    if (!document.activeElement.closest('#editor-body')) editor.focus();
     const selectedCells = document.querySelectorAll('td.selected-cell');
-    if (selectedCells.length > 0) { selectedCells.forEach(cell => { const range = document.createRange(); range.selectNodeContents(cell); const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range); document.execCommand(cmd, false, value); }); } 
-    else { document.execCommand(cmd, false, value); }
+    if (selectedCells.length > 0) {
+        selectedCells.forEach(cell => {
+            const range = document.createRange(); range.selectNodeContents(cell);
+            const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+            document.execCommand(cmd, false, value);
+        });
+    } else { document.execCommand(cmd, false, value); }
+    triggerAutoSave(); 
+}
+
+// [신규] 부분 글자 크기 조정 로직
+export function changeGlobalFontSize(delta) {
+    const selection = window.getSelection();
+    
+    // 1. 글자를 드래그해서 선택한 경우 (부분 조정)
+    if (selection.rangeCount > 0 && selection.toString().length > 0) {
+        recordHistory();
+        // 브라우저의 임시 글자 크기 명령 적용 (1-7)
+        document.execCommand('fontSize', false, '7');
+        const fontEls = document.querySelectorAll('font[size="7"]');
+        
+        fontEls.forEach(el => {
+            // 부모 span에서 현재 크기를 찾아오거나 없으면 기본 크기 사용
+            const parentSpan = el.closest('span[style*="font-size"]');
+            let currentSize = parentSpan ? parseInt(parentSpan.style.fontSize) : state.currentFontSize;
+            
+            const newSize = Math.max(8, Math.min(100, currentSize + delta));
+            const span = document.createElement('span');
+            span.style.fontSize = newSize + 'px';
+            span.innerHTML = el.innerHTML;
+            el.parentNode.replaceChild(span, el);
+        });
+    } else {
+        // 2. 아무것도 선택하지 않은 경우 (전체 기본 크기 조정)
+        state.currentFontSize = Math.max(12, Math.min(60, state.currentFontSize + delta)); 
+        applyFontStyle(state.currentFontFamily, state.currentFontSize); 
+    }
     triggerAutoSave(); 
 }
 
@@ -552,21 +592,6 @@ export function applyFontStyle(f, s) {
     if(subtitle) { subtitle.style.fontFamily = f; subtitle.style.fontSize = Math.floor(baseSize * 1.3) + 'px'; }
 }
 
-export function changeGlobalFontSize(delta) { state.currentFontSize = Math.max(12, Math.min(60, state.currentFontSize + delta)); applyFontStyle(state.currentFontFamily, state.currentFontSize); triggerAutoSave(); }
 export function insertSticker(emoji) { recordHistory(); document.execCommand('insertText', false, emoji); triggerAutoSave(); }
 export function insertImage(src) { recordHistory(); document.execCommand('insertImage', false, src); triggerAutoSave(); }
-
-export function insertTable(rows, cols) {
-    recordHistory();
-    let tableHtml = '<div class="table-wrapper"><table style="width: 100%; table-layout: fixed;"><tbody>';
-    for (let i = 0; i < rows; i++) { 
-        tableHtml += '<tr>'; 
-        for (let j = 0; j < cols; j++) { tableHtml += '<td><br></td>'; } 
-        tableHtml += '</tr>'; 
-    }
-    tableHtml += '</tbody></table></div><p><br></p>';
-    const editor = document.getElementById('editor-body'); 
-    editor.focus(); 
-    document.execCommand('insertHTML', false, tableHtml); 
-    triggerAutoSave();
-}
+export function insertTable(rows, cols) { recordHistory(); let tableHtml = '<div class="table-wrapper"><table style="width: 100%; table-layout: fixed;"><tbody>'; for (let i = 0; i < rows; i++) { tableHtml += '<tr>'; for (let j = 0; j < cols; j++) { tableHtml += '<td><br></td>'; } tableHtml += '</tr>'; } tableHtml += '</tbody></table></div><p><br></p>'; const editor = document.getElementById('editor-body'); editor.focus(); document.execCommand('insertHTML', false, tableHtml); triggerAutoSave(); }
