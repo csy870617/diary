@@ -12,15 +12,15 @@ let lastCloudModifiedTime = null;
 let syncTimeoutTimer = null; 
 
 /**
- * 토큰 유효성 검사 및 자동 갱신
- * [개선] 자동 저장 시 팝업이 뜨지 않도록 'silent' 모드를 강화했습니다.
+ * [핵심 수정] 토큰 유효성 검사 및 자동 갱신 로직 강화
+ * 동기화 직전에 호출되어 토큰이 만료되었으면 조용히 새 토큰을 받아옵니다.
  */
 async function ensureValidToken(isAutoSave = false) {
     const storedToken = localStorage.getItem('faith_token');
     const storedExp = localStorage.getItem('faith_token_exp');
     const now = Date.now();
 
-    // 1. 토큰이 유효하고 만료까지 5분 이상 남았다면 즉시 통과
+    // 1. 토큰이 있고 만료까지 5분 이상 넉넉히 남았다면 그대로 사용
     if (storedToken && storedExp && now < (parseInt(storedExp) - 300000)) {
         if (!gapi.client.getToken()) {
             gapi.client.setToken({ access_token: storedToken });
@@ -28,36 +28,41 @@ async function ensureValidToken(isAutoSave = false) {
         return true;
     }
 
-    // 2. 만료되었거나 임박한 경우 조용히 갱신 시도
-    // 자동 저장 중일 때는 사용자를 방해하지 않기 위해 팝업을 원천 차단합니다.
+    // 2. 토큰이 없거나 만료되었다면 새로 요청 (사용자 상호작용 없이 조용히 시도)
     return new Promise((resolve) => {
         try {
+            if (!tokenClient) {
+                console.error("Token Client가 초기화되지 않았습니다.");
+                resolve(false);
+                return;
+            }
+
             tokenClient.callback = async (resp) => {
                 if (resp.error) {
-                    console.warn("인증 갱신 실패 (조용히 처리됨):", resp.error);
+                    console.warn("인증 갱신 실패:", resp.error);
+                    // 자동 저장 중이 아닐 때만 로그아웃 처리하거나 알림
+                    if (!isAutoSave) {
+                        localStorage.removeItem('faith_token');
+                        localStorage.removeItem('faith_token_exp');
+                    }
                     resolve(false);
                     return;
                 }
+                
+                // 새 토큰 저장
                 const expiresIn = resp.expires_in || 3599; 
                 const expTime = Date.now() + (expiresIn * 1000);
                 localStorage.setItem('faith_token', resp.access_token);
                 localStorage.setItem('faith_token_exp', expTime);
                 gapi.client.setToken({ access_token: resp.access_token });
+                console.log("구글 인증 토큰이 성공적으로 갱신되었습니다.");
                 resolve(true);
             };
 
-            // prompt: '' 는 팝업 없이 세션을 연장합니다.
-            // 만약 브라우저 설정으로 인해 팝업이 필요해지는 상황이라면, 
-            // 자동 저장 중(isAutoSave=true)에는 요청 자체를 하지 않고 취소합니다.
-            if (isAutoSave && (!storedToken || now >= parseInt(storedExp))) {
-                console.log("자동 저장 중 세션 만료: 사용자 방해 방지를 위해 동기화 건너뜀");
-                resolve(false);
-                return;
-            }
-
+            // prompt: '' 옵션은 이미 로그인된 경우 팝업 없이 토큰만 받아옵니다.
             tokenClient.requestAccessToken({ prompt: '' });
         } catch (err) {
-            console.error("Token Client Error", err);
+            console.error("Token Refresh Error:", err);
             resolve(false);
         }
     });
@@ -69,12 +74,6 @@ export function initGoogleDrive(callback) {
         return;
     }
 
-    const storedToken = localStorage.getItem('faith_token');
-    const storedExp = localStorage.getItem('faith_token_exp');
-    if (storedToken && storedExp && Date.now() < (parseInt(storedExp) - 300000)) {
-        if(callback) callback(true);
-    }
-
     gapi.load('client', async () => {
         try {
             await gapi.client.init({
@@ -83,7 +82,10 @@ export function initGoogleDrive(callback) {
             });
             gapiInited = true;
             
+            const storedToken = localStorage.getItem('faith_token');
+            const storedExp = localStorage.getItem('faith_token_exp');
             const now = Date.now();
+
             if (storedToken && storedExp && now < (parseInt(storedExp) - 60000)) {
                 gapi.client.setToken({ access_token: storedToken });
                 state.currentUser = { name: "Google User", provider: "google" };
@@ -156,19 +158,19 @@ export async function saveToDrive() {
     if (!localStorage.getItem('faith_token')) return; 
     if (isSyncing) { pendingSync = true; return; }
 
-    // [중요] 저장 시에는 isAutoSave 파라미터를 true로 전달하여 팝업 발생을 억제합니다.
+    // [중요] 저장 시작 전 토큰 유효성 강제 확인 및 자동 갱신
     const isValid = await ensureValidToken(true);
-    if (!isValid) return;
+    if (!isValid) {
+        console.warn("토큰이 유효하지 않아 클라우드 동기화를 중단합니다.");
+        return;
+    }
 
     isSyncing = true;
     toggleSpinners(true);
 
     if (syncTimeoutTimer) clearTimeout(syncTimeoutTimer);
     syncTimeoutTimer = setTimeout(() => {
-        if (isSyncing) {
-            isSyncing = false;
-            toggleSpinners(false);
-        }
+        if (isSyncing) { isSyncing = false; toggleSpinners(false); }
     }, 30000);
 
     try {
@@ -207,12 +209,12 @@ export async function saveToDrive() {
         }
 
     } catch (err) {
-        if (err.status === 401 || err.status === 403) {
-            localStorage.removeItem('faith_token_exp'); 
-            isSyncing = false; 
-            // 401 에러 시에도 팝업 없이 재시도하도록 설정
-            return await saveToDrive(); 
+        // 토큰 만료 에러(401) 발생 시 토큰 정보 삭제 후 재시도 유도
+        if (err.status === 401) {
+            localStorage.removeItem('faith_token_exp');
+            console.log("세션 만료 감지, 다음 동기화 시 갱신을 시도합니다.");
         }
+        console.error("구글 드라이브 저장 실패:", err);
     } finally {
         if (syncTimeoutTimer) clearTimeout(syncTimeoutTimer);
         isSyncing = false;

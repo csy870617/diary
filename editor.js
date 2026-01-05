@@ -226,23 +226,86 @@ function setupBasicHandling() {
     const editorContainer = document.getElementById('editor-container');
     if (!editorBody) return;
 
+    // [핀포인트 수정] 표 복사 로직 추가 (격자 구조 유지)
+    editorBody.oncopy = (e) => {
+        const selectedCells = document.querySelectorAll('td.selected-cell');
+        if (selectedCells.length > 0) {
+            e.preventDefault();
+            const startTable = selectedCells[0].closest('table');
+            let minR = 999, maxR = 0, minC = 999, maxC = 0;
+            selectedCells.forEach(td => {
+                const r = td.parentElement.rowIndex, c = td.cellIndex;
+                minR = Math.min(minR, r); maxR = Math.max(maxR, r);
+                minC = Math.min(minC, c); maxC = Math.max(maxC, c);
+            });
+
+            let copyHtml = "<table>";
+            for (let i = minR; i <= maxR; i++) {
+                copyHtml += "<tr>";
+                for (let j = minC; j <= maxC; j++) {
+                    const td = startTable.rows[i].cells[j];
+                    const content = td ? td.innerHTML : "";
+                    copyHtml += `<td>${content}</td>`;
+                }
+                copyHtml += "</tr>";
+            }
+            copyHtml += "</table>";
+            
+            e.clipboardData.setData('text/html', copyHtml);
+            // 일반 텍스트 복사 대비용 (탭으로 구분)
+            let copyPlainText = "";
+            for (let i = minR; i <= maxR; i++) {
+                let rowText = [];
+                for (let j = minC; j <= maxC; j++) {
+                    rowText.push(startTable.rows[i].cells[j]?.innerText || "");
+                }
+                copyPlainText += rowText.join("\t") + "\n";
+            }
+            e.clipboardData.setData('text/plain', copyPlainText);
+        }
+    };
+
+    // [핀포인트 수정] 붙여넣기 로직 강화 (멀티 셀 분산 지원)
     editorBody.onpaste = (e) => {
         e.preventDefault();
         const html = e.clipboardData.getData('text/html');
+        const targetTd = e.target.closest('td');
+
         if (html && html.includes('<table')) {
             const parser = new DOMParser();
             const doc = parser.parseFromString(html, 'text/html');
-            const cells = doc.querySelectorAll('td');
-            let combinedContent = "";
-            if (cells.length > 0) {
+            const sourceRows = doc.querySelectorAll('tr');
+
+            // 타겟이 표 내부 한 칸일 때 (멀티 셀 분산 붙여넣기 실행)
+            if (targetTd && sourceRows.length > 0) {
+                recordHistory();
+                const targetTable = targetTd.closest('table');
+                const startR = targetTd.parentElement.rowIndex;
+                const startC = targetTd.cellIndex;
+
+                sourceRows.forEach((tr, rIdx) => {
+                    const targetRow = targetTable.rows[startR + rIdx];
+                    if (targetRow) {
+                        const sourceCells = tr.querySelectorAll('td');
+                        sourceCells.forEach((td, cIdx) => {
+                            const finalTargetTd = targetRow.cells[startC + cIdx];
+                            if (finalTargetTd) {
+                                finalTargetTd.innerHTML = td.innerHTML;
+                            }
+                        });
+                    }
+                });
+            } else {
+                // 표 바깥에 붙여넣을 때는 기존의 내용만 추출하는 로직 유지
+                const cells = doc.querySelectorAll('td');
+                let combinedContent = "";
                 cells.forEach((cell, idx) => {
                     combinedContent += cell.innerHTML + (idx < cells.length - 1 ? " " : "");
                 });
                 document.execCommand('insertHTML', false, combinedContent);
-            } else {
-                document.execCommand('insertText', false, e.clipboardData.getData('text/plain'));
             }
         } else {
+            // 일반 텍스트 붙여넣기 (Plain Text 강제)
             const text = e.clipboardData.getData('text/plain');
             document.execCommand('insertText', false, text);
         }
@@ -518,34 +581,15 @@ function deleteSelectedElement() { if (currentSelectedElement) { currentSelected
 
 let isResizing = false, startX2, startY2, startWidth2, startHeight2;
 function startResize(e) { 
-    e.preventDefault(); 
-    isResizing = true; 
-    startX2 = e.clientX; 
-    startY2 = e.clientY; 
-    startWidth2 = currentSelectedElement.clientWidth; 
-    startHeight2 = currentSelectedElement.clientHeight; 
-    // [신규] 리사이징 시작 시 현재 표의 글자 크기 저장
-    if (currentSelectedElement.tagName === 'TABLE') {
-        startTableFontSize = parseInt(window.getComputedStyle(currentSelectedElement).fontSize) || 16;
-    }
-    document.addEventListener('mousemove', resizing); 
-    document.addEventListener('mouseup', stopResize); 
+    e.preventDefault(); isResizing = true; startX2 = e.clientX; startY2 = e.clientY; startWidth2 = currentSelectedElement.clientWidth; startHeight2 = currentSelectedElement.clientHeight; 
+    if (currentSelectedElement.tagName === 'TABLE') { startTableFontSize = parseInt(window.getComputedStyle(currentSelectedElement).fontSize) || 16; }
+    document.addEventListener('mousemove', resizing); document.addEventListener('mouseup', stopResize); 
 }
 
 function resizing(e) { 
     if (!isResizing || !currentSelectedElement) return; 
-    const deltaX = e.clientX - startX2;
-    const newWidth = startWidth2 + deltaX; 
-    const scaleRatio = newWidth / startWidth2; // 너비 변화 비율 계산
-    const newHeight = startHeight2 + (e.clientY - startY2); 
-
-    if (newWidth > 50) {
-        currentSelectedElement.style.width = newWidth + 'px'; 
-        // [신규] 표일 경우 내부 글자 크기도 비율에 맞춰 조절
-        if (currentSelectedElement.tagName === 'TABLE') {
-            currentSelectedElement.style.fontSize = (startTableFontSize * scaleRatio) + 'px';
-        }
-    }
+    const deltaX = e.clientX - startX2, newWidth = startWidth2 + deltaX, scaleRatio = newWidth / startWidth2, newHeight = startHeight2 + (e.clientY - startY2); 
+    if (newWidth > 50) { currentSelectedElement.style.width = newWidth + 'px'; if (currentSelectedElement.tagName === 'TABLE') { currentSelectedElement.style.fontSize = (startTableFontSize * scaleRatio) + 'px'; } }
     if (newHeight > 30) currentSelectedElement.style.height = newHeight + 'px'; 
     updateSelectionBox(); 
 }
@@ -559,42 +603,18 @@ export function deleteColumn() { const table = currentSelectedElement; if (!tabl
 
 export function createHyperlink() { const selection = window.getSelection(); if (selection.rangeCount > 0 && selection.toString().length > 0) { const url = prompt("연결할 주소(URL)를 입력하세요:", "https://"); if (url && url !== "https://") { recordHistory(); document.execCommand('createLink', false, url); const anchor = selection.anchorNode.parentElement; if (anchor && anchor.tagName === 'A') { anchor.target = '_blank'; anchor.style.color = '#2563EB'; anchor.style.textDecoration = 'underline'; anchor.style.cursor = 'pointer'; } triggerAutoSave(); } } else { alert("링크를 걸 문구를 먼저 드래그하여 선택해주세요."); } }
 
-// [수정] 되돌리기 기능 개선 (커서 위치 보존 및 논리 분리)
 export function formatDoc(cmd, value = null) { 
     const editor = document.getElementById('editor-body'); if (!editor) return;
-    const currentRange = saveSelection(); 
-
-    if (cmd === 'undo') {
-        if (undoStack.length > 0) {
-            redoStack.push(editor.innerHTML); 
-            editor.innerHTML = undoStack.pop(); 
-            restoreSelection(currentRange);
-            triggerAutoSave(); return;
-        } else { document.execCommand('undo', false, null); return; }
-    }
-    if (cmd === 'redo') {
-        if (redoStack.length > 0) {
-            undoStack.push(editor.innerHTML);
-            editor.innerHTML = redoStack.pop();
-            restoreSelection(currentRange);
-            triggerAutoSave(); return;
-        } else { document.execCommand('redo', false, null); return; }
-    }
-
-    recordHistory(); 
-    if (!document.activeElement.closest('#editor-body')) editor.focus();
+    const currentRange = saveSelection();
+    if (cmd === 'undo') { if (undoStack.length > 0) { redoStack.push(editor.innerHTML); editor.innerHTML = undoStack.pop(); restoreSelection(currentRange); triggerAutoSave(); return; } else { document.execCommand('undo', false, null); return; } }
+    if (cmd === 'redo') { if (redoStack.length > 0) { undoStack.push(editor.innerHTML); editor.innerHTML = redoStack.pop(); restoreSelection(currentRange); triggerAutoSave(); return; } else { document.execCommand('redo', false, null); return; } }
+    recordHistory(); if (!document.activeElement.closest('#editor-body')) editor.focus();
     const selectedCells = document.querySelectorAll('td.selected-cell');
-    if (selectedCells.length > 0) {
-        selectedCells.forEach(cell => {
-            const range = document.createRange(); range.selectNodeContents(cell);
-            const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
-            document.execCommand(cmd, false, value);
-        });
-    } else { document.execCommand(cmd, false, value); }
+    if (selectedCells.length > 0) { selectedCells.forEach(cell => { const range = document.createRange(); range.selectNodeContents(cell); const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range); document.execCommand(cmd, false, value); }); } 
+    else { document.execCommand(cmd, false, value); }
     triggerAutoSave(); 
 }
 
-// [수정] 부분 글자 크기 조정 로직 추가
 export function changeGlobalFontSize(delta) {
     const selection = window.getSelection();
     if (selection.rangeCount > 0 && selection.toString().length > 0) {
@@ -603,13 +623,10 @@ export function changeGlobalFontSize(delta) {
         const style = window.getComputedStyle(parent);
         const currentSize = parseInt(style.fontSize) || state.currentFontSize;
         const newSize = Math.max(8, Math.min(100, currentSize + delta));
-        
         document.execCommand('fontSize', false, '7'); 
         const fontTags = document.querySelectorAll('font[size="7"]');
         fontTags.forEach(t => {
-            const span = document.createElement('span');
-            span.style.fontSize = newSize + 'px';
-            span.innerHTML = t.innerHTML;
+            const span = document.createElement('span'); span.style.fontSize = newSize + 'px'; span.innerHTML = t.innerHTML;
             t.parentNode.replaceChild(span, t);
         });
     } else {
