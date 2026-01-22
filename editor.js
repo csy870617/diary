@@ -26,16 +26,17 @@ let isRowDragging = false;
 let resizeTargetTd = null;
 let startX, startY, startW, startH;
 
-// [히스토리] 구조적 변경 되돌리기를 위한 스택
+// [히스토리] 워드/엑셀 방식의 정교한 되돌리기를 위한 스택
 let undoStack = [];
 let redoStack = [];
 const MAX_HISTORY = 50;
 
-// [리사이징] 표 전체 스케일링을 위한 변수
+// [리사이징] 표 전체 비례 스케일링을 위한 변수
 let startTableFontSize = 16;
 
 /**
- * 커서 위치 저장을 위한 유틸리티 (텍스트 오프셋 방식)
+ * [유틸리티] 커서 위치 보존 (텍스트 오프셋 방식)
+ * innerHTML이 교체되어도 작업하던 글자 위치를 정확히 찾아갑니다.
  */
 function getCursorOffset(element) {
     const selection = window.getSelection();
@@ -72,7 +73,7 @@ function setCursorOffset(element, offset) {
     }
 }
 
-// 현재 에디터 상태를 히스토리에 기록하는 함수
+// 현재 에디터 상태 기록 (중복 방지 로직 포함)
 function recordHistory() {
     const editorBody = document.getElementById('editor-body');
     if (!editorBody) return;
@@ -95,7 +96,7 @@ export async function triggerAutoSave() {
     }, 2000); 
 }
 
-/* --- 책 모드 핸들러 로직 --- */
+/* --- 책 모드 핸들러 (원본 보존) --- */
 function handleBookWheel(e) {
     if (state.currentViewMode !== 'book') return;
     e.preventDefault(); e.stopPropagation();
@@ -126,7 +127,7 @@ function handleBookResize() {
 }
 
 /**
- * [해결] 누락되었던 이벤트 리스너 토글 함수 복원
+ * [오류 수정] 누락되었던 리스너 제어 함수 정의
  */
 function toggleBookEventListeners(enable) {
     const container = document.getElementById('editor-container');
@@ -249,6 +250,7 @@ function setupBasicHandling() {
     const editorContainer = document.getElementById('editor-container');
     if (!editorBody) return;
 
+    // 붙여넣기 최적화 (서식 제거 및 표 내용 추출)
     editorBody.onpaste = (e) => {
         e.preventDefault();
         recordHistory();
@@ -367,7 +369,7 @@ export function toggleViewMode(mode) {
     document.querySelectorAll('.book-nav, #page-indicator, #book-slider-container, #btn-scroll-top').forEach(el => el.classList.add('hidden'));
     hideSelection(); 
     
-    // [중요] 누락되었던 리스너 토글 호출
+    // [해결] 누락되었던 리스너 제어 함수 호출
     toggleBookEventListeners(mode === 'book');
 
     if (mode === 'book') { editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false"; linkifyContents(editBody); writeModal.classList.add('mode-book'); updateBookLayout(); if (!wasBookMode && oldHeight > 0) currentBookPageIndex = Math.floor(oldScrollTop / oldHeight); updateBookNav(); if (container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth); editorToolbar?.classList.add('collapsed'); }
@@ -376,7 +378,7 @@ export function toggleViewMode(mode) {
 }
 
 /**
- * [수정] 정교한 정렬 및 되돌리기 통합 관리
+ * [최종 고도화] 정렬 및 되돌리기 통합 관리
  */
 export function formatDoc(cmd, value = null) { 
     const editor = document.getElementById('editor-body'); if (!editor) return;
@@ -399,11 +401,21 @@ export function formatDoc(cmd, value = null) {
         const alignMap = { 'justifyLeft': 'left', 'justifyCenter': 'center', 'justifyRight': 'right' };
         const alignValue = alignMap[cmd];
         if (selectedCells.length > 0) { selectedCells.forEach(cell => cell.style.textAlign = alignValue); } 
-        else { const selection = window.getSelection(); const td = selection.anchorNode?.parentElement?.closest('td'); if (td) td.style.textAlign = alignValue; else document.execCommand(cmd, false, value); }
+        else { 
+            const selection = window.getSelection(); 
+            const td = selection.anchorNode?.nodeType === 3 ? selection.anchorNode.parentElement.closest('td') : selection.anchorNode.closest('td');
+            if (td) td.style.textAlign = alignValue; 
+            else document.execCommand(cmd, false, value); 
+        }
     } else {
         const selectedCells = document.querySelectorAll('td.selected-cell');
-        if (selectedCells.length > 0) { selectedCells.forEach(cell => { const range = document.createRange(); range.selectNodeContents(cell); const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range); document.execCommand(cmd, false, value); }); } 
-        else { document.execCommand(cmd, false, value); }
+        if (selectedCells.length > 0) {
+            selectedCells.forEach(cell => {
+                const range = document.createRange(); range.selectNodeContents(cell);
+                const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+                document.execCommand(cmd, false, value);
+            });
+        } else { document.execCommand(cmd, false, value); }
     }
     triggerAutoSave(); 
 }
@@ -438,9 +450,10 @@ export function applyFontStyle(f, s) {
     if(subtitle) { subtitle.style.fontFamily = f; subtitle.style.fontSize = Math.floor(baseSize * 1.3) + 'px'; }
 }
 
-/* --- 이미지 및 표 리사이징 보조 함수 유지 --- */
+/* --- 이미지 및 표 리사이징 보조 함수 (원본 보존) --- */
 function selectElement(el) { currentSelectedElement = el; createSelectionUI(); updateSelectionBox(); }
 function hideSelection() { currentSelectedElement = null; ['img-selection-box','resize-handle','img-delete-btn','img-resize-group'].forEach(cls => { document.querySelectorAll('.'+cls).forEach(e => e.style.display = 'none'); }); if(tableControlGroup) tableControlGroup.style.display = 'none'; }
+
 function createSelectionUI() {
     if (!selectionBox) {
         selectionBox = document.createElement('div'); selectionBox.className = 'img-selection-box'; document.body.appendChild(selectionBox);
@@ -461,6 +474,7 @@ function createSelectionUI() {
     selectionBox.style.display = 'block'; resizeHandle.style.display = 'block'; deleteBtn.style.display = 'flex'; resizeBtnGroup.style.display = 'flex';
     if(tableControlGroup) tableControlGroup.style.display = currentSelectedElement.tagName === 'TABLE' ? 'flex' : 'none';
 }
+
 function updateSelectionBox() {
     if (!currentSelectedElement || !selectionBox) return;
     const rect = currentSelectedElement.getBoundingClientRect(), scrollTop = window.scrollY, scrollLeft = window.scrollX;
@@ -476,7 +490,9 @@ function updateSelectionBox() {
         deleteBtn.style.top = (rect.bottom + scrollTop + 55) + 'px'; deleteBtn.style.left = centerX + 'px';
     }
 }
+
 function deleteSelectedElement() { if (currentSelectedElement) { currentSelectedElement.remove(); hideSelection(); triggerAutoSave(); } }
+
 let isResizing = false, startX2, startY2, startWidth2, startHeight2;
 function startResize(e) { e.preventDefault(); isResizing = true; startX2 = e.clientX; startY2 = e.clientY; startWidth2 = currentSelectedElement.clientWidth; startHeight2 = currentSelectedElement.clientHeight; if (currentSelectedElement.tagName === 'TABLE') { startTableFontSize = parseInt(window.getComputedStyle(currentSelectedElement).fontSize) || 16; } document.addEventListener('mousemove', resizing); document.addEventListener('mouseup', stopResize); }
 function resizing(e) { if (!isResizing || !currentSelectedElement) return; const deltaX = e.clientX - startX2, newWidth = startWidth2 + deltaX, scaleRatio = newWidth / startWidth2, newHeight = startHeight2 + (e.clientY - startY2); if (newWidth > 50) { currentSelectedElement.style.width = newWidth + 'px'; if (currentSelectedElement.tagName === 'TABLE') { currentSelectedElement.style.fontSize = (startTableFontSize * scaleRatio) + 'px'; } } if (newHeight > 30) currentSelectedElement.style.height = newHeight + 'px'; updateSelectionBox(); }
@@ -486,6 +502,7 @@ export function addRow() { const table = currentSelectedElement; if (!table || t
 export function deleteRow() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE' || table.rows.length <= 1) return; recordHistory(); const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, refRow = targetCell ? targetCell.parentElement : table.rows[table.rows.length - 1]; table.deleteRow(refRow.rowIndex); lastClickedCell = null; }
 export function addColumn() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE') return; recordHistory(); const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1, rowIdx = targetCell ? targetCell.parentElement.rowIndex : 0; let cellToFocus = null; for (let i = 0; i < table.rows.length; i++) { const newCell = table.rows[i].insertCell(colIdx + 1); newCell.innerHTML = '<br>'; if (i === rowIdx) cellToFocus = newCell; } if (cellToFocus) focusCell(cellToFocus); }
 export function deleteColumn() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE' || table.rows[0].cells.length <= 1) return; recordHistory(); const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1; for (let i = 0; i < table.rows.length; i++) { table.rows[i].deleteCell(colIdx); } lastClickedCell = null; }
+
 export function insertSticker(emoji) { recordHistory(); document.execCommand('insertText', false, emoji); triggerAutoSave(); }
 export function insertImage(src) { recordHistory(); document.execCommand('insertImage', false, src); triggerAutoSave(); }
 export function insertTable(rows, cols) { recordHistory(); let tableHtml = '<div class="table-wrapper"><table style="width: 100%; table-layout: fixed;"><tbody>'; for (let i = 0; i < rows; i++) { tableHtml += '<tr>'; for (let j = 0; j < cols; j++) { tableHtml += '<td><br></td>'; } tableHtml += '</tr>'; } tableHtml += '</tbody></table></div><p><br></p>'; const editor = document.getElementById('editor-body'); editor.focus(); document.execCommand('insertHTML', false, tableHtml); triggerAutoSave(); }
