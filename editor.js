@@ -232,7 +232,7 @@ function setupBasicHandling() {
 
     editorBody.onpaste = (e) => {
         e.preventDefault();
-        recordHistory(); // 붙여넣기 전 시점 저장
+        recordHistory();
         const html = e.clipboardData.getData('text/html');
         if (html && html.includes('<table')) {
             const parser = new DOMParser();
@@ -271,14 +271,7 @@ function setupBasicHandling() {
         }
     };
 
-    editorBody.ontouchstart = (e) => {
-        if (!editorBody.isContentEditable) return;
-        const cell = e.target.closest('td');
-        if (cell) {
-            mobileLongPressTimer = setTimeout(() => { isSelectingCells = true; selectionStartCell = cell; clearCellSelection(); if (navigator.vibrate) navigator.vibrate(50); }, 600);
-        }
-    };
-
+    editorBody.ontouchstart = (e) => { if (!editorBody.isContentEditable) return; const cell = e.target.closest('td'); if (cell) { mobileLongPressTimer = setTimeout(() => { isSelectingCells = true; selectionStartCell = cell; clearCellSelection(); if (navigator.vibrate) navigator.vibrate(50); }, 600); } };
     editorBody.ontouchmove = (e) => { if (isSelectingCells && selectionStartCell) { e.preventDefault(); const touch = e.touches[0]; const cell = document.elementFromPoint(touch.clientX, touch.clientY)?.closest('td'); if (cell) selectCellRange(selectionStartCell, cell); } else { clearTimeout(mobileLongPressTimer); } };
     editorBody.ontouchend = () => { clearTimeout(mobileLongPressTimer); isSelectingCells = false; };
 
@@ -301,20 +294,6 @@ function setupBasicHandling() {
     editorBody.onkeydown = (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); formatDoc('undo'); return; }
         if ((e.ctrlKey || e.metaKey) && e.key === 'y') { e.preventDefault(); formatDoc('redo'); return; }
-        if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'i' || e.key === 'u')) {
-            const selectedCells = document.querySelectorAll('td.selected-cell');
-            if (selectedCells.length > 0) { e.preventDefault(); const cmd = e.key === 'b' ? 'bold' : e.key === 'i' ? 'italic' : 'underline'; formatDoc(cmd); return; }
-        }
-        if (e.key === 'Tab') {
-            const sel = window.getSelection(); if (!sel.rangeCount) return;
-            const cell = sel.anchorNode.nodeType === 3 ? sel.anchorNode.parentElement.closest('td') : sel.anchorNode.closest('td');
-            if (cell) { e.preventDefault(); clearCellSelection(); const row = cell.parentElement; let targetCell = e.shiftKey ? cell.previousElementSibling : cell.nextElementSibling; if (!targetCell && e.shiftKey && row.previousElementSibling) targetCell = row.previousElementSibling.cells[row.previousElementSibling.cells.length - 1]; else if (!targetCell && !e.shiftKey && row.nextElementSibling) targetCell = row.nextElementSibling.cells[0]; if (targetCell) focusCell(targetCell); }
-        }
-        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-            const sel = window.getSelection(); if (!sel.rangeCount) return;
-            const cell = sel.anchorNode.nodeType === 3 ? sel.anchorNode.parentElement.closest('td') : sel.anchorNode.closest('td');
-            if (cell) { const row = cell.parentElement, colIdx = cell.cellIndex; const targetRow = e.key === 'ArrowDown' ? row.nextElementSibling : row.previousElementSibling; if (targetRow && targetRow.cells[colIdx]) { e.preventDefault(); clearCellSelection(); focusCell(targetRow.cells[colIdx]); } }
-        }
         if (e.key === 'Delete') {
             const selectedCells = document.querySelectorAll('td.selected-cell');
             if (selectedCells.length > 0) { e.preventDefault(); recordHistory(); selectedCells.forEach(cell => { const range = document.createRange(); range.selectNodeContents(cell); const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range); document.execCommand('delete', false, null); }); triggerAutoSave(); return; }
@@ -323,11 +302,7 @@ function setupBasicHandling() {
     };
 
     let inputTimer;
-    editorBody.addEventListener('input', () => { 
-        clearTimeout(inputTimer);
-        inputTimer = setTimeout(recordHistory, 1000); 
-        updateSelectionBox(); triggerAutoSave(); 
-    });
+    editorBody.addEventListener('input', () => { clearTimeout(inputTimer); inputTimer = setTimeout(recordHistory, 1000); updateSelectionBox(); triggerAutoSave(); });
     
     const syncButtons = () => { if (currentSelectedElement) updateSelectionBox(); };
     editorContainer?.addEventListener('scroll', syncButtons);
@@ -335,21 +310,6 @@ function setupBasicHandling() {
     document.getElementById('edit-title')?.addEventListener('input', triggerAutoSave);
     document.getElementById('edit-subtitle')?.addEventListener('input', triggerAutoSave);
     window.addEventListener('resize', () => { updateSelectionBox(); if(state.currentViewMode === 'book') handleBookResize(); });
-}
-
-function toggleBookEventListeners(enable) {
-    const container = document.getElementById('editor-container');
-    if (!container) return;
-    container.removeEventListener('wheel', handleBookWheel);
-    container.removeEventListener('touchstart', handleBookTouchStart);
-    container.removeEventListener('touchmove', handleBookTouchMove);
-    container.removeEventListener('touchend', handleBookTouchEnd);
-    if (enable) {
-        container.addEventListener('wheel', handleBookWheel, { passive: false });
-        container.addEventListener('touchstart', handleBookTouchStart, { passive: true });
-        container.addEventListener('touchmove', handleBookTouchMove, { passive: false });
-        container.addEventListener('touchend', handleBookTouchEnd, { passive: true });
-    }
 }
 
 export function openEditor(isEdit, entryData) { 
@@ -392,6 +352,94 @@ export function toggleViewMode(mode) {
     else { editTitle.readOnly = false; editSubtitle.readOnly = false; editBody.contentEditable = "true"; editorToolbar?.classList.remove('collapsed'); if (wasBookMode && container) requestAnimationFrame(() => { container.scrollTop = lastPageIndex * oldHeight; }); }
 }
 
+/**
+ * [수정] 되돌리기 / 정렬 고도화
+ */
+export function formatDoc(cmd, value = null) { 
+    const editor = document.getElementById('editor-body'); if (!editor) return;
+    const currentOffset = getCursorOffset(editor);
+
+    if (cmd === 'undo') {
+        if (undoStack.length > 0) { redoStack.push(editor.innerHTML); editor.innerHTML = undoStack.pop(); setCursorOffset(editor, currentOffset); triggerAutoSave(); return; } 
+        else { document.execCommand('undo', false, null); return; }
+    }
+    if (cmd === 'redo') {
+        if (redoStack.length > 0) { undoStack.push(editor.innerHTML); editor.innerHTML = redoStack.pop(); setCursorOffset(editor, currentOffset); triggerAutoSave(); return; } 
+        else { document.execCommand('redo', false, null); return; }
+    }
+
+    recordHistory(); 
+    if (!document.activeElement.closest('#editor-body')) editor.focus();
+
+    // [핵심 추가] 정렬 명령 처리 (표 셀 내부에 있을 때 CSS 스타일로 강제 적용)
+    if (cmd.startsWith('justify')) {
+        const selectedCells = document.querySelectorAll('td.selected-cell');
+        const alignMap = { 'justifyLeft': 'left', 'justifyCenter': 'center', 'justifyRight': 'right' };
+        const alignValue = alignMap[cmd];
+
+        if (selectedCells.length > 0) {
+            selectedCells.forEach(cell => cell.style.textAlign = alignValue);
+        } else {
+            const selection = window.getSelection();
+            const td = selection.anchorNode?.parentElement?.closest('td');
+            if (td) {
+                td.style.textAlign = alignValue;
+            } else {
+                document.execCommand(cmd, false, value);
+            }
+        }
+    } else {
+        const selectedCells = document.querySelectorAll('td.selected-cell');
+        if (selectedCells.length > 0) {
+            selectedCells.forEach(cell => {
+                const range = document.createRange(); range.selectNodeContents(cell);
+                const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+                document.execCommand(cmd, false, value);
+            });
+        } else {
+            document.execCommand(cmd, false, value);
+        }
+    }
+    triggerAutoSave(); 
+}
+
+/**
+ * [수정] 부분 글자 크기 조정 로직
+ */
+export function changeGlobalFontSize(delta) {
+    const selection = window.getSelection();
+    if (selection.rangeCount > 0 && selection.toString().length > 0) {
+        recordHistory();
+        const parent = selection.anchorNode.parentElement;
+        const style = window.getComputedStyle(parent);
+        const currentSize = parseInt(style.fontSize) || state.currentFontSize;
+        const newSize = Math.max(8, Math.min(100, currentSize + delta));
+        
+        document.execCommand('fontSize', false, '7'); 
+        const fontTags = document.querySelectorAll('font[size="7"]');
+        fontTags.forEach(t => {
+            const span = document.createElement('span');
+            span.style.fontSize = newSize + 'px';
+            span.innerHTML = t.innerHTML;
+            t.parentNode.replaceChild(span, t);
+        });
+    } else {
+        state.currentFontSize = Math.max(12, Math.min(60, state.currentFontSize + delta)); 
+        applyFontStyle(state.currentFontFamily, state.currentFontSize); 
+    }
+    triggerAutoSave(); 
+}
+
+export function applyFontStyle(f, s) { 
+    state.currentFontFamily = f; state.currentFontSize = s; 
+    const body = document.getElementById('editor-body'), title = document.getElementById('edit-title'), subtitle = document.getElementById('edit-subtitle');
+    const isHand = (f === 'Nanum Pen Script'); const baseSize = isHand ? s + 4 : s;
+    if(body) { body.style.fontFamily = f; body.style.fontSize = baseSize + 'px'; }
+    if(title) { title.style.fontFamily = f; title.style.fontSize = Math.floor(baseSize * 1.6) + 'px'; }
+    if(subtitle) { subtitle.style.fontFamily = f; subtitle.style.fontSize = Math.floor(baseSize * 1.3) + 'px'; }
+}
+
+/* --- 리사이징 및 기타 유틸리티 (원본 보존) --- */
 function selectElement(el) { currentSelectedElement = el; createSelectionUI(); updateSelectionBox(); }
 function hideSelection() { currentSelectedElement = null; if (selectionBox) selectionBox.style.display = 'none'; if (resizeHandle) resizeHandle.style.display = 'none'; if (deleteBtn) deleteBtn.style.display = 'none'; if (resizeBtnGroup) resizeBtnGroup.style.display = 'none'; if(tableControlGroup) tableControlGroup.style.display = 'none'; }
 
@@ -444,15 +492,7 @@ function startResize(e) {
     if (currentSelectedElement.tagName === 'TABLE') { startTableFontSize = parseInt(window.getComputedStyle(currentSelectedElement).fontSize) || 16; }
     document.addEventListener('mousemove', resizing); document.addEventListener('mouseup', stopResize); 
 }
-
-function resizing(e) { 
-    if (!isResizing || !currentSelectedElement) return; 
-    const deltaX = e.clientX - startX2, newWidth = startWidth2 + deltaX, scaleRatio = newWidth / startWidth2, newHeight = startHeight2 + (e.clientY - startY2); 
-    if (newWidth > 50) { currentSelectedElement.style.width = newWidth + 'px'; if (currentSelectedElement.tagName === 'TABLE') { currentSelectedElement.style.fontSize = (startTableFontSize * scaleRatio) + 'px'; } }
-    if (newHeight > 30) currentSelectedElement.style.height = newHeight + 'px'; 
-    updateSelectionBox(); 
-}
-
+function resizing(e) { if (!isResizing || !currentSelectedElement) return; const deltaX = e.clientX - startX2, newWidth = startWidth2 + deltaX, scaleRatio = newWidth / startWidth2, newHeight = startHeight2 + (e.clientY - startY2); if (newWidth > 50) { currentSelectedElement.style.width = newWidth + 'px'; if (currentSelectedElement.tagName === 'TABLE') { currentSelectedElement.style.fontSize = (startTableFontSize * scaleRatio) + 'px'; } } if (newHeight > 30) currentSelectedElement.style.height = newHeight + 'px'; updateSelectionBox(); }
 function stopResize() { if (isResizing) { recordHistory(); isResizing = false; } document.removeEventListener('mousemove', resizing); document.removeEventListener('mouseup', stopResize); triggerAutoSave(); }
 
 export function addRow() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE') return; recordHistory(); const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, refRow = targetCell ? targetCell.parentElement : table.rows[table.rows.length - 1], colIdx = targetCell ? targetCell.cellIndex : 0, newRow = table.insertRow(refRow.rowIndex + 1), colCount = table.rows[0].cells.length; let cellToFocus = null; for (let i = 0; i < colCount; i++) { const newCell = newRow.insertCell(i); newCell.innerHTML = '<br>'; if (i === colIdx) cellToFocus = newCell; } if (cellToFocus) focusCell(cellToFocus); }
@@ -460,95 +500,7 @@ export function deleteRow() { const table = currentSelectedElement; if (!table |
 export function addColumn() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE') return; recordHistory(); const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1, rowIdx = targetCell ? targetCell.parentElement.rowIndex : 0; let cellToFocus = null; for (let i = 0; i < table.rows.length; i++) { const newCell = table.rows[i].insertCell(colIdx + 1); newCell.innerHTML = '<br>'; if (i === rowIdx) cellToFocus = newCell; } if (cellToFocus) focusCell(cellToFocus); }
 export function deleteColumn() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE' || table.rows[0].cells.length <= 1) return; recordHistory(); const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1; for (let i = 0; i < table.rows.length; i++) { table.rows[i].deleteCell(colIdx); } lastClickedCell = null; }
 
-export function createHyperlink() { const selection = window.getSelection(); if (selection.rangeCount > 0 && selection.toString().length > 0) { const url = prompt("연결할 주소(URL)를 입력하세요:", "https://"); if (url && url !== "https://") { recordHistory(); document.execCommand('createLink', false, url); const anchor = selection.anchorNode.parentElement; if (anchor && anchor.tagName === 'A') { anchor.target = '_blank'; anchor.style.color = '#2563EB'; anchor.style.textDecoration = 'underline'; anchor.style.cursor = 'pointer'; } triggerAutoSave(); } } else { alert("링크를 걸 문구를 먼저 드래그하여 선택해주세요."); } }
-
-/**
- * [수정] 되돌리기/다시실행 고도화
- * 1. 실행 전 커서 위치(Offset) 저장
- * 2. innerHTML 교체 후 오프셋 기반으로 커서 복구
- */
-export function formatDoc(cmd, value = null) { 
-    const editor = document.getElementById('editor-body'); if (!editor) return;
-    const currentOffset = getCursorOffset(editor);
-
-    if (cmd === 'undo') {
-        if (undoStack.length > 0) {
-            redoStack.push(editor.innerHTML); 
-            editor.innerHTML = undoStack.pop(); 
-            setCursorOffset(editor, currentOffset); 
-            triggerAutoSave(); return;
-        } else { document.execCommand('undo', false, null); return; }
-    }
-    if (cmd === 'redo') {
-        if (redoStack.length > 0) {
-            undoStack.push(editor.innerHTML);
-            editor.innerHTML = redoStack.pop();
-            setCursorOffset(editor, currentOffset);
-            triggerAutoSave(); return;
-        } else { document.execCommand('redo', false, null); return; }
-    }
-
-    recordHistory(); 
-    if (!document.activeElement.closest('#editor-body')) editor.focus();
-    const selectedCells = document.querySelectorAll('td.selected-cell');
-    if (selectedCells.length > 0) {
-        selectedCells.forEach(cell => {
-            const range = document.createRange(); range.selectNodeContents(cell);
-            const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
-            document.execCommand(cmd, false, value);
-        });
-    } else { document.execCommand(cmd, false, value); }
-    triggerAutoSave(); 
-}
-
-/**
- * [수정] 부분 글자 크기 조정 로직
- * 색상 변경과 동일하게 드래그한 영역에 span 태그를 입혀 처리합니다.
- */
-export function changeGlobalFontSize(delta) {
-    const selection = window.getSelection();
-    const editor = document.getElementById('editor-body');
-    
-    if (selection.rangeCount > 0 && selection.toString().length > 0) {
-        recordHistory();
-        const parent = selection.anchorNode.parentElement;
-        const style = window.getComputedStyle(parent);
-        const currentSize = parseInt(style.fontSize) || state.currentFontSize;
-        const newSize = Math.max(8, Math.min(100, currentSize + delta));
-        
-        // fontSize 임시 명령 후 span으로 교체하는 트릭 (정교한 부분 서식 적용)
-        document.execCommand('fontSize', false, '7'); 
-        const fontTags = document.querySelectorAll('font[size="7"]');
-        fontTags.forEach(t => {
-            const span = document.createElement('span');
-            span.style.fontSize = newSize + 'px';
-            span.innerHTML = t.innerHTML;
-            t.parentNode.replaceChild(span, t);
-        });
-    } else {
-        // 선택 영역이 없을 경우 에디터 전체 기본 크기 조정
-        state.currentFontSize = Math.max(12, Math.min(60, state.currentFontSize + delta)); 
-        applyFontStyle(state.currentFontFamily, state.currentFontSize); 
-    }
-    triggerAutoSave(); 
-}
-
-export function applyFontStyle(f, s) { 
-    state.currentFontFamily = f; state.currentFontSize = s; 
-    const body = document.getElementById('editor-body'), title = document.getElementById('edit-title'), subtitle = document.getElementById('edit-subtitle');
-    const isHand = (f === 'Nanum Pen Script'); const baseSize = isHand ? s + 4 : s;
-    if(body) { body.style.fontFamily = f; body.style.fontSize = baseSize + 'px'; }
-    if(title) { title.style.fontFamily = f; title.style.fontSize = Math.floor(baseSize * 1.6) + 'px'; }
-    if(subtitle) { subtitle.style.fontFamily = f; subtitle.style.fontSize = Math.floor(baseSize * 1.3) + 'px'; }
-}
-
 export function insertSticker(emoji) { recordHistory(); document.execCommand('insertText', false, emoji); triggerAutoSave(); }
 export function insertImage(src) { recordHistory(); document.execCommand('insertImage', false, src); triggerAutoSave(); }
-
-export function insertTable(rows, cols) {
-    recordHistory();
-    let tableHtml = '<div class="table-wrapper"><table style="width: 100%; table-layout: fixed;"><tbody>';
-    for (let i = 0; i < rows; i++) { tableHtml += '<tr>'; for (let j = 0; j < cols; j++) { tableHtml += '<td><br></td>'; } tableHtml += '</tr>'; }
-    tableHtml += '</tbody></table></div><p><br></p>';
-    const editor = document.getElementById('editor-body'); editor.focus(); document.execCommand('insertHTML', false, tableHtml); triggerAutoSave();
-}
+export function insertTable(rows, cols) { recordHistory(); let tableHtml = '<div class="table-wrapper"><table style="width: 100%; table-layout: fixed;"><tbody>'; for (let i = 0; i < rows; i++) { tableHtml += '<tr>'; for (let j = 0; j < cols; j++) { tableHtml += '<td><br></td>'; } tableHtml += '</tr>'; } tableHtml += '</tbody></table></div><p><br></p>'; const editor = document.getElementById('editor-body'); editor.focus(); document.execCommand('insertHTML', false, tableHtml); triggerAutoSave(); }
+export function createHyperlink() { const selection = window.getSelection(); if (selection.rangeCount > 0 && selection.toString().length > 0) { const url = prompt("연결할 주소(URL)를 입력하세요:", "https://"); if (url && url !== "https://") { recordHistory(); document.execCommand('createLink', false, url); const anchor = selection.anchorNode.parentElement; if (anchor && anchor.tagName === 'A') { anchor.target = '_blank'; anchor.style.color = '#2563EB'; anchor.style.textDecoration = 'underline'; anchor.style.cursor = 'pointer'; } triggerAutoSave(); } } else { alert("링크를 걸 문구를 먼저 드래그하여 선택해주세요."); } }
