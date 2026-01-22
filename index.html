@@ -4,15 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="referrer" content="origin"> 
-    
     <title>신앙일지 | Faith Log</title>
     <link rel="stylesheet" href="style.css?v=3.6">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
-    
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://apis.google.com/js/api.js"></script>
 </head>
@@ -32,21 +29,17 @@
                     <div class="login-msg-wrapper" id="login-msg-area">
                         <span class="login-msg-main">여러 대의 기기에서 사용 시<br>구글 동기화 후 이용해 주세요.</span>
                     </div>
-                    
                     <button id="refresh-btn" class="icon-nav-btn hidden" title="지금 동기화" style="margin-right: 4px;">
                         <i class="ph ph-arrows-clockwise"></i>
                     </button>
-
                     <button id="login-trigger-btn" class="login-btn-header">동기화</button>
                     <button id="logout-btn" class="login-btn-header hidden">로그아웃</button>
                 </div>
             </div>
         </header>
-
         <div class="nav-row">
             <div class="tabs" id="tab-container"></div>
         </div>
-
         <div class="controls-row">
             <div class="nav-actions">
                 <div class="sort-control">
@@ -65,20 +58,16 @@
                 </button>
             </div>
         </div>
-
         <main id="entry-list" class="entry-list"></main>
-
         <div class="floating-pen" id="write-btn">
             <i class="ph ph-pencil-simple"></i>
         </div>
     </div>
-
     <div id="write-modal" class="full-screen-modal hidden">
         <div class="write-header">
             <button id="close-write-btn" class="text-btn nav-back-btn">
                 <i class="ph ph-caret-left"></i> <span id="back-btn-text">목록</span>
             </button>
-            
             <div class="header-actions">
                 <button id="btn-readonly" class="icon-action-btn" title="읽기 전용">
                     <i class="ph ph-eye"></i>
@@ -108,8 +97,7 @@
                         <option value="Nanum Pen Script">손글씨</option>
                     </select>
                     <div class="font-size-controls" style="display: flex; align-items: center; gap: 8px; margin-left: 5px;">
-                        <span style="font-size: 12px; color: #666;">크기:</span>
-                        <input type="number" id="font-size-input" value="10" min="1" max="100" style="width: 50px; padding: 4px; border: 1px solid #ddd; border-radius: 4px; text-align: center;">
+                        <input type="number" id="font-size-input" value="16" min="1" max="100" style="width: 50px; padding: 4px; border: 1px solid #ddd; border-radius: 4px; text-align: center;">
                         <button class="tool-btn" id="toolbar-table-btn" title="표 삽입"><i class="ph ph-table"></i></button>
                         <button class="tool-btn" id="toolbar-link-btn" title="하이퍼링크"><i class="ph ph-link"></i></button>
                     </div>
@@ -177,7 +165,6 @@
             </div>
         </div>
     </div>
-
     <div id="table-modal" class="modal-overlay hidden">
         <div class="simple-modal" style="width: 240px;">
             <h3>표 삽입</h3>
@@ -197,7 +184,6 @@
             </div>
         </div>
     </div>
-
     <div id="login-modal" class="full-screen-modal hidden">
         <button id="close-login-btn" class="btn-close-modal"><i class="ph ph-x"></i></button>
         <div class="login-wrapper">
@@ -213,7 +199,6 @@
             </div>
         </div>
     </div>
-
     <div id="trash-modal" class="full-screen-modal hidden">
         <div class="write-header">
             <button id="close-trash-btn" class="text-btn nav-back-btn"><i class="ph ph-arrow-left"></i> 뒤로</button>
@@ -222,7 +207,6 @@
         </div>
         <div class="trash-container" id="trash-list"></div>
     </div>
-
     <div id="move-modal" class="modal-overlay hidden">
         <div class="simple-modal" style="width: 280px;">
             <h3>주제 이동</h3>
@@ -230,18 +214,15 @@
             <button id="close-move-btn" class="cancel-btn" style="width:100%;">취소</button>
         </div>
     </div>
-
     <div id="context-menu" class="context-menu hidden">
         <button class="ctx-item" id="ctx-move"><i class="ph ph-folder-open"></i> 주제 이동</button>
         <button class="ctx-item" id="ctx-copy"><i class="ph ph-copy"></i> 복제하기</button>
         <button class="ctx-item danger" id="ctx-delete"><i class="ph ph-trash"></i> 삭제하기</button>
     </div>
-
     <div id="category-context-menu" class="context-menu hidden">
         <button class="ctx-item" id="ctx-cat-rename"><i class="ph ph-pencil-line"></i> 이름 변경</button>
         <button class="ctx-item danger" id="ctx-cat-delete"><i class="ph ph-trash"></i> 주제 삭제</button>
     </div>
-
     <div id="modal-overlay" class="modal-overlay hidden"></div>
     <script type="module" src="script.js?v=3.1"></script>
 </body>

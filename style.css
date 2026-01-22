@@ -69,7 +69,6 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .tool-btn.small { font-size: 14px; display: flex; align-items: center; gap: 2px; font-weight: 600; color: var(--gray-900); }
 .tool-btn:active, .tool-btn.active { background-color: var(--active-bg); color: var(--active-text); }
 .font-select { border: 1px solid var(--gray-200); border-radius: 6px; padding: 6px; font-size: 13px; outline: none; background: white; width: 70px; }
-.font-size-controls { display: flex; gap: 4px; }
 
 /* 팔레트 */
 .sticker-palette { position: fixed; top: 110px; bottom: auto; left: 50%; transform: translateX(-50%); background: white; border: 1px solid var(--gray-200); padding: 10px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); width: fit-content; max-width: 90%; z-index: 2003; max-height: 250px; overflow-y: auto; }
@@ -84,35 +83,26 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .color-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; justify-items: center; }
 .color-dot { width: 32px; height: 32px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.1); cursor: pointer; padding: 0; transition: transform 0.2s; display: flex; align-items: center; justify-content: center; }
 .color-dot:hover { transform: scale(1.15); border-color: var(--gray-400); }
-.color-dot.remove-color { background-color: transparent; border: 1px solid var(--gray-400); color: var(--danger); font-size: 14px; }
 
 /* 모달 */
 .full-screen-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: white; z-index: 1000; overflow: hidden; display: flex; flex-direction: column; padding-top: var(--safe-top); padding-bottom: var(--safe-bottom); }
 .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4); z-index: 4000; display: flex; justify-content: center; align-items: center; backdrop-filter: blur(2px); opacity: 1; transition: opacity 0.2s; }
 .modal-overlay.hidden { opacity: 0; pointer-events: none; }
 .simple-modal { background: white; padding: 24px; border-radius: 16px; width: 85%; max-width: 320px; box-shadow: 0 10px 30px rgba(0,0,0,0.15); text-align: center; position: relative; font-family: var(--text-sans); animation: popupScale 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
-@keyframes popupScale { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 .simple-modal h3 { margin: 0 0 6px 0; font-size: 18px; font-family: var(--text-serif); font-weight: 700; color: var(--gray-900); }
-.simple-modal p { font-size: 13px; color: var(--gray-500); margin-bottom: 20px; }
-#move-category-list { max-height: 200px; overflow-y: auto; margin: 10px 0 20px; text-align: left; border: 1px solid var(--gray-200); border-radius: 8px; padding: 4px; }
-.cat-select-item { padding: 10px 12px; border-radius: 6px; cursor: pointer; font-size: 14px; color: var(--gray-900); transition: background 0.2s; display: flex; align-items: center; gap: 8px; }
-.cat-select-item:hover { background-color: var(--gray-100); }
-.cat-select-item.current { color: var(--gray-400); cursor: default; background: none; font-weight: 500; }
-.cat-select-item.current::after { content: '(현재)'; font-size: 11px; margin-left: auto; }
 .modal-btns { display: flex; gap: 8px; justify-content: center; width: 100%; }
-.modal-btns button { flex: 1; }
-.primary-btn { background: var(--gray-900); color: white; border: none; padding: 12px 0; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 14px; transition: opacity 0.2s; }
-.primary-btn:hover { opacity: 0.9; }
-.cancel-btn { background: var(--gray-100); color: var(--gray-900); border: none; padding: 12px 0; border-radius: 10px; cursor: pointer; font-size: 14px; font-weight: 500; transition: background 0.2s; }
-.cancel-btn:hover { background: var(--gray-200); }
+.primary-btn { background: var(--gray-900); color: white; border: none; padding: 12px 0; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 14px; }
+.cancel-btn { background: var(--gray-100); color: var(--gray-900); border: none; padding: 12px 0; border-radius: 10px; cursor: pointer; font-size: 14px; font-weight: 500; }
 .floating-pen { position: fixed; bottom: 30px; right: calc(50% - 260px); width: 56px; height: 56px; border-radius: 50%; background: var(--gray-900); color: white; box-shadow: 0 4px 12px rgba(0,0,0,0.3); cursor: pointer; display: flex; justify-content: center; align-items: center; font-size: 24px; z-index: 100; transition: transform 0.2s; }
-.floating-pen:hover { transform: scale(1.1); }
 
 .editor-container { max-width: 700px; margin: 0 auto; padding: 30px 40px 100px; width: 100%; height: auto !important; overflow-y: auto; }
-.editor-title { width: 100%; font-size: 26px; border: none; outline: none; font-family: var(--text-serif); font-weight: 600; margin-bottom: 10px; }
-.editor-subtitle { width: 100%; font-size: 16px; border: none; outline: none; color: var(--gray-500); font-family: var(--text-serif); margin-bottom: 20px; }
+
+/* [중요 수정] 제목과 소제목 글자 크기 강제 고정 (!important 추가) */
+.editor-title { width: 100%; font-size: 26px !important; border: none; outline: none; font-family: var(--text-serif); font-weight: 600; margin-bottom: 10px; background: transparent; }
+.editor-subtitle { width: 100%; font-size: 16px !important; border: none; outline: none; color: var(--gray-500); font-family: var(--text-serif); margin-bottom: 20px; background: transparent; }
+
 .divider { width: 30px; height: 1px; background: var(--gray-200); margin-bottom: 30px; }
-.editor-body, .article-body { line-height: 1.8; outline: none; min-height: 300px; white-space: pre-wrap; font-family: var(--text-serif); font-size: 16px; position: relative; word-break: break-all; overflow-wrap: break-word; }
+.editor-body { line-height: 1.8; outline: none; min-height: 300px; white-space: pre-wrap; font-family: var(--text-serif); font-size: 16px; position: relative; word-break: break-all; overflow-wrap: break-word; }
 .editor-body:empty:before { content: attr(placeholder); color: var(--gray-500); display: block; }
 .meta-info-row { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 13px; color: var(--gray-500); font-family: var(--text-sans); }
 .write-category { color: var(--accent); font-weight: 600; }
@@ -122,89 +112,22 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 
 .header-actions { display: flex; gap: 10px; align-items: center; }
 .nav-back-btn { display: flex; align-items: center; gap: 4px; font-size: 15px; color: var(--gray-500); font-family: var(--text-sans); font-weight: 500; cursor: pointer; background: none; border: none; padding: 5px 8px; border-radius: 6px; transition: all 0.2s; }
-.nav-back-btn:hover { color: var(--gray-900); background-color: var(--gray-100); }
-.icon-action-btn { font-size: 20px; padding: 8px; color: var(--gray-400); display: flex; align-items: center; justify-content: center; border-radius: 8px; transition: all 0.2s; background: none; border: none; cursor: pointer; }
-.icon-action-btn:hover { background-color: var(--gray-100); color: var(--gray-900); }
+.icon-action-btn { font-size: 20px; padding: 8px; color: var(--gray-400); display: flex; align-items: center; justify-content: center; border-radius: 8px; background: none; border: none; cursor: pointer; }
 .icon-action-btn.active { background-color: var(--active-bg); color: var(--active-text); } 
-#write-modal.mode-read-only .editor-toolbar { display: none; }
-#write-modal.mode-read-only .editor-container { padding-top: 40px; }
-#write-modal.mode-read-only .editor-title, #write-modal.mode-read-only .editor-subtitle { pointer-events: none; }
 
 /* 이미지 및 표 관련 */
 .editor-body img { max-width: 100%; height: auto; border-radius: 8px; margin: 10px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: inline-block; cursor: pointer; vertical-align: middle; }
-
-/* [수정] 표 슬라이드 박스 및 너비 설정 */
-.table-wrapper { 
-    width: 100%; 
-    overflow-x: auto; 
-    -webkit-overflow-scrolling: touch; 
-    margin: 15px 0;
-    padding-bottom: 10px; 
-}
-
-/* 표 스크롤바 디자인 (PC 전용) */
-.table-wrapper::-webkit-scrollbar { display: block; height: 6px; }
-.table-wrapper::-webkit-scrollbar-track { background: var(--gray-100); border-radius: 10px; }
-.table-wrapper::-webkit-scrollbar-thumb { background: var(--gray-400); border-radius: 10px; }
-
-.editor-body table { 
-    width: 100%; /* [변경] 기본 시작 너비를 스마트폰 가로 폭으로 설정 */
-    border-collapse: collapse; 
-    table-layout: fixed; 
-    cursor: pointer; 
-    user-select: text; 
-}
-.editor-body table td { border: 1px solid var(--gray-200); padding: 8px; min-height: 34px; word-break: break-all; position: relative; overflow: hidden; }
+.table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 15px 0; padding-bottom: 10px; }
+.editor-body table { width: 100%; border-collapse: collapse; table-layout: fixed; cursor: pointer; }
+.editor-body table td { border: 1px solid var(--gray-200); padding: 8px; min-height: 34px; word-break: break-all; position: relative; }
 .editor-body table td.selected-cell { background-color: rgba(59, 130, 246, 0.15) !important; outline: 1px solid var(--selection-color) !important; }
-.editor-body table.selecting-cells { user-select: none !important; -webkit-user-select: none !important; }
 
-.img-selection-box { position: absolute; border: 2px solid var(--selection-color); box-sizing: border-box; pointer-events: none; z-index: 3000; display: none; }
-.resize-handle { position: absolute; width: 20px; height: 20px; background-color: white; border: 2px solid var(--selection-color); border-radius: 50%; pointer-events: auto; z-index: 3001; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-.resize-handle.se { bottom: -10px; right: -10px; cursor: nwse-resize; }
-.img-resize-group { position: absolute; bottom: -50px; left: 50%; transform: translateX(-50%); display: inline-flex; flex-direction: row; align-items: center; justify-content: center; gap: 6px; z-index: 3002; background: white; padding: 0 6px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); border: 1px solid var(--gray-200); height: 38px; box-sizing: border-box; white-space: nowrap; }
-.img-resize-btn { appearance: none; -webkit-appearance: none; border: 1px solid var(--gray-200); background: white; font-size: 12px; font-family: var(--text-sans); padding: 0 8px; margin: 0; border-radius: 6px; cursor: pointer; color: var(--gray-900); line-height: 28px; height: 28px; min-width: 36px; text-align: center; display: inline-block; }
-.img-resize-btn:hover { background: var(--gray-100); }
-.img-delete-btn { position: absolute; top: -40px; left: 50%; transform: translateX(-50%); background: var(--danger); color: white; border: none; border-radius: 20px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; pointer-events: auto; box-shadow: 0 2px 6px rgba(0,0,0,0.2); display: flex; align-items: center; gap: 4px; white-space: nowrap; z-index: 3002; }
-.img-delete-btn:hover { background: #DC2626; }
-.editor-body a { pointer-events: auto !important; cursor: pointer !important; color: #2563EB; text-decoration: underline; }
-
-/* [중요] 책 모드 (Book Mode) - 스크롤 완전 봉쇄 */
+/* 책 모드 */
 #write-modal.mode-book { overflow: hidden; display: flex; flex-direction: column; width: 100vw; height: 100vh; position: fixed; top: 0; left: 0; z-index: 2000; }
-#write-modal.mode-book .editor-container { margin: 0; max-width: none; width: 100%; height: calc(100vh - 120px) !important; padding: 0 !important; column-width: auto; column-gap: 0 !important; column-fill: auto; overflow-x: hidden !important; overflow-y: hidden !important; scroll-behavior: auto !important; }
+#write-modal.mode-book .editor-container { margin: 0; max-width: none; width: 100%; height: calc(100vh - 120px) !important; padding: 0 !important; column-width: auto; column-gap: 0 !important; overflow-x: hidden !important; overflow-y: hidden !important; }
 #write-modal.mode-book .editor-body { padding: 20px 40px 200px 40px; box-sizing: border-box; text-align: justify; }
-#write-modal.mode-book .editor-title, #write-modal.mode-book .editor-subtitle { padding: 0 40px; box-sizing: border-box; }
-#write-modal.mode-book .meta-info-row, #write-modal.mode-book .divider { margin-left: 40px; margin-right: 40px; }
-#write-modal.mode-book .editor-title, #write-modal.mode-book .editor-subtitle, #write-modal.mode-book .meta-info-row, #write-modal.mode-book .divider { break-inside: avoid; } 
-.book-nav { display: none !important; }
-.page-indicator { position: fixed; bottom: 40px; right: 30px; left: auto; transform: none; font-family: var(--text-sans); font-size: 13px; color: var(--gray-400); z-index: 2050; background: transparent; padding: 4px 10px; pointer-events: auto !important; cursor: pointer; }
-.book-slider-container { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); width: 80%; max-width: 500px; background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(5px); padding: 12px 20px; border-radius: 30px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); z-index: 2100; display: flex; align-items: center; border: 1px solid var(--gray-100); }
-.book-slider-container.hidden { display: none !important; }
-#book-page-slider { width: 100%; height: 6px; -webkit-appearance: none; appearance: none; background: var(--gray-200); border-radius: 3px; outline: none; cursor: pointer; }
-#book-page-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; background: var(--gray-900); border-radius: 50%; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-.btn-scroll-top { position: fixed; bottom: 30px; right: 30px; width: 44px; height: 44px; border-radius: 50%; background: white; color: var(--gray-900); border: 1px solid var(--gray-200); box-shadow: 0 4px 12px rgba(0,0,0,0.1); cursor: pointer; display: flex; justify-content: center; align-items: center; font-size: 18px; z-index: 2060; transition: opacity 0.3s, transform 0.2s; }
-.btn-scroll-top:hover { transform: scale(1.1); background-color: var(--gray-100); }
-.btn-scroll-top:active { transform: scale(0.9); }
 
-/* 기타 UI */
-.trash-container { padding: 20px; }
-.trash-item { background: white; border: 1px solid var(--gray-200); border-radius: 12px; padding: 15px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
-.trash-info h4 { font-size: 16px; margin-bottom: 4px; text-decoration: line-through; color: var(--gray-400); }
-.trash-info p { font-size: 12px; color: var(--gray-400); }
-.trash-btn-group { display: flex; gap: 8px; }
-.trash-btn-group button { padding: 6px 12px; font-size: 12px; border-radius: 6px; cursor: pointer; border: none; font-weight: 500; font-family: var(--text-sans); }
-.btn-restore { background: var(--active-bg); color: var(--active-text); }
-.btn-perm-delete { background: #FEE2E2; color: var(--danger); }
-.context-menu { position: fixed; background: white; border: 1px solid var(--gray-200); border-radius: 8px; padding: 6px 0; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 3000; min-width: 160px; display: flex; flex-direction: column; }
-.ctx-item { background: none; border: none; text-align: left; padding: 10px 16px; font-size: 14px; font-family: var(--text-sans); color: var(--gray-900); cursor: pointer; display: flex; align-items: center; gap: 8px; width: 100%; transition: background 0.2s; }
-.ctx-item:hover { background: var(--gray-100); }
-.ctx-item.danger { color: var(--danger); }
-.ctx-item i { font-size: 16px; color: var(--gray-500); width: 20px; text-align: center; } 
-.login-wrapper { display: flex; justify-content: center; align-items: center; height: 100%; width: 100%; background: white; }
-.login-content { width: 100%; max-width: 360px; padding: 40px; text-align: center; }
-.login-logo h2 { font-family: var(--text-serif); font-size: 32px; font-weight: 600; margin-bottom: 8px; color: var(--gray-900); }
-.login-logo p { font-family: var(--text-sans); font-size: 14px; color: var(--gray-500); margin-bottom: 50px; }
-.btn-login-submit { width: 100%; background: var(--gray-900); color: white; padding: 16px; border-radius: 8px; border: none; font-size: 16px; font-weight: 600; cursor: pointer; font-family: var(--text-sans); transition: opacity 0.2s; }
-.btn-close-modal { position: absolute; top: 20px; right: 20px; background: none; border: none; font-size: 24px; color: var(--gray-400); cursor: pointer; }
+/* 글 목록 카드 */
 .entry-card { padding: 24px; border-bottom: 1px solid var(--gray-100); cursor: pointer; }
 .entry-card:hover { background: #fafafa; }
 .card-title { font-size: 19px; font-weight: 600; margin-bottom: 6px; }
@@ -215,24 +138,10 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 /* 모바일 반응형 */
 @media screen and (max-width: 650px) {
     .layout { padding: 0 16px 100px; width: 100%; }
-    .brunch-header { padding: 0 4px; margin-top: 50px; margin-bottom: 20px; flex-direction: row; align-items: flex-end; }
-    .header-left { flex-shrink: 0; }
-    .logo-area h1 { font-size: 24px; }
-    .sub-logo { display: block; font-size: 10px; margin-top: 2px; }
-    .header-right { width: auto; flex: 1; justify-content: flex-end; }
-    .login-msg-wrapper { top: -54px; right: 0; }
-    .login-msg-main { font-size: 11px; }
-    .search-container { flex: none; width: 32px; }
-    .search-container:focus-within, .search-container:hover { width: 140px; }
-    .nav-row { padding: 0 4px; overflow-x: auto; }
-    .controls-row { padding: 0 4px 10px; }
-    .floating-pen { right: 20px; bottom: 20px; width: 50px; height: 50px; font-size: 22px; }
+    .brunch-header { margin-top: 50px; }
+    .floating-pen { right: 20px; bottom: 20px; width: 50px; height: 50px; }
     .editor-container { padding: 20px 20px 100px; }
-    .full-screen-modal { padding-top: var(--safe-top); padding-bottom: var(--safe-bottom); }
-    #write-modal.mode-book .editor-container { padding: 0 !important; column-width: auto; column-gap: 0 !important; height: 100% !important; }
-    #write-modal.mode-book .editor-body { padding: 20px 20px 200px 20px; }
-    #write-modal.mode-book .editor-title, #write-modal.mode-book .editor-subtitle { padding: 0 20px; }
-    #write-modal.mode-book .meta-info-row, #write-modal.mode-book .divider { margin-left: 20px; margin-right: 20px; }
+    .editor-title { font-size: 24px !important; }
 }
 
 #btn-empty-trash { font-size: 13px; color: var(--danger); font-weight: 600; padding: 6px 12px; border-radius: 6px; background-color: #FEE2E2; border: none; cursor: pointer; transition: background-color 0.2s; font-family: var(--text-sans); margin-left: auto; }

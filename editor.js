@@ -16,7 +16,6 @@ let currentBookPageIndex = 0;
 let touchStartX = 0;          
 let wheelLockTimer = null;    
 
-// 표 셀 선택 및 리사이징 관련 변수
 let selectionStartCell = null;
 let isSelectingCells = false;
 let mobileLongPressTimer = null;
@@ -26,17 +25,11 @@ let isRowDragging = false;
 let resizeTargetTd = null;
 let startX, startY, startW, startH;
 
-// [히스토리] 정교한 되돌리기를 위한 스택
 let undoStack = [];
 let redoStack = [];
 const MAX_HISTORY = 50;
+let startTableFontSize = 16;
 
-// [리사이징] 표 전체 스케일링을 위한 변수 (기본값 10)
-let startTableFontSize = 10;
-
-/**
- * 커서 위치 보존 유틸리티
- */
 function getCursorOffset(element) {
     const selection = window.getSelection();
     if (selection.rangeCount === 0) return 0;
@@ -72,7 +65,6 @@ function setCursorOffset(element, offset) {
     }
 }
 
-// 현재 에디터 상태 기록
 function recordHistory() {
     const editorBody = document.getElementById('editor-body');
     if (!editorBody) return;
@@ -84,7 +76,6 @@ function recordHistory() {
     }
 }
 
-// 자동 저장 트리거
 export async function triggerAutoSave() {
     if (autoSaveTimer) clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(async () => {
@@ -340,12 +331,16 @@ export function openEditor(isEdit, entryData) {
         editSubtitle.value = entryData.subtitle || ''; 
         editBody.innerHTML = entryData.body || ''; 
         linkifyContents(editBody); 
-        applyFontStyle(entryData.fontFamily || 'Pretendard', entryData.fontSize || 10); 
+        state.currentFontFamily = entryData.fontFamily || 'Pretendard';
+        state.currentFontSize = entryData.fontSize || 16;
+        applyFontStyle(state.currentFontFamily, state.currentFontSize); 
     }
     else { 
         state.editingId = Date.now().toString(); 
         editTitle.value = ''; editSubtitle.value = ''; editBody.innerHTML = ''; 
-        applyFontStyle('Pretendard', 10); 
+        state.currentFontFamily = 'Pretendard';
+        state.currentFontSize = 16;
+        applyFontStyle('Pretendard', 16); 
         setTimeout(() => editTitle.focus(), 100); 
     }
     
@@ -423,17 +418,15 @@ export function formatDoc(cmd, value = null) {
     triggerAutoSave(); 
 }
 
-/**
- * [워드/엑셀급 정교한 크기 조정]
- */
 export function changeGlobalFontSize(newSize) {
     const selection = window.getSelection();
     const size = parseInt(newSize);
     if (isNaN(size)) return;
+    
+    state.currentFontSize = size;
+    recordHistory();
 
     if (selection.rangeCount > 0 && selection.toString().length > 0) {
-        // 선택 영역이 있을 때: 해당 부분만 변경
-        recordHistory();
         document.execCommand('fontSize', false, '7'); 
         const fontTags = document.querySelectorAll('font[size="7"]');
         fontTags.forEach(t => {
@@ -443,22 +436,18 @@ export function changeGlobalFontSize(newSize) {
             t.parentNode.replaceChild(span, t);
         });
     } else {
-        // 선택 영역이 없을 때: 에디터 전체 기본 크기 변경
-        state.currentFontSize = size; 
         const body = document.getElementById('editor-body');
         if(body) body.style.fontSize = size + 'px';
     }
     triggerAutoSave(); 
 }
 
-/**
- * [워드/엑셀급 정교한 폰트 조정]
- */
 export function changeGlobalFontFamily(newFont) {
     const selection = window.getSelection();
+    state.currentFontFamily = newFont;
+    recordHistory();
+
     if (selection.rangeCount > 0 && selection.toString().length > 0) {
-        // 선택 영역이 있을 때: 해당 부분만 변경
-        recordHistory();
         document.execCommand('fontName', false, 'temp_font');
         const fontTags = document.querySelectorAll('font[face="temp_font"]');
         fontTags.forEach(t => {
@@ -468,23 +457,30 @@ export function changeGlobalFontFamily(newFont) {
             t.parentNode.replaceChild(span, t);
         });
     } else {
-        // 선택 영역이 없을 때: 에디터 전체 기본 폰트 변경
-        state.currentFontFamily = newFont;
         applyFontStyle(newFont, state.currentFontSize);
     }
     triggerAutoSave();
 }
 
 /**
- * 에디터의 베이스(전체) 스타일을 적용
+ * [중요] 제목과 소제목은 글꼴만 변경하고 크기는 고정
  */
 export function applyFontStyle(f, s) { 
     state.currentFontFamily = f; state.currentFontSize = s; 
     const body = document.getElementById('editor-body'), title = document.getElementById('edit-title'), subtitle = document.getElementById('edit-subtitle');
     const isHand = (f === 'Nanum Pen Script'); const baseSize = isHand ? s + 4 : s;
-    if(body) { body.style.fontFamily = f; body.style.fontSize = baseSize + 'px'; }
-    if(title) { title.style.fontFamily = f; title.style.fontSize = Math.floor(baseSize * 1.6) + 'px'; }
-    if(subtitle) { subtitle.style.fontFamily = f; subtitle.style.fontSize = Math.floor(baseSize * 1.3) + 'px'; }
+    
+    if(body) { 
+        body.style.fontFamily = f; 
+        body.style.fontSize = baseSize + 'px'; 
+    }
+    // 제목과 소제목은 글꼴만 업데이트 (크기는 CSS !important로 고정됨)
+    if(title) { 
+        title.style.fontFamily = f; 
+    }
+    if(subtitle) { 
+        subtitle.style.fontFamily = f; 
+    }
 }
 
 /* --- 리사이징 및 기타 유틸리티 --- */
@@ -527,7 +523,7 @@ function updateSelectionBox() {
 }
 function deleteSelectedElement() { if (currentSelectedElement) { currentSelectedElement.remove(); hideSelection(); triggerAutoSave(); } }
 let isResizing = false, startX2, startY2, startWidth2, startHeight2;
-function startResize(e) { e.preventDefault(); isResizing = true; startX2 = e.clientX; startY2 = e.clientY; startWidth2 = currentSelectedElement.clientWidth; startHeight2 = currentSelectedElement.clientHeight; if (currentSelectedElement.tagName === 'TABLE') { startTableFontSize = parseInt(window.getComputedStyle(currentSelectedElement).fontSize) || 10; } document.addEventListener('mousemove', resizing); document.addEventListener('mouseup', stopResize); }
+function startResize(e) { e.preventDefault(); isResizing = true; startX2 = e.clientX; startY2 = e.clientY; startWidth2 = currentSelectedElement.clientWidth; startHeight2 = currentSelectedElement.clientHeight; if (currentSelectedElement.tagName === 'TABLE') { startTableFontSize = parseInt(window.getComputedStyle(currentSelectedElement).fontSize) || 16; } document.addEventListener('mousemove', resizing); document.addEventListener('mouseup', stopResize); }
 function resizing(e) { if (!isResizing || !currentSelectedElement) return; const deltaX = e.clientX - startX2, newWidth = startWidth2 + deltaX, scaleRatio = newWidth / startWidth2, newHeight = startHeight2 + (e.clientY - startY2); if (newWidth > 50) { currentSelectedElement.style.width = newWidth + 'px'; if (currentSelectedElement.tagName === 'TABLE') { currentSelectedElement.style.fontSize = (startTableFontSize * scaleRatio) + 'px'; } } if (newHeight > 30) currentSelectedElement.style.height = newHeight + 'px'; updateSelectionBox(); }
 function stopResize() { if (isResizing) { recordHistory(); isResizing = false; } document.removeEventListener('mousemove', resizing); document.removeEventListener('mouseup', stopResize); triggerAutoSave(); }
 

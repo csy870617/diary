@@ -24,6 +24,7 @@ export async function saveEntry() {
     if (!state.editingId) state.editingId = Date.now().toString();
     const index = state.entries.findIndex(e => e.id === state.editingId);
 
+    // 핵심 수정: 현재 에디터에 적용된 폰트 정보를 metadata로 명확히 저장
     if(index === -1) {
         const newEntry = {
             id: state.editingId,
@@ -36,34 +37,27 @@ export async function saveEntry() {
             category: state.currentCategory,
             isDeleted: false,
             isPurged: false,
-            fontFamily: state.currentFontFamily || 'Pretendard',
-            fontSize: state.currentFontSize || 16
+            fontFamily: state.currentFontFamily,
+            fontSize: state.currentFontSize
         };
         state.entries.unshift(newEntry);
     } else {
         const old = state.entries[index];
-        if (old.title !== title || old.body !== body || old.subtitle !== subtitle) {
-            state.entries[index] = {
-                ...old,
-                title, subtitle, body,
-                modifiedAt: nowISO, 
-                fontFamily: state.currentFontFamily,
-                fontSize: state.currentFontSize
-            };
-        }
+        state.entries[index] = {
+            ...old,
+            title, subtitle, body,
+            modifiedAt: nowISO, 
+            fontFamily: state.currentFontFamily,
+            fontSize: state.currentFontSize
+        };
     }
     
     localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-    renderEntries(); // [개선] UI 즉시 갱신
+    renderEntries();
 }
 
-/**
- * 변경사항 저장 및 백그라운드 동기화
- * UI 렌더링을 방해하지 않도록 await 순서를 조정했습니다.
- */
 export async function saveData() {
     localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-    // 드라이브 저장은 백그라운드에서 진행되도록 await를 걸지 않거나 별도로 처리 가능합니다.
     saveToDrive(); 
 }
 
@@ -72,13 +66,9 @@ export async function updateEntryField(id, fields) {
     if(entry) {
         Object.assign(entry, fields);
         entry.modifiedAt = new Date().toISOString();
-        
-        // [개선] 로컬 저장과 UI 갱신을 먼저 수행하여 즉시 반영되게 함
         localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
         renderEntries();
         renderTrash();
-        
-        // 동기화는 나중에 수행
         await saveToDrive();
     }
 }
@@ -89,12 +79,8 @@ export async function moveToTrash(id) {
         if(entry) {
             entry.isDeleted = true;
             entry.modifiedAt = new Date().toISOString();
-            
-            // [개선] 즉시 화면에서 제거
             localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
             renderEntries();
-            
-            // 백그라운드 동기화
             saveToDrive();
         }
     }
@@ -105,12 +91,9 @@ export async function restoreEntry(id) {
     if(entry) {
         entry.isDeleted = false;
         entry.modifiedAt = new Date().toISOString();
-        
-        // [개선] 즉시 화면 갱신 (휴지통에서 제거, 목록에 추가)
         localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
         renderTrash();
         renderEntries();
-        
         saveToDrive();
     }
 }
@@ -121,11 +104,8 @@ export async function permanentDelete(id) {
         if(index !== -1) {
             state.entries[index].isPurged = true;
             state.entries[index].modifiedAt = new Date().toISOString();
-            
-            // [개선] 즉시 휴지통 화면에서 제거
             localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
             renderTrash();
-            
             saveToDrive();
         }
     }
@@ -134,15 +114,11 @@ export async function permanentDelete(id) {
 export async function emptyTrash() {
     const trashItems = state.entries.filter(e => e.isDeleted && !e.isPurged);
     if(trashItems.length === 0) return alert("휴지통이 이미 비어있습니다.");
-    
     if(confirm(`휴지통의 ${trashItems.length}개 항목을 모두 영구 삭제하시겠습니까?`)) {
         const now = new Date().toISOString();
         trashItems.forEach(e => { e.isPurged = true; e.modifiedAt = now; });
-        
-        // [개선] 즉시 휴지통 화면 비우기
         localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
         renderTrash();
-        
         await saveToDrive();
     }
 }
@@ -174,10 +150,7 @@ export async function duplicateEntry(id) {
         timestamp: nowISO, modifiedAt: nowISO, isDeleted: false, isPurged: false
     };
     state.entries.unshift(newEntry);
-    
-    // [개선] 즉시 목록 갱신
     localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
     renderEntries();
-    
     saveToDrive();
 }
