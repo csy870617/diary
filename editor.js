@@ -35,9 +35,7 @@ const MAX_HISTORY = 50;
 let startTableFontSize = 16;
 
 /**
- * [수정] 커서 위치 저장을 위한 유틸리티
- * 커서 위치를 단순 Range가 아닌 텍스트 오프셋으로 관리하여 
- * innerHTML 교체 후에도 커서가 튀지 않게 합니다.
+ * 커서 위치 저장을 위한 유틸리티 (텍스트 오프셋 방식)
  */
 function getCursorOffset(element) {
     const selection = window.getSelection();
@@ -79,7 +77,6 @@ function recordHistory() {
     const editorBody = document.getElementById('editor-body');
     if (!editorBody) return;
     const currentState = editorBody.innerHTML;
-    // 중복 기록 방지 및 스택 관리
     if (undoStack.length === 0 || undoStack[undoStack.length - 1] !== currentState) {
         undoStack.push(currentState);
         if (undoStack.length > MAX_HISTORY) undoStack.shift();
@@ -98,7 +95,7 @@ export async function triggerAutoSave() {
     }, 2000); 
 }
 
-/* --- 책 모드 관련 원본 로직 (유지) --- */
+/* --- 책 모드 핸들러 로직 --- */
 function handleBookWheel(e) {
     if (state.currentViewMode !== 'book') return;
     e.preventDefault(); e.stopPropagation();
@@ -127,6 +124,25 @@ function handleBookResize() {
         updateBookNav();
     }
 }
+
+/**
+ * [해결] 누락되었던 이벤트 리스너 토글 함수 복원
+ */
+function toggleBookEventListeners(enable) {
+    const container = document.getElementById('editor-container');
+    if (!container) return;
+    container.removeEventListener('wheel', handleBookWheel);
+    container.removeEventListener('touchstart', handleBookTouchStart);
+    container.removeEventListener('touchmove', handleBookTouchMove);
+    container.removeEventListener('touchend', handleBookTouchEnd);
+    if (enable) {
+        container.addEventListener('wheel', handleBookWheel, { passive: false });
+        container.addEventListener('touchstart', handleBookTouchStart, { passive: true });
+        container.addEventListener('touchmove', handleBookTouchMove, { passive: false });
+        container.addEventListener('touchend', handleBookTouchEnd, { passive: true });
+    }
+}
+
 export function turnPage(direction) { 
     const container = document.getElementById('editor-container');
     if (!container) return;
@@ -138,6 +154,7 @@ export function turnPage(direction) {
     container.scrollLeft = currentBookPageIndex * stride;
     updateBookNav();
 }
+
 export function jumpToPage(index) {
     const container = document.getElementById('editor-container');
     if (!container) return;
@@ -148,6 +165,7 @@ export function jumpToPage(index) {
     container.scrollLeft = currentBookPageIndex * stride;
     updateBookNav();
 }
+
 function updateBookLayout() {
     const container = document.getElementById('editor-container');
     if (!container) return;
@@ -156,6 +174,7 @@ function updateBookLayout() {
     container.style.height = `${window.innerHeight - 120}px`;
     container.style.overflow = 'hidden';
 }
+
 export function updateBookNav() { 
     if (state.currentViewMode !== 'book') return; 
     const container = document.getElementById('editor-container');
@@ -346,14 +365,18 @@ export function toggleViewMode(mode) {
     if(container) { container.style.height = ''; container.style.overflow = ''; container.style.columnWidth = ''; container.style.columnGap = ''; container.scrollLeft = 0; }
     writeModal.classList.remove('mode-read-only', 'mode-book');
     document.querySelectorAll('.book-nav, #page-indicator, #book-slider-container, #btn-scroll-top').forEach(el => el.classList.add('hidden'));
-    hideSelection(); toggleBookEventListeners(false);
-    if (mode === 'book') { editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false"; linkifyContents(editBody); writeModal.classList.add('mode-book'); updateBookLayout(); if (!wasBookMode && oldHeight > 0) currentBookPageIndex = Math.floor(oldScrollTop / oldHeight); toggleBookEventListeners(true); updateBookNav(); if (container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth); editorToolbar?.classList.add('collapsed'); }
+    hideSelection(); 
+    
+    // [중요] 누락되었던 리스너 토글 호출
+    toggleBookEventListeners(mode === 'book');
+
+    if (mode === 'book') { editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false"; linkifyContents(editBody); writeModal.classList.add('mode-book'); updateBookLayout(); if (!wasBookMode && oldHeight > 0) currentBookPageIndex = Math.floor(oldScrollTop / oldHeight); updateBookNav(); if (container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth); editorToolbar?.classList.add('collapsed'); }
     else if (mode === 'readOnly') { editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false"; linkifyContents(editBody); writeModal.classList.add('mode-read-only'); editorToolbar?.classList.add('collapsed'); if (wasBookMode && container) requestAnimationFrame(() => { container.scrollTop = lastPageIndex * oldHeight; }); }
     else { editTitle.readOnly = false; editSubtitle.readOnly = false; editBody.contentEditable = "true"; editorToolbar?.classList.remove('collapsed'); if (wasBookMode && container) requestAnimationFrame(() => { container.scrollTop = lastPageIndex * oldHeight; }); }
 }
 
 /**
- * [수정] 되돌리기 / 정렬 고도화
+ * [수정] 정교한 정렬 및 되돌리기 통합 관리
  */
 export function formatDoc(cmd, value = null) { 
     const editor = document.getElementById('editor-body'); if (!editor) return;
@@ -371,41 +394,20 @@ export function formatDoc(cmd, value = null) {
     recordHistory(); 
     if (!document.activeElement.closest('#editor-body')) editor.focus();
 
-    // [핵심 추가] 정렬 명령 처리 (표 셀 내부에 있을 때 CSS 스타일로 강제 적용)
     if (cmd.startsWith('justify')) {
         const selectedCells = document.querySelectorAll('td.selected-cell');
         const alignMap = { 'justifyLeft': 'left', 'justifyCenter': 'center', 'justifyRight': 'right' };
         const alignValue = alignMap[cmd];
-
-        if (selectedCells.length > 0) {
-            selectedCells.forEach(cell => cell.style.textAlign = alignValue);
-        } else {
-            const selection = window.getSelection();
-            const td = selection.anchorNode?.parentElement?.closest('td');
-            if (td) {
-                td.style.textAlign = alignValue;
-            } else {
-                document.execCommand(cmd, false, value);
-            }
-        }
+        if (selectedCells.length > 0) { selectedCells.forEach(cell => cell.style.textAlign = alignValue); } 
+        else { const selection = window.getSelection(); const td = selection.anchorNode?.parentElement?.closest('td'); if (td) td.style.textAlign = alignValue; else document.execCommand(cmd, false, value); }
     } else {
         const selectedCells = document.querySelectorAll('td.selected-cell');
-        if (selectedCells.length > 0) {
-            selectedCells.forEach(cell => {
-                const range = document.createRange(); range.selectNodeContents(cell);
-                const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
-                document.execCommand(cmd, false, value);
-            });
-        } else {
-            document.execCommand(cmd, false, value);
-        }
+        if (selectedCells.length > 0) { selectedCells.forEach(cell => { const range = document.createRange(); range.selectNodeContents(cell); const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range); document.execCommand(cmd, false, value); }); } 
+        else { document.execCommand(cmd, false, value); }
     }
     triggerAutoSave(); 
 }
 
-/**
- * [수정] 부분 글자 크기 조정 로직
- */
 export function changeGlobalFontSize(delta) {
     const selection = window.getSelection();
     if (selection.rangeCount > 0 && selection.toString().length > 0) {
@@ -414,13 +416,10 @@ export function changeGlobalFontSize(delta) {
         const style = window.getComputedStyle(parent);
         const currentSize = parseInt(style.fontSize) || state.currentFontSize;
         const newSize = Math.max(8, Math.min(100, currentSize + delta));
-        
         document.execCommand('fontSize', false, '7'); 
         const fontTags = document.querySelectorAll('font[size="7"]');
         fontTags.forEach(t => {
-            const span = document.createElement('span');
-            span.style.fontSize = newSize + 'px';
-            span.innerHTML = t.innerHTML;
+            const span = document.createElement('span'); span.style.fontSize = newSize + 'px'; span.innerHTML = t.innerHTML;
             t.parentNode.replaceChild(span, t);
         });
     } else {
@@ -439,10 +438,9 @@ export function applyFontStyle(f, s) {
     if(subtitle) { subtitle.style.fontFamily = f; subtitle.style.fontSize = Math.floor(baseSize * 1.3) + 'px'; }
 }
 
-/* --- 리사이징 및 기타 유틸리티 (원본 보존) --- */
+/* --- 이미지 및 표 리사이징 보조 함수 유지 --- */
 function selectElement(el) { currentSelectedElement = el; createSelectionUI(); updateSelectionBox(); }
-function hideSelection() { currentSelectedElement = null; if (selectionBox) selectionBox.style.display = 'none'; if (resizeHandle) resizeHandle.style.display = 'none'; if (deleteBtn) deleteBtn.style.display = 'none'; if (resizeBtnGroup) resizeBtnGroup.style.display = 'none'; if(tableControlGroup) tableControlGroup.style.display = 'none'; }
-
+function hideSelection() { currentSelectedElement = null; ['img-selection-box','resize-handle','img-delete-btn','img-resize-group'].forEach(cls => { document.querySelectorAll('.'+cls).forEach(e => e.style.display = 'none'); }); if(tableControlGroup) tableControlGroup.style.display = 'none'; }
 function createSelectionUI() {
     if (!selectionBox) {
         selectionBox = document.createElement('div'); selectionBox.className = 'img-selection-box'; document.body.appendChild(selectionBox);
@@ -451,11 +449,7 @@ function createSelectionUI() {
         deleteBtn = document.createElement('button'); deleteBtn.className = 'img-delete-btn'; deleteBtn.innerHTML = '<i class="ph ph-trash"></i> 삭제'; document.body.appendChild(deleteBtn);
         deleteBtn.onclick = () => { recordHistory(); deleteSelectedElement(); };
         resizeBtnGroup = document.createElement('div'); resizeBtnGroup.className = 'img-resize-group';
-        [25, 50, 75, 100].forEach(size => {
-            const btn = document.createElement('button'); btn.className = 'img-resize-btn'; btn.innerText = size + '%';
-            btn.onclick = () => { if (currentSelectedElement) { recordHistory(); currentSelectedElement.style.width = size + '%'; currentSelectedElement.style.height = 'auto'; updateSelectionBox(); triggerAutoSave(); } };
-            resizeBtnGroup.appendChild(btn);
-        });
+        [25, 50, 75, 100].forEach(size => { const btn = document.createElement('button'); btn.className = 'img-resize-btn'; btn.innerText = size + '%'; btn.onclick = () => { if (currentSelectedElement) { recordHistory(); currentSelectedElement.style.width = size + '%'; currentSelectedElement.style.height = 'auto'; updateSelectionBox(); triggerAutoSave(); } }; resizeBtnGroup.appendChild(btn); });
         document.body.appendChild(resizeBtnGroup);
     }
     if (!tableControlGroup) {
@@ -467,7 +461,6 @@ function createSelectionUI() {
     selectionBox.style.display = 'block'; resizeHandle.style.display = 'block'; deleteBtn.style.display = 'flex'; resizeBtnGroup.style.display = 'flex';
     if(tableControlGroup) tableControlGroup.style.display = currentSelectedElement.tagName === 'TABLE' ? 'flex' : 'none';
 }
-
 function updateSelectionBox() {
     if (!currentSelectedElement || !selectionBox) return;
     const rect = currentSelectedElement.getBoundingClientRect(), scrollTop = window.scrollY, scrollLeft = window.scrollX;
@@ -483,15 +476,9 @@ function updateSelectionBox() {
         deleteBtn.style.top = (rect.bottom + scrollTop + 55) + 'px'; deleteBtn.style.left = centerX + 'px';
     }
 }
-
 function deleteSelectedElement() { if (currentSelectedElement) { currentSelectedElement.remove(); hideSelection(); triggerAutoSave(); } }
-
 let isResizing = false, startX2, startY2, startWidth2, startHeight2;
-function startResize(e) { 
-    e.preventDefault(); isResizing = true; startX2 = e.clientX; startY2 = e.clientY; startWidth2 = currentSelectedElement.clientWidth; startHeight2 = currentSelectedElement.clientHeight; 
-    if (currentSelectedElement.tagName === 'TABLE') { startTableFontSize = parseInt(window.getComputedStyle(currentSelectedElement).fontSize) || 16; }
-    document.addEventListener('mousemove', resizing); document.addEventListener('mouseup', stopResize); 
-}
+function startResize(e) { e.preventDefault(); isResizing = true; startX2 = e.clientX; startY2 = e.clientY; startWidth2 = currentSelectedElement.clientWidth; startHeight2 = currentSelectedElement.clientHeight; if (currentSelectedElement.tagName === 'TABLE') { startTableFontSize = parseInt(window.getComputedStyle(currentSelectedElement).fontSize) || 16; } document.addEventListener('mousemove', resizing); document.addEventListener('mouseup', stopResize); }
 function resizing(e) { if (!isResizing || !currentSelectedElement) return; const deltaX = e.clientX - startX2, newWidth = startWidth2 + deltaX, scaleRatio = newWidth / startWidth2, newHeight = startHeight2 + (e.clientY - startY2); if (newWidth > 50) { currentSelectedElement.style.width = newWidth + 'px'; if (currentSelectedElement.tagName === 'TABLE') { currentSelectedElement.style.fontSize = (startTableFontSize * scaleRatio) + 'px'; } } if (newHeight > 30) currentSelectedElement.style.height = newHeight + 'px'; updateSelectionBox(); }
 function stopResize() { if (isResizing) { recordHistory(); isResizing = false; } document.removeEventListener('mousemove', resizing); document.removeEventListener('mouseup', stopResize); triggerAutoSave(); }
 
@@ -499,7 +486,6 @@ export function addRow() { const table = currentSelectedElement; if (!table || t
 export function deleteRow() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE' || table.rows.length <= 1) return; recordHistory(); const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, refRow = targetCell ? targetCell.parentElement : table.rows[table.rows.length - 1]; table.deleteRow(refRow.rowIndex); lastClickedCell = null; }
 export function addColumn() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE') return; recordHistory(); const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1, rowIdx = targetCell ? targetCell.parentElement.rowIndex : 0; let cellToFocus = null; for (let i = 0; i < table.rows.length; i++) { const newCell = table.rows[i].insertCell(colIdx + 1); newCell.innerHTML = '<br>'; if (i === rowIdx) cellToFocus = newCell; } if (cellToFocus) focusCell(cellToFocus); }
 export function deleteColumn() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE' || table.rows[0].cells.length <= 1) return; recordHistory(); const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1; for (let i = 0; i < table.rows.length; i++) { table.rows[i].deleteCell(colIdx); } lastClickedCell = null; }
-
 export function insertSticker(emoji) { recordHistory(); document.execCommand('insertText', false, emoji); triggerAutoSave(); }
 export function insertImage(src) { recordHistory(); document.execCommand('insertImage', false, src); triggerAutoSave(); }
 export function insertTable(rows, cols) { recordHistory(); let tableHtml = '<div class="table-wrapper"><table style="width: 100%; table-layout: fixed;"><tbody>'; for (let i = 0; i < rows; i++) { tableHtml += '<tr>'; for (let j = 0; j < cols; j++) { tableHtml += '<td><br></td>'; } tableHtml += '</tr>'; } tableHtml += '</tbody></table></div><p><br></p>'; const editor = document.getElementById('editor-body'); editor.focus(); document.execCommand('insertHTML', false, tableHtml); triggerAutoSave(); }
