@@ -1,7 +1,7 @@
 import { state, loadCategoriesFromLocal, saveCategoriesToLocal } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
 import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameCategoryAction, deleteCategoryAction, addNewCategory } from './ui.js';
-import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable, createHyperlink } from './editor.js';
+import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable, createHyperlink } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, saveToDrive, syncFromDrive } from './drive.js';
 
@@ -59,7 +59,7 @@ function init() {
                 body: raw.b || raw.body || '',
                 date: raw.d || raw.date || new Date().toLocaleDateString('ko-KR'),
                 fontFamily: raw.f || raw.fontFamily || 'Pretendard',
-                fontSize: raw.z || raw.fontSize || 16
+                fontSize: raw.z || raw.fontSize || 10
             };
             setTimeout(() => {
                 openEditor(true, entry);
@@ -142,7 +142,7 @@ function setupListeners() {
 
         ['context-menu', 'category-context-menu', 'color-palette-popup', 'sticker-palette', 'table-modal'].forEach(id => {
             const el = document.getElementById(id);
-            if (el && !el.contains(e.target) && !e.target.closest('.tool-btn')) el.classList.add('hidden');
+            if (el && !el.contains(e.target) && !e.target.closest('.tool-btn') && !e.target.closest('#font-size-input')) el.classList.add('hidden');
         });
     }, true);
 
@@ -172,19 +172,26 @@ function setupUIListeners() {
     document.getElementById('search-input')?.addEventListener('input', (e) => renderEntries(e.target.value));
     document.getElementById('refresh-btn')?.addEventListener('click', () => syncFromDrive());
 
-    document.getElementById('btn-global-size-up')?.addEventListener('click', () => changeGlobalFontSize(2));
-    document.getElementById('btn-global-size-down')?.addEventListener('click', () => changeGlobalFontSize(-2));
+    const fontSizeInput = document.getElementById('font-size-input');
+    if (fontSizeInput) {
+        fontSizeInput.addEventListener('input', (e) => {
+            changeGlobalFontSize(e.target.value);
+            triggerAutoSave();
+        });
+    }
 
     const toolbarScrollArea = document.getElementById('toolbar-scroll-area');
     if (toolbarScrollArea) { toolbarScrollArea.addEventListener('wheel', (e) => { if (e.deltaY !== 0) { e.preventDefault(); toolbarScrollArea.scrollLeft += e.deltaY; } }); }
 
-    document.getElementById('font-selector')?.addEventListener('change', (e) => { applyFontStyle(e.target.value, state.currentFontSize); triggerAutoSave(); });
+    document.getElementById('font-selector')?.addEventListener('change', (e) => { 
+        changeGlobalFontFamily(e.target.value); 
+        triggerAutoSave(); 
+    });
 
     document.querySelectorAll('.tool-btn[data-cmd]').forEach(btn => {
         btn.addEventListener('click', (e) => { e.preventDefault(); const cmd = btn.dataset.cmd; if (cmd) formatDoc(cmd); });
     });
 
-    // [최적화] 공유하기 버튼: URL 길이 한계 극복을 위한 압축 키 사용
     document.getElementById('btn-share')?.addEventListener('click', () => {
         const bodyHtml = document.getElementById('editor-body').innerHTML;
         if (bodyHtml.includes('src="data:image')) {
@@ -211,12 +218,9 @@ function setupUIListeners() {
         } catch (e) { alert("공유 링크 생성 실패"); }
     });
 
-    // [신규] PDF 다운로드 버튼 로직
     document.getElementById('btn-download')?.addEventListener('click', () => {
         const element = document.getElementById('editor-container');
         const title = document.getElementById('edit-title').value || '신앙일지';
-        
-        // PDF 변환 옵션 설정
         const opt = {
             margin: 10,
             filename: `${title}.pdf`,
@@ -224,8 +228,6 @@ function setupUIListeners() {
             html2canvas: { scale: 2, useCORS: true },
             jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
         };
-
-        // 변환 실행 전 로딩 상태 표시 (원할 경우 추가)
         html2pdf().set(opt).from(element).save();
     });
 
