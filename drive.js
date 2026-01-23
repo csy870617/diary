@@ -8,12 +8,10 @@ let gapiInited = false;
 let gisInited = false;
 let isSyncing = false;
 let pendingSync = false;
-let lastCloudModifiedTime = null; 
-let syncTimeoutTimer = null; 
 let refreshTimer = null;
 
 /**
- * [핵심 기능] 토큰 유효성 검사 및 자동 세션 연장
+ * [핵심 수정] 토큰 유효성 검사 및 인앱 세션 복구 로직
  */
 async function ensureValidToken(isAutoSave = false) {
     const storedToken = localStorage.getItem('faith_token');
@@ -21,7 +19,7 @@ async function ensureValidToken(isAutoSave = false) {
     const isLoggedIn = localStorage.getItem('is_faith_logged_in') === 'true';
     const now = Date.now();
 
-    // 1. 아직 토큰이 유효한 경우
+    // 1. 유효한 토큰이 이미 있는 경우
     if (storedToken && storedExp && now < (parseInt(storedExp) - 300000)) {
         if (!gapi.client.getToken()) {
             gapi.client.setToken({ access_token: storedToken });
@@ -29,26 +27,24 @@ async function ensureValidToken(isAutoSave = false) {
         return true;
     }
 
-    // 2. 토큰이 없거나 만료되었지만 로그인 플래그가 있는 경우 (배경에서 자동 갱신)
-    if (isLoggedIn) {
+    // 2. 인앱 브라우저 세션 복구 (배경에서 조용히 갱신)
+    if (isLoggedIn && tokenClient) {
         return new Promise((resolve) => {
             try {
                 tokenClient.callback = async (resp) => {
                     if (resp.error) {
                         console.warn("세션 갱신 실패:", resp.error);
-                        if (!isAutoSave) {
-                            localStorage.removeItem('is_faith_logged_in');
-                        }
+                        if (!isAutoSave) localStorage.removeItem('is_faith_logged_in');
                         resolve(false);
                         return;
                     }
                     saveTokenInfo(resp);
-                    console.log("구글 보안 세션이 자동으로 연장되었습니다.");
                     resolve(true);
                 };
-                // prompt: '' 는 팝업 없이 세션을 복구하는 핵심 옵션입니다.
+                // prompt: ''는 이미 로그인된 경우 팝업 없이 세션을 가져오는 옵션입니다.
                 tokenClient.requestAccessToken({ prompt: '' });
             } catch (err) {
+                console.error("Auth Refresh Error:", err);
                 resolve(false);
             }
         });
@@ -56,9 +52,6 @@ async function ensureValidToken(isAutoSave = false) {
     return false;
 }
 
-/**
- * 토큰 정보 저장 및 자동 갱신 타이머 설정
- */
 function saveTokenInfo(resp) {
     const expiresIn = resp.expires_in || 3599; 
     const expTime = Date.now() + (expiresIn * 1000);
@@ -66,8 +59,6 @@ function saveTokenInfo(resp) {
     localStorage.setItem('faith_token_exp', expTime);
     localStorage.setItem('is_faith_logged_in', 'true');
     gapi.client.setToken({ access_token: resp.access_token });
-    
-    // 다음 만료 시점에 맞춰 자동 갱신 예약
     setupAutoRefresh(expiresIn);
 }
 
@@ -77,12 +68,9 @@ function setupAutoRefresh(expiresInSeconds) {
     refreshTimer = setTimeout(() => ensureValidToken(true), delay);
 }
 
-/**
- * 드라이브 초기화 (앱 시작 시 호출)
- */
 export function initGoogleDrive(callback) {
-    if (typeof gapi === 'undefined' || typeof google === 'undefined' || !google.accounts) {
-        setTimeout(() => initGoogleDrive(callback), 100);
+    if (typeof gapi === 'undefined' || typeof google === 'undefined') {
+        setTimeout(() => initGoogleDrive(callback), 200);
         return;
     }
 
@@ -94,21 +82,17 @@ export function initGoogleDrive(callback) {
             });
             gapiInited = true;
             
-            // 앱 실행 시 세션 복구 시도
-            const hasLoggedIn = localStorage.getItem('is_faith_logged_in') === 'true';
-            if (hasLoggedIn) {
+            if (localStorage.getItem('is_faith_logged_in') === 'true') {
                 const success = await ensureValidToken(true);
                 if (success) {
                     const userInfo = await gapi.client.drive.about.get({ fields: 'user' });
                     state.currentUser = userInfo.result.user;
                     await syncFromDrive();
                     if(callback) callback(true);
-                } else {
-                    if(callback) callback(false);
+                    return;
                 }
-            } else {
-                if(callback) callback(false);
             }
+            if(callback) callback(false);
         } catch (err) {
             console.error("GAPI 초기화 실패", err);
             if(callback) callback(false);
@@ -124,33 +108,28 @@ export function initGoogleDrive(callback) {
             const userInfo = await gapi.client.drive.about.get({ fields: 'user' });
             state.currentUser = userInfo.result.user;
             await syncFromDrive();
-            if(callback) callback(true);
+            if (window.onAuthSuccess) window.onAuthSuccess(); // auth.js와 연동
         },
     });
     gisInited = true;
 }
 
 export function handleAuthClick() {
-    // 명시적 로그인은 항상 계정 선택 화면을 보여줌
+    // 인앱 브라우저에서는 consent보다 select_account가 더 안정적입니다.
     if (tokenClient) tokenClient.requestAccessToken({ prompt: 'select_account' });
 }
 
 export function handleSignoutClick(callback) {
     const token = gapi.client.getToken();
-    if (token) {
-        google.accounts.oauth2.revoke(token.access_token);
-        gapi.client.setToken('');
-    }
-    localStorage.removeItem('faith_token');
-    localStorage.removeItem('faith_token_exp');
-    localStorage.removeItem('is_faith_logged_in');
-    state.currentUser = null;
+    if (token) google.accounts.oauth2.revoke(token.access_token);
+    gapi.client.setToken('');
+    localStorage.clear(); // 세션 완전 초기화
     if (refreshTimer) clearTimeout(refreshTimer);
     if(callback) callback();
 }
 
 /**
- * 실시간 데이터 업로드 및 병합 로직
+ * 드라이브 동기화 및 파일 관리 로직 (전체 유지)
  */
 export async function saveToDrive() {
     if (localStorage.getItem('is_faith_logged_in') !== 'true') return;
@@ -167,17 +146,14 @@ export async function saveToDrive() {
         const fileMeta = await findDBFileMeta(folderId);
         
         if (fileMeta) {
-            // 구름 위 데이터가 로컬보다 최신인지 확인 후 병합
             const response = await gapi.client.drive.files.get({ fileId: fileMeta.id, alt: 'media' });
             const cloudData = typeof response.result === 'string' ? JSON.parse(response.result) : response.result;
-            
             if (cloudData) {
                 state.entries = mergeEntries(state.entries, cloudData.entries || []);
                 const mergedCats = mergeCategories(state, cloudData);
                 state.allCategories = mergedCats.categories;
                 state.categoryOrder = mergedCats.order;
                 state.categoryUpdatedAt = mergedCats.updatedAt;
-
                 localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
                 saveCategoriesToLocal();
                 renderTabs();
@@ -185,12 +161,9 @@ export async function saveToDrive() {
                 refreshEditorContent();
             }
         }
-
-        // 최종 병합된 데이터를 업로드
         await uploadToDrive(folderId, fileMeta ? fileMeta.id : null);
-
     } catch (err) {
-        console.error("동기화 실패:", err);
+        console.error("Drive Sync Error:", err);
     } finally {
         isSyncing = false;
         toggleSpinners(false);
@@ -237,7 +210,7 @@ function mergeEntries(localList, cloudList) {
     localList.forEach(localItem => {
         if(!localItem || !localItem.id) return;
         const cloudItem = entryMap.get(localItem.id);
-        if (!cloudItem) { entryMap.set(localItem.id, localItem); } 
+        if (!cloudItem) entryMap.set(localItem.id, localItem);
         else {
             const localTime = new Date(localItem.modifiedAt || localItem.timestamp || 0).getTime();
             const cloudTime = new Date(cloudItem.modifiedAt || cloudItem.timestamp || 0).getTime();
@@ -250,11 +223,10 @@ function mergeEntries(localList, cloudList) {
 function mergeCategories(localState, cloudData) {
     const localTime = new Date(localState.categoryUpdatedAt || 0).getTime();
     const cloudTime = new Date(cloudData.categoryUpdatedAt || 0).getTime();
-    if (cloudTime > localTime && cloudData.categories && cloudData.categories.length > 0) {
+    if (cloudTime > localTime && cloudData.categories) {
         return { categories: cloudData.categories, order: cloudData.order || [], updatedAt: cloudData.categoryUpdatedAt };
-    } else {
-        return { categories: localState.allCategories, order: localState.categoryOrder, updatedAt: localState.categoryUpdatedAt };
     }
+    return { categories: localState.allCategories, order: localState.categoryOrder, updatedAt: localState.categoryUpdatedAt };
 }
 
 async function ensureAppFolder() {
@@ -273,6 +245,5 @@ async function findDBFileMeta(folderId) {
 
 function toggleSpinners(active) {
     const listBtn = document.getElementById('refresh-btn');
-    if (active) { if(listBtn) listBtn.classList.add('rotating'); } 
-    else { if(listBtn) listBtn.classList.remove('rotating'); }
+    if (listBtn) listBtn.classList.toggle('rotating', active);
 }

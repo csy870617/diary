@@ -2,7 +2,6 @@ import { handleAuthClick, handleSignoutClick } from './drive.js';
 import { openModal, closeAllModals } from './ui.js';
 
 export function setupAuthListeners() {
-    // 헤더의 '구글 로그인' 버튼
     const loginTriggerBtn = document.getElementById('login-trigger-btn');
     if(loginTriggerBtn) {
         loginTriggerBtn.addEventListener('click', () => {
@@ -10,29 +9,30 @@ export function setupAuthListeners() {
         });
     }
 
-    // 모달 내부의 '구글로 계속하기' 버튼
     const googleLoginBtn = document.getElementById('google-login-btn');
     if(googleLoginBtn) {
         googleLoginBtn.addEventListener('click', () => {
-            handleAuthClick(); // drive.js의 로그인 트리거
-            closeAllModals(true);
+            // [수정] 모달을 미리 닫지 않고, 인증이 성공하면 닫도록 핸들러 등록
+            handleAuthClick(); 
         });
     }
 
-    // 로그아웃 버튼
+    // drive.js에서 인증 성공 시 호출할 글로벌 콜백 정의
+    window.onAuthSuccess = () => {
+        closeAllModals(true);
+    };
+
     const logoutBtn = document.getElementById('logout-btn');
     if(logoutBtn) {
         logoutBtn.addEventListener('click', () => {
             if(confirm("로그아웃 하시겠습니까?")) {
                 handleSignoutClick(() => {
-                    alert("로그아웃 되었습니다.");
-                    location.reload(); // 상태 초기화를 위해 새로고침
+                    location.reload(); 
                 });
             }
         });
     }
     
-    // 모달 닫기
     const closeLoginBtn = document.getElementById('close-login-btn');
     if(closeLoginBtn) closeLoginBtn.addEventListener('click', () => closeAllModals(true));
 }
