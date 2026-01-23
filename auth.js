@@ -2,6 +2,7 @@ import { handleAuthClick, handleSignoutClick } from './drive.js';
 import { openModal, closeAllModals } from './ui.js';
 
 export function setupAuthListeners() {
+    // 1. 헤더 동기화 버튼
     const loginTriggerBtn = document.getElementById('login-trigger-btn');
     if(loginTriggerBtn) {
         loginTriggerBtn.addEventListener('click', (e) => {
@@ -10,29 +11,29 @@ export function setupAuthListeners() {
         });
     }
 
+    // 2. [웨일 최적화] 구글 로그인 버튼
     const googleLoginBtn = document.getElementById('google-login-btn');
     if(googleLoginBtn) {
         googleLoginBtn.addEventListener('click', (e) => {
-            // [웨일 대응] 기본 동작과 전파를 확실히 차단하여 팝업이 잘 뜨게 함
+            // 즉시 이벤트 전파를 중단하고 인증창을 호출하여 브라우저의 의심을 피합니다.
             e.preventDefault();
-            e.stopPropagation();
-            console.log("구글 인증 팝업 요청...");
+            e.stopImmediatePropagation();
             handleAuthClick(); 
         });
     }
 
-    // drive.js와 연동되는 성공 콜백
+    // 성공 시 실행될 콜백
     window.onAuthSuccess = () => {
         closeAllModals(true);
-        // 사용자에게 성공을 알림 (웨일 브라우저 확인용)
-        console.log("구글 로그인 성공 및 UI 업데이트");
+        console.log("동기화 로그인 성공");
     };
 
+    // 3. 로그아웃
     const logoutBtn = document.getElementById('logout-btn');
     if(logoutBtn) {
         logoutBtn.addEventListener('click', (e) => {
             e.preventDefault();
-            if(confirm("로그아웃 하시겠습니까?")) {
+            if(confirm("로그아웃 하시겠습니까? 세션이 종료됩니다.")) {
                 handleSignoutClick(() => {
                     location.reload(); 
                 });
@@ -40,6 +41,7 @@ export function setupAuthListeners() {
         });
     }
     
+    // 4. 모달 닫기
     const closeLoginBtn = document.getElementById('close-login-btn');
     if(closeLoginBtn) {
         closeLoginBtn.addEventListener('click', (e) => {
