@@ -9,80 +9,11 @@ let gisInited = false;
 let isSyncing = false;
 let pendingSync = false;
 let refreshTimer = null;
+let authStatusCallback = null; // UI 업데이트를 위한 콜백 저장
 
 /**
- * [핵심] 웨일에서 팝업 차단을 방지하기 위해 
- * 인증 클라이언트를 전역에서 즉시 접근 가능한 상태로 유지합니다.
+ * [핵심 수정] 세션 복구 및 토큰 유효성 검사
  */
-export function initGoogleDrive(callback) {
-    if (typeof gapi === 'undefined' || typeof google === 'undefined' || !google.accounts) {
-        setTimeout(() => initGoogleDrive(callback), 200);
-        return;
-    }
-
-    gapi.load('client', async () => {
-        try {
-            await gapi.client.init({
-                apiKey: GOOGLE_CONFIG.API_KEY,
-                discoveryDocs: [GOOGLE_CONFIG.DISCOVERY_DOC],
-            });
-            gapiInited = true;
-            
-            // 앱 실행 시 자동 세션 복구
-            if (localStorage.getItem('is_faith_logged_in') === 'true') {
-                const success = await ensureValidToken(true);
-                if (success) {
-                    const userInfo = await gapi.client.drive.about.get({ fields: 'user' });
-                    state.currentUser = userInfo.result.user;
-                    await syncFromDrive();
-                    if(callback) callback(true);
-                    return;
-                }
-            }
-            if(callback) callback(false);
-        } catch (err) {
-            console.error("GAPI 초기화 실패", err);
-            if(callback) callback(false);
-        }
-    });
-
-    // GIS 인증 클라이언트 설정
-    tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: GOOGLE_CONFIG.CLIENT_ID,
-        scope: GOOGLE_CONFIG.SCOPES,
-        callback: async (resp) => {
-            if (resp.error) {
-                console.error("인증 응답 에러:", resp.error);
-                return;
-            }
-            saveTokenInfo(resp);
-            const userInfo = await gapi.client.drive.about.get({ fields: 'user' });
-            state.currentUser = userInfo.result.user;
-            await syncFromDrive();
-            if (window.onAuthSuccess) window.onAuthSuccess(); 
-        },
-    });
-    gisInited = true;
-}
-
-/**
- * [웨일 해결책] 클릭 이벤트와 인증창 호출 사이에 어떤 지연도 없도록 수정했습니다.
- */
-export function handleAuthClick() {
-    if (!tokenClient) {
-        alert("인증 시스템을 불러오는 중입니다. 1~2초 후 다시 눌러주세요.");
-        initGoogleDrive();
-        return;
-    }
-    // 웨일에서 가장 안정적인 'select_account' 옵션을 사용하며 직속 호출합니다.
-    try {
-        tokenClient.requestAccessToken({ prompt: 'select_account' });
-    } catch (e) {
-        console.error("인증 요청 실패:", e);
-        alert("웨일 브라우저의 팝업 차단 설정을 확인해 주세요.");
-    }
-}
-
 async function ensureValidToken(isAutoSave = false) {
     const storedToken = localStorage.getItem('faith_token');
     const storedExp = localStorage.getItem('faith_token_exp');
@@ -98,16 +29,21 @@ async function ensureValidToken(isAutoSave = false) {
 
     if (isLoggedIn && tokenClient) {
         return new Promise((resolve) => {
-            tokenClient.callback = async (resp) => {
-                if (resp.error) {
-                    if (!isAutoSave) localStorage.removeItem('is_faith_logged_in');
-                    resolve(false);
-                    return;
-                }
-                saveTokenInfo(resp);
-                resolve(true);
-            };
-            tokenClient.requestAccessToken({ prompt: '' }); 
+            try {
+                tokenClient.callback = async (resp) => {
+                    if (resp.error) {
+                        if (!isAutoSave) localStorage.removeItem('is_faith_logged_in');
+                        resolve(false);
+                        return;
+                    }
+                    saveTokenInfo(resp);
+                    if (authStatusCallback) authStatusCallback(true); // UI 갱신 트리거
+                    resolve(true);
+                };
+                tokenClient.requestAccessToken({ prompt: '' });
+            } catch (err) {
+                resolve(false);
+            }
         });
     }
     return false;
@@ -129,6 +65,64 @@ function setupAutoRefresh(expiresInSeconds) {
     refreshTimer = setTimeout(() => ensureValidToken(true), delay);
 }
 
+export function initGoogleDrive(callback) {
+    authStatusCallback = callback; // 콜백 저장
+
+    if (typeof gapi === 'undefined' || typeof google === 'undefined' || !google.accounts) {
+        setTimeout(() => initGoogleDrive(callback), 200);
+        return;
+    }
+
+    gapi.load('client', async () => {
+        try {
+            await gapi.client.init({
+                apiKey: GOOGLE_CONFIG.API_KEY,
+                discoveryDocs: [GOOGLE_CONFIG.DISCOVERY_DOC],
+            });
+            gapiInited = true;
+            
+            if (localStorage.getItem('is_faith_logged_in') === 'true') {
+                const success = await ensureValidToken(true);
+                if (success) {
+                    const userInfo = await gapi.client.drive.about.get({ fields: 'user' });
+                    state.currentUser = userInfo.result.user;
+                    await syncFromDrive();
+                    if(callback) callback(true);
+                    return;
+                }
+            }
+            if(callback) callback(false);
+        } catch (err) {
+            console.error("초기화 실패", err);
+            if(callback) callback(false);
+        }
+    });
+
+    tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CONFIG.CLIENT_ID,
+        scope: GOOGLE_CONFIG.SCOPES,
+        callback: async (resp) => {
+            if (resp.error) return;
+            saveTokenInfo(resp);
+            const userInfo = await gapi.client.drive.about.get({ fields: 'user' });
+            state.currentUser = userInfo.result.user;
+            await syncFromDrive();
+            if (authStatusCallback) authStatusCallback(true); // [수정] 로그인 성공 시 UI 즉시 갱신
+            if (window.onAuthSuccess) window.onAuthSuccess(); 
+        },
+    });
+    gisInited = true;
+}
+
+export function handleAuthClick() {
+    if (!tokenClient) {
+        initGoogleDrive(authStatusCallback);
+        return;
+    }
+    // 웨일 환경에서는 select_account가 가장 확실하게 팝업을 띄웁니다.
+    tokenClient.requestAccessToken({ prompt: 'select_account' });
+}
+
 export function handleSignoutClick(callback) {
     const token = gapi.client.getToken();
     if (token) google.accounts.oauth2.revoke(token.access_token);
@@ -142,7 +136,7 @@ export function handleSignoutClick(callback) {
 }
 
 /**
- * 실시간 동기화 및 병합 (전체 로직 보존)
+ * 실시간 데이터 저장 및 병합 (기존 로직 완벽 유지)
  */
 export async function saveToDrive() {
     if (localStorage.getItem('is_faith_logged_in') !== 'true') return;
@@ -175,7 +169,7 @@ export async function saveToDrive() {
         }
         await uploadToDrive(folderId, fileMeta ? fileMeta.id : null);
     } catch (err) {
-        console.error("드라이브 통신 에러:", err);
+        console.error("저장 실패", err);
     } finally {
         isSyncing = false;
         toggleSpinners(false);
