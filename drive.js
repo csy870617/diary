@@ -3,16 +3,18 @@ import { state, saveCategoriesToLocal } from './state.js';
 import { renderEntries, renderTabs } from './ui.js';
 import { refreshEditorContent } from './editor.js';
 
-let tokenClient = null;
+let tokenClient;
 let gapiInited = false;
 let gisInited = false;
 let isSyncing = false;
 let pendingSync = false;
-let refreshTimer = null;
-let authStatusCallback = null; // UI 업데이트를 위한 콜백 저장
+let lastCloudModifiedTime = null; 
+let syncTimeoutTimer = null; 
+let refreshTimer = null; // [추가] 토큰 자동 갱신용 타이머
 
 /**
- * [핵심 수정] 세션 복구 및 토큰 유효성 검사
+ * [핵심 수정] 토큰 유효성 검사 및 자동 갱신 로직 강화
+ * 사용자가 로그아웃하기 전까지 세션을 유지합니다.
  */
 async function ensureValidToken(isAutoSave = false) {
     const storedToken = localStorage.getItem('faith_token');
@@ -20,6 +22,7 @@ async function ensureValidToken(isAutoSave = false) {
     const isLoggedIn = localStorage.getItem('is_faith_logged_in') === 'true';
     const now = Date.now();
 
+    // 1. 토큰이 유효한 경우
     if (storedToken && storedExp && now < (parseInt(storedExp) - 300000)) {
         if (!gapi.client.getToken()) {
             gapi.client.setToken({ access_token: storedToken });
@@ -27,28 +30,27 @@ async function ensureValidToken(isAutoSave = false) {
         return true;
     }
 
+    // 2. 세션이 만료되었지만 로그인 상태인 경우 (배경에서 조용히 복구)
     if (isLoggedIn && tokenClient) {
         return new Promise((resolve) => {
-            try {
-                tokenClient.callback = async (resp) => {
-                    if (resp.error) {
-                        if (!isAutoSave) localStorage.removeItem('is_faith_logged_in');
-                        resolve(false);
-                        return;
-                    }
-                    saveTokenInfo(resp);
-                    if (authStatusCallback) authStatusCallback(true); // UI 갱신 트리거
-                    resolve(true);
-                };
-                tokenClient.requestAccessToken({ prompt: '' });
-            } catch (err) {
-                resolve(false);
-            }
+            tokenClient.callback = async (resp) => {
+                if (resp.error) {
+                    if (!isAutoSave) localStorage.removeItem('is_faith_logged_in');
+                    resolve(false);
+                    return;
+                }
+                saveTokenInfo(resp);
+                resolve(true);
+            };
+            tokenClient.requestAccessToken({ prompt: '' }); 
         });
     }
     return false;
 }
 
+/**
+ * [추가] 토큰 정보 저장 및 UI 갱신 알림
+ */
 function saveTokenInfo(resp) {
     const expiresIn = resp.expires_in || 3599; 
     const expTime = Date.now() + (expiresIn * 1000);
@@ -56,20 +58,14 @@ function saveTokenInfo(resp) {
     localStorage.setItem('faith_token_exp', expTime);
     localStorage.setItem('is_faith_logged_in', 'true');
     gapi.client.setToken({ access_token: resp.access_token });
-    setupAutoRefresh(expiresIn);
-}
-
-function setupAutoRefresh(expiresInSeconds) {
+    
     if (refreshTimer) clearTimeout(refreshTimer);
-    const delay = Math.max((expiresInSeconds - 600) * 1000, 1000);
-    refreshTimer = setTimeout(() => ensureValidToken(true), delay);
+    refreshTimer = setTimeout(() => ensureValidToken(true), (expiresIn - 600) * 1000);
 }
 
 export function initGoogleDrive(callback) {
-    authStatusCallback = callback; // 콜백 저장
-
     if (typeof gapi === 'undefined' || typeof google === 'undefined' || !google.accounts) {
-        setTimeout(() => initGoogleDrive(callback), 200);
+        setTimeout(() => initGoogleDrive(callback), 100);
         return;
     }
 
@@ -77,23 +73,25 @@ export function initGoogleDrive(callback) {
         try {
             await gapi.client.init({
                 apiKey: GOOGLE_CONFIG.API_KEY,
-                discoveryDocs: [GOOGLE_CONFIG.DISCOVERY_DOC],
+                discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"],
             });
             gapiInited = true;
             
+            // 로그인 플래그가 있다면 자동 로그인 시도
             if (localStorage.getItem('is_faith_logged_in') === 'true') {
                 const success = await ensureValidToken(true);
                 if (success) {
-                    const userInfo = await gapi.client.drive.about.get({ fields: 'user' });
-                    state.currentUser = userInfo.result.user;
-                    await syncFromDrive();
-                    if(callback) callback(true);
+                    await checkAuthAndSync(callback);
                     return;
                 }
             }
+            state.isLoading = false;
+            renderEntries();
             if(callback) callback(false);
         } catch (err) {
-            console.error("초기화 실패", err);
+            console.error("GAPI 초기화 실패", err);
+            state.isLoading = false;
+            renderEntries();
             if(callback) callback(false);
         }
     });
@@ -104,29 +102,24 @@ export function initGoogleDrive(callback) {
         callback: async (resp) => {
             if (resp.error) return;
             saveTokenInfo(resp);
-            const userInfo = await gapi.client.drive.about.get({ fields: 'user' });
-            state.currentUser = userInfo.result.user;
-            await syncFromDrive();
-            if (authStatusCallback) authStatusCallback(true); // [수정] 로그인 성공 시 UI 즉시 갱신
-            if (window.onAuthSuccess) window.onAuthSuccess(); 
+            await checkAuthAndSync(callback);
+            if (window.onAuthSuccess) window.onAuthSuccess(); // auth.js 연동
         },
     });
     gisInited = true;
 }
 
 export function handleAuthClick() {
-    if (!tokenClient) {
-        initGoogleDrive(authStatusCallback);
-        return;
-    }
-    // 웨일 환경에서는 select_account가 가장 확실하게 팝업을 띄웁니다.
-    tokenClient.requestAccessToken({ prompt: 'select_account' });
+    // 웨일에서 가장 안정적인 select_account 옵션 사용
+    if (tokenClient) tokenClient.requestAccessToken({ prompt: 'select_account' });
 }
 
 export function handleSignoutClick(callback) {
     const token = gapi.client.getToken();
-    if (token) google.accounts.oauth2.revoke(token.access_token);
-    gapi.client.setToken('');
+    if (token !== null) {
+        google.accounts.oauth2.revoke(token.access_token);
+        gapi.client.setToken('');
+    }
     localStorage.removeItem('faith_token');
     localStorage.removeItem('faith_token_exp');
     localStorage.removeItem('is_faith_logged_in');
@@ -135,11 +128,29 @@ export function handleSignoutClick(callback) {
     if(callback) callback();
 }
 
-/**
- * 실시간 데이터 저장 및 병합 (기존 로직 완벽 유지)
- */
+async function checkAuthAndSync(callback) {
+    if (!gapi.client.getToken()) {
+        if(callback) callback(false);
+        return;
+    }
+    try {
+        const userInfo = await gapi.client.drive.about.get({ fields: 'user' });
+        state.currentUser = userInfo.result.user;
+        await syncFromDrive(); 
+        if(callback) callback(true);
+    } catch (err) {
+        if(callback) callback(false);
+    }
+}
+
+function toggleSpinners(active) {
+    const listBtn = document.getElementById('refresh-btn');
+    if (active) { if(listBtn) listBtn.classList.add('rotating'); } 
+    else { if(listBtn) listBtn.classList.remove('rotating'); }
+}
+
 export async function saveToDrive() {
-    if (localStorage.getItem('is_faith_logged_in') !== 'true') return;
+    if (localStorage.getItem('is_faith_logged_in') !== 'true') return; 
     if (isSyncing) { pendingSync = true; return; }
 
     const isValid = await ensureValidToken(true);
@@ -148,32 +159,53 @@ export async function saveToDrive() {
     isSyncing = true;
     toggleSpinners(true);
 
+    if (syncTimeoutTimer) clearTimeout(syncTimeoutTimer);
+    syncTimeoutTimer = setTimeout(() => {
+        if (isSyncing) { isSyncing = false; toggleSpinners(false); }
+    }, 30000);
+
     try {
         const folderId = await ensureAppFolder();
         const fileMeta = await findDBFileMeta(folderId);
         
+        let cloudData = null;
         if (fileMeta) {
-            const response = await gapi.client.drive.files.get({ fileId: fileMeta.id, alt: 'media' });
-            const cloudData = typeof response.result === 'string' ? JSON.parse(response.result) : response.result;
-            if (cloudData) {
-                state.entries = mergeEntries(state.entries, cloudData.entries || []);
-                const mergedCats = mergeCategories(state, cloudData);
-                state.allCategories = mergedCats.categories;
-                state.categoryOrder = mergedCats.order;
-                state.categoryUpdatedAt = mergedCats.updatedAt;
-                
-                localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-                saveCategoriesToLocal();
-                renderTabs(); renderEntries(); refreshEditorContent();
+            if (!lastCloudModifiedTime || fileMeta.modifiedTime !== lastCloudModifiedTime) {
+                const response = await gapi.client.drive.files.get({ fileId: fileMeta.id, alt: 'media' });
+                cloudData = typeof response.result === 'string' ? JSON.parse(response.result) : response.result;
+                lastCloudModifiedTime = fileMeta.modifiedTime;
             }
         }
-        await uploadToDrive(folderId, fileMeta ? fileMeta.id : null);
+
+        if (cloudData) {
+            state.entries = mergeEntries(state.entries, cloudData.entries || []);
+            const mergedCats = mergeCategories(state, cloudData);
+            state.allCategories = mergedCats.categories;
+            state.categoryOrder = mergedCats.order;
+            state.categoryUpdatedAt = mergedCats.updatedAt;
+
+            localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+            saveCategoriesToLocal();
+            renderTabs();
+            renderEntries();
+            refreshEditorContent();
+        }
+
+        const uploadRes = await uploadToDrive(folderId, fileMeta ? fileMeta.id : null);
+        if (uploadRes && uploadRes.result) {
+            lastCloudModifiedTime = uploadRes.result.modifiedTime;
+        }
+
     } catch (err) {
-        console.error("저장 실패", err);
+        console.error("구글 드라이브 저장 실패:", err);
     } finally {
+        if (syncTimeoutTimer) clearTimeout(syncTimeoutTimer);
         isSyncing = false;
         toggleSpinners(false);
-        if (pendingSync) { pendingSync = false; setTimeout(saveToDrive, 1000); }
+        if (pendingSync) {
+            pendingSync = false;
+            setTimeout(saveToDrive, 500);
+        }
     }
 }
 
@@ -190,8 +222,7 @@ async function uploadToDrive(folderId, fileId) {
     const fileContent = JSON.stringify(finalData);
     const fileMetadata = { name: DB_FILE_NAME, mimeType: 'application/json' };
     if (!fileId) fileMetadata.parents = [folderId];
-    
-    const boundary = '-------faith_log_boundary';
+    const boundary = '-------faith_log_multipart_boundary';
     const delimiter = "\r\n--" + boundary + "\r\n";
     const close_delim = "\r\n--" + boundary + "--";
     const multipartRequestBody =
@@ -201,7 +232,7 @@ async function uploadToDrive(folderId, fileId) {
     return await gapi.client.request({
         'path': fileId ? `/upload/drive/v3/files/${fileId}` : '/upload/drive/v3/files',
         'method': fileId ? 'PATCH' : 'POST',
-        'params': { 'uploadType': 'multipart' },
+        'params': { 'uploadType': 'multipart', 'fields': 'id, name, modifiedTime' },
         'headers': { 'Content-Type': 'multipart/related; boundary="' + boundary + '"' },
         'body': multipartRequestBody
     });
@@ -213,7 +244,7 @@ function mergeEntries(localList, cloudList) {
     localList.forEach(localItem => {
         if(!localItem || !localItem.id) return;
         const cloudItem = entryMap.get(localItem.id);
-        if (!cloudItem) entryMap.set(localItem.id, localItem);
+        if (!cloudItem) { entryMap.set(localItem.id, localItem); } 
         else {
             const localTime = new Date(localItem.modifiedAt || localItem.timestamp || 0).getTime();
             const cloudTime = new Date(cloudItem.modifiedAt || cloudItem.timestamp || 0).getTime();
@@ -226,10 +257,11 @@ function mergeEntries(localList, cloudList) {
 function mergeCategories(localState, cloudData) {
     const localTime = new Date(localState.categoryUpdatedAt || 0).getTime();
     const cloudTime = new Date(cloudData.categoryUpdatedAt || 0).getTime();
-    if (cloudTime > localTime && cloudData.categories) {
+    if (cloudTime > localTime && cloudData.categories && cloudData.categories.length > 0) {
         return { categories: cloudData.categories, order: cloudData.order || [], updatedAt: cloudData.categoryUpdatedAt };
+    } else {
+        return { categories: localState.allCategories, order: localState.categoryOrder, updatedAt: localState.categoryUpdatedAt };
     }
-    return { categories: localState.allCategories, order: localState.categoryOrder, updatedAt: localState.categoryUpdatedAt };
 }
 
 async function ensureAppFolder() {
@@ -244,9 +276,4 @@ async function findDBFileMeta(folderId) {
     const q = `name='${DB_FILE_NAME}' and '${folderId}' in parents and trashed=false`;
     const response = await gapi.client.drive.files.list({ q, orderBy: 'modifiedTime desc', fields: 'files(id, name, modifiedTime)' });
     return response.result.files.length > 0 ? response.result.files[0] : null;
-}
-
-function toggleSpinners(active) {
-    const listBtn = document.getElementById('refresh-btn');
-    if (listBtn) listBtn.classList.toggle('rotating', active);
 }
