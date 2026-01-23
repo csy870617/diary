@@ -17,34 +17,36 @@ const stickers = [
     '☁️','☀️','🌙','⭐','✨','🌈','🔥','💧','🌱','🌿','🍂','🌻','🌷','🌹',
     '❤️','🧡','💛','💚','💙','💜','🤍','🤎','🖤','💔','❣️','💕','💞','💓',
     '😊','🥰','😭','🥺','🤔','🫡','👏','👍','🤝','🙇','🙆','🙅','💪','🎉',
-    '📝','✏️','🖍️','📌','📎','📅','⏳','💡','🔔','🎁','🎀','💌','🏠','🚪'
+    '📝','✏️','🖍️','📌','📎','📅','⏳','💡','🔔','🎁','🎀','💌','🏠',' DOOR'
 ];
 
 function init() {
     if (!history.state) history.replaceState({ modal: 'main' }, null, '');
-    const urlParams = new URLSearchParams(window.location.search);
-    const sharedData = urlParams.get('share');
+    
     loadCategoriesFromLocal(); 
     loadDataFromLocal();
     checkOldTrash();
     renderTabs();
     state.isLoading = false;
     renderEntries();
-    const fastToken = localStorage.getItem('faith_token');
-    const fastExp = localStorage.getItem('faith_token_exp');
-    if (fastToken && fastExp && Date.now() < (parseInt(fastExp) - 300000)) {
-        updateAuthUI(true);
-    }
+
+    // 1. 구글 드라이브 초기화 및 자동 로그인(세션 복구) 시도
     initGoogleDrive((isLoggedIn) => {
         updateAuthUI(isLoggedIn);
         if (isLoggedIn) {
-            renderTabs();
-            renderEntries(); 
+            console.log("구글 동기화가 활성화되었습니다.");
+            syncFromDrive(); // 앱 시작 시 클라우드 데이터 가져오기
+            
+            // 주기적 동기화 (15초마다)
             setInterval(() => {
                 if (!document.hidden && window.gapi?.client?.getToken()) syncFromDrive();
             }, 15000); 
         }
     });
+
+    // 공유 데이터 처리 로직 (기존 유지)
+    const urlParams = new URLSearchParams(window.location.search);
+    const sharedData = urlParams.get('share');
     if (sharedData) {
         try {
             const raw = JSON.parse(decodeURIComponent(atob(sharedData)));
@@ -62,19 +64,24 @@ function init() {
                 const backBtnText = document.getElementById('back-btn-text');
                 if (backBtnText) backBtnText.innerText = '홈으로';
             }, 500);
-        } catch (e) {
-            console.error("공유 데이터 해석 실패", e);
-        }
+        } catch (e) { console.error("공유 데이터 해석 실패", e); }
     }
+
     window.addEventListener('focus', () => { if (window.gapi?.client?.getToken()) syncFromDrive(); });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && window.gapi?.client?.getToken()) syncFromDrive(); });
     window.addEventListener('online', () => syncFromDrive());
+
     setupListeners();
     renderStickers();
 }
 
 function updateAuthUI(isLoggedIn) {
-    const logoutBtn = document.getElementById('logout-btn'), loginTriggerBtn = document.getElementById('login-trigger-btn'), loginModal = document.getElementById('login-modal'), refreshBtn = document.getElementById('refresh-btn'), loginMsgArea = document.getElementById('login-msg-area');
+    const logoutBtn = document.getElementById('logout-btn'), 
+          loginTriggerBtn = document.getElementById('login-trigger-btn'), 
+          loginModal = document.getElementById('login-modal'), 
+          refreshBtn = document.getElementById('refresh-btn'), 
+          loginMsgArea = document.getElementById('login-msg-area');
+
     if (isLoggedIn) {
         if (logoutBtn) logoutBtn.classList.remove('hidden');
         if (loginTriggerBtn) loginTriggerBtn.classList.add('hidden');
@@ -82,7 +89,6 @@ function updateAuthUI(isLoggedIn) {
         if (refreshBtn) refreshBtn.classList.remove('hidden');
         if (loginMsgArea) loginMsgArea.classList.add('hidden'); 
     } else {
-        state.currentUser = null;
         if (logoutBtn) logoutBtn.classList.add('hidden');
         if (loginTriggerBtn) loginTriggerBtn.classList.remove('hidden');
         if (refreshBtn) refreshBtn.classList.add('hidden');
@@ -104,6 +110,7 @@ function setupListeners() {
         });
         tabContainer.addEventListener('wheel', (evt) => { if (evt.deltaY !== 0) { evt.preventDefault(); tabContainer.scrollLeft += evt.deltaY; } });
     }
+
     window.addEventListener('popstate', async () => {
         const writeModal = document.getElementById('write-modal');
         if (writeModal && !writeModal.classList.contains('hidden')) await saveEntry();
@@ -114,6 +121,7 @@ function setupListeners() {
             if (backBtnText) backBtnText.innerText = '목록';
         }
     });
+
     const editorBody = document.getElementById('editor-body');
     if (editorBody) {
         editorBody.ondragover = (e) => e.preventDefault();
@@ -122,6 +130,7 @@ function setupListeners() {
             if (files.length > 0 && files[0].type.startsWith('image/')) processImage(files[0]);
         };
     }
+
     window.addEventListener('click', (e) => {
         const link = e.target.closest('#editor-body a');
         if (link && link.href && document.getElementById('editor-body').getAttribute('contenteditable') === "false") {
@@ -129,11 +138,13 @@ function setupListeners() {
         }
         const sliderContainer = document.getElementById('book-slider-container');
         if (sliderContainer && !sliderContainer.classList.contains('hidden') && !sliderContainer.contains(e.target) && !e.target.closest('#page-indicator')) sliderContainer.classList.add('hidden');
+
         ['context-menu', 'category-context-menu', 'color-palette-popup', 'sticker-palette', 'table-modal'].forEach(id => {
             const el = document.getElementById(id);
             if (el && !el.contains(e.target) && !e.target.closest('.tool-btn') && !e.target.closest('#font-size-input')) el.classList.add('hidden');
         });
     }, true);
+
     setupAuthListeners();
     setupUIListeners();
 }
@@ -141,11 +152,14 @@ function setupListeners() {
 function setupUIListeners() {
     const editorContainer = document.getElementById('editor-container');
     const scrollTopBtn = document.getElementById('btn-scroll-top');
+
     editorContainer?.addEventListener('scroll', () => {
         if (state.currentViewMode === 'readOnly' && editorContainer.scrollTop > 300) scrollTopBtn?.classList.remove('hidden');
         else scrollTopBtn?.classList.add('hidden');
     });
+
     scrollTopBtn?.addEventListener('click', () => { editorContainer.scrollTo({ top: 0, behavior: 'smooth' }); });
+
     document.getElementById('sort-criteria')?.addEventListener('change', (e) => { state.currentSortBy = e.target.value; renderEntries(); });
     document.getElementById('sort-order-btn')?.addEventListener('click', () => { 
         state.currentSortOrder = state.currentSortOrder === 'desc' ? 'asc' : 'desc'; 
@@ -153,6 +167,7 @@ function setupUIListeners() {
         if (icon) { icon.className = state.currentSortOrder === 'desc' ? 'ph ph-sort-descending' : 'ph ph-sort-ascending'; }
         renderEntries(); 
     });
+    
     document.getElementById('search-input')?.addEventListener('input', (e) => renderEntries(e.target.value));
     document.getElementById('refresh-btn')?.addEventListener('click', () => syncFromDrive());
 
@@ -182,6 +197,7 @@ function setupUIListeners() {
             alert("이미지가 포함된 글은 URL 공유가 불가능합니다. 우측 하단의 다운로드 버튼(PDF)을 이용해 공유해주세요.");
             return;
         }
+
         const title = document.getElementById('edit-title').value;
         const entryData = {
             t: title || '제목 없음',
@@ -191,6 +207,7 @@ function setupUIListeners() {
             f: state.currentFontFamily,
             z: state.currentFontSize
         };
+
         try {
             const encodedData = btoa(unescape(encodeURIComponent(JSON.stringify(entryData))));
             const shareUrl = `${window.location.origin}${window.location.pathname}?share=${encodedData}`;
@@ -199,6 +216,7 @@ function setupUIListeners() {
             else { navigator.clipboard.writeText(shareUrl).then(() => { alert('공유 링크가 클립보드에 복사되었습니다.'); }); }
         } catch (e) { alert("공유 링크 생성 실패"); }
     });
+
     document.getElementById('btn-download')?.addEventListener('click', () => {
         const element = document.getElementById('editor-container');
         const title = document.getElementById('edit-title').value || '신앙일지';
@@ -211,7 +229,9 @@ function setupUIListeners() {
         };
         html2pdf().set(opt).from(element).save();
     });
+
     document.getElementById('toolbar-link-btn')?.addEventListener('click', () => { createHyperlink(); });
+
     const tableModal = document.getElementById('table-modal');
     document.getElementById('toolbar-table-btn')?.addEventListener('click', () => { tableModal.classList.remove('hidden'); });
     document.getElementById('btn-confirm-table')?.addEventListener('click', () => {
@@ -221,13 +241,16 @@ function setupUIListeners() {
         tableModal.classList.add('hidden');
     });
     document.getElementById('btn-cancel-table')?.addEventListener('click', () => { tableModal.classList.add('hidden'); });
+
     document.getElementById('sticker-btn')?.addEventListener('click', (e) => { 
         e.stopPropagation(); const palette = document.getElementById('sticker-palette');
         if (palette) { palette.style.top = '110px'; palette.classList.toggle('hidden'); }
     });
+    
     const imageInput = document.getElementById('image-upload-input');
     document.getElementById('toolbar-image-btn')?.addEventListener('click', () => { document.getElementById('editor-body')?.focus(); imageInput?.click(); });
     imageInput?.addEventListener('change', (e) => { if (e.target.files[0]) processImage(e.target.files[0]); e.target.value = ''; });
+
     document.getElementById('toolbar-toggle-btn')?.addEventListener('click', function() {
         const toolbar = document.getElementById('editor-toolbar');
         if (toolbar) {
@@ -236,13 +259,16 @@ function setupUIListeners() {
             if (icon) icon.className = toolbar.classList.contains('collapsed') ? 'ph ph-caret-down' : 'ph ph-caret-up';
         }
     });
+
     document.getElementById('toolbar-color-btn')?.addEventListener('click', (e) => { e.stopPropagation(); state.activeColorMode = 'foreColor'; openColorPalette(); });
     document.getElementById('toolbar-hilite-btn')?.addEventListener('click', (e) => { e.stopPropagation(); state.activeColorMode = 'hiliteColor'; openColorPalette(); });
+
     document.querySelectorAll('.color-dot').forEach(btn => { 
         btn.onmousedown = (e) => { 
             e.preventDefault(); if(btn.dataset.color) formatDoc(state.activeColorMode, btn.dataset.color); document.getElementById('color-palette-popup')?.classList.add('hidden'); 
         }; 
     });
+
     const removeColorBtn = document.getElementById('btn-remove-color');
     if (removeColorBtn) {
         removeColorBtn.onmousedown = (e) => {
@@ -252,6 +278,7 @@ function setupUIListeners() {
             document.getElementById('color-palette-popup')?.classList.add('hidden');
         };
     }
+
     document.getElementById('write-btn')?.addEventListener('click', () => openEditor(false));
     document.getElementById('close-write-btn')?.addEventListener('click', () => { 
         saveEntry(); closeAllModals(true); if (navigator.onLine && window.gapi?.client?.getToken()) saveToDrive(); 
