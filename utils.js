@@ -127,20 +127,29 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
         // 시스템 클립보드에서 데이터 가져오기
         let html = e.clipboardData.getData('text/html');
         let text = e.clipboardData.getData('text/plain');
-        
-        // 테이블이 포함된 경우 셀 내용만 추출
+
+        // 테이블이 포함된 경우: 커서가 테이블 셀 안이 아닐 때만 셀 내용 합치기
+        // (셀 안에서의 테이블 붙여넣기는 editor.js의 handleCellPaste가 capture phase에서 처리)
         if (html && html.includes('<table')) {
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
-            const cells = doc.querySelectorAll('td');
-            if (cells.length > 0) {
-                let combinedContent = "";
-                cells.forEach((cell, idx) => {
-                    combinedContent += cell.innerHTML + (idx < cells.length - 1 ? " " : "");
-                });
-                document.execCommand('insertHTML', false, combinedContent);
-                if (callbacks.onAfterPaste) callbacks.onAfterPaste();
-                return;
+            const selection = window.getSelection();
+            const cursorNode = selection.rangeCount > 0 ? selection.getRangeAt(0).startContainer : null;
+            const inCell = cursorNode && (cursorNode.nodeType === 3
+                ? cursorNode.parentElement?.closest('td')
+                : cursorNode.closest?.('td'));
+
+            if (!inCell) {
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                const cells = doc.querySelectorAll('td');
+                if (cells.length > 0) {
+                    let combinedContent = "";
+                    cells.forEach((cell, idx) => {
+                        combinedContent += cell.innerHTML + (idx < cells.length - 1 ? " " : "");
+                    });
+                    document.execCommand('insertHTML', false, combinedContent);
+                    if (callbacks.onAfterPaste) callbacks.onAfterPaste();
+                    return;
+                }
             }
         }
         
