@@ -153,6 +153,11 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .img-resize-btn:hover { background: var(--gray-100); color: var(--accent); }
 .img-resize-btn i { font-size: 16px; }
 
+/* 표 모달 편집 버튼 스타일 */
+.table-edit-btn { display: flex; align-items: center; justify-content: center; gap: 4px; padding: 10px 8px; font-size: 13px; color: var(--gray-900); background: var(--gray-100); border: 1px solid var(--gray-200); border-radius: 8px; cursor: pointer; font-family: var(--text-sans); font-weight: 500; transition: all 0.2s; }
+.table-edit-btn:hover { background: var(--active-bg); color: var(--active-text); border-color: var(--active-text); }
+.table-edit-btn i { font-size: 14px; }
+
 /* 책 모드 스타일 유지 */
 #write-modal.mode-book { overflow: hidden; display: flex; flex-direction: column; width: 100vw; height: 100vh; position: fixed; top: 0; left: 0; z-index: 2000; }
 #write-modal.mode-book .editor-container { margin: 0; max-width: none; width: 100%; height: calc(100vh - 120px) !important; padding: 0 !important; column-width: auto; column-gap: 0 !important; column-fill: auto; overflow-x: hidden !important; overflow-y: hidden !important; scroll-behavior: auto !important; }

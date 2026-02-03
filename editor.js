@@ -2,6 +2,7 @@ import { state } from './state.js';
 import { saveEntry } from './data.js';
 import { saveToDrive } from './drive.js';
 import { openModal } from './ui.js';
+import { setupLinkPreservation, autoLink } from './utils.js';
 
 let currentSelectedElement = null; 
 let lastClickedCell = null; 
@@ -9,7 +10,6 @@ let selectionBox = null;
 let resizeHandle = null;
 let deleteBtn = null;
 let resizeBtnGroup = null;
-let tableControlGroup = null; 
 let autoSaveTimer = null;
 let isTurningPage = false;    
 let currentBookPageIndex = 0; 
@@ -27,9 +27,279 @@ let startX, startY, startW, startH;
 
 let undoStack = [];
 let redoStack = [];
-const MAX_HISTORY = 50;
+const MAX_HISTORY = 100;
 let startTableFontSize = 16;
 
+// Undo/Redo 시스템을 위한 상태
+let lastInputTime = 0;
+let lastInputType = '';
+let isComposing = false;  // IME 조합 중 여부
+let pendingSnapshot = null;  // 보류 중인 스냅샷
+const TYPING_GROUP_DELAY = 500;  // 타이핑 그룹핑 딜레이 (ms)
+const WORD_BREAK_CHARS = [' ', '\n', '\t', '.', ',', '!', '?', ';', ':', '(', ')', '[', ']', '{', '}', '"', "'"];
+
+/**
+ * 현재 에디터 상태의 스냅샷 생성 (커서 위치 포함)
+ */
+function createSnapshot() {
+    const editorBody = document.getElementById('editor-body');
+    const editTitle = document.getElementById('edit-title');
+    const editSubtitle = document.getElementById('edit-subtitle');
+    if (!editorBody) return null;
+    
+    const selection = window.getSelection();
+    let cursorInfo = null;
+    
+    if (selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        cursorInfo = {
+            startPath: getNodePath(editorBody, range.startContainer),
+            startOffset: range.startOffset,
+            endPath: getNodePath(editorBody, range.endContainer),
+            endOffset: range.endOffset,
+            isCollapsed: range.collapsed
+        };
+    }
+    
+    return {
+        body: editorBody.innerHTML,
+        title: editTitle?.value || '',
+        subtitle: editSubtitle?.value || '',
+        cursor: cursorInfo,
+        timestamp: Date.now()
+    };
+}
+
+/**
+ * 스냅샷에서 에디터 상태 복원
+ */
+function restoreSnapshot(snapshot) {
+    if (!snapshot) return;
+    
+    const editorBody = document.getElementById('editor-body');
+    const editTitle = document.getElementById('edit-title');
+    const editSubtitle = document.getElementById('edit-subtitle');
+    if (!editorBody) return;
+    
+    // 내용 복원
+    editorBody.innerHTML = snapshot.body;
+    if (editTitle) editTitle.value = snapshot.title;
+    if (editSubtitle) editSubtitle.value = snapshot.subtitle;
+    
+    // 커서 위치 복원
+    if (snapshot.cursor) {
+        try {
+            const selection = window.getSelection();
+            const range = document.createRange();
+            
+            const startNode = getNodeFromPath(editorBody, snapshot.cursor.startPath);
+            const endNode = getNodeFromPath(editorBody, snapshot.cursor.endPath);
+            
+            if (startNode && endNode) {
+                const startOffset = Math.min(snapshot.cursor.startOffset, getMaxOffset(startNode));
+                const endOffset = Math.min(snapshot.cursor.endOffset, getMaxOffset(endNode));
+                
+                range.setStart(startNode, startOffset);
+                range.setEnd(endNode, endOffset);
+                
+                selection.removeAllRanges();
+                selection.addRange(range);
+            }
+        } catch (e) {
+            // 커서 복원 실패 시 에디터 끝으로 이동
+            editorBody.focus();
+            const range = document.createRange();
+            range.selectNodeContents(editorBody);
+            range.collapse(false);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }
+    }
+}
+
+/**
+ * 노드의 경로 배열 생성 (루트부터 해당 노드까지의 인덱스 배열)
+ */
+function getNodePath(root, node) {
+    const path = [];
+    let current = node;
+    
+    while (current && current !== root) {
+        const parent = current.parentNode;
+        if (!parent) break;
+        
+        const index = Array.from(parent.childNodes).indexOf(current);
+        path.unshift(index);
+        current = parent;
+    }
+    
+    return path;
+}
+
+/**
+ * 경로 배열로부터 노드 찾기
+ */
+function getNodeFromPath(root, path) {
+    if (!path || path.length === 0) return root;
+    
+    let current = root;
+    for (const index of path) {
+        if (!current.childNodes || index >= current.childNodes.length) {
+            return null;
+        }
+        current = current.childNodes[index];
+    }
+    return current;
+}
+
+/**
+ * 노드의 최대 오프셋 값
+ */
+function getMaxOffset(node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+        return node.textContent.length;
+    }
+    return node.childNodes.length;
+}
+
+/**
+ * 히스토리에 스냅샷 추가 (중복 방지)
+ */
+function pushToHistory(snapshot) {
+    if (!snapshot) return;
+    
+    // 마지막 스냅샷과 동일하면 추가하지 않음
+    if (undoStack.length > 0) {
+        const last = undoStack[undoStack.length - 1];
+        if (last.body === snapshot.body && 
+            last.title === snapshot.title && 
+            last.subtitle === snapshot.subtitle) {
+            return;
+        }
+    }
+    
+    undoStack.push(snapshot);
+    if (undoStack.length > MAX_HISTORY) {
+        undoStack.shift();
+    }
+    
+    // 새로운 변경이 발생하면 redo 스택 초기화
+    redoStack = [];
+}
+
+/**
+ * 히스토리 기록 (변경 전 상태 저장)
+ * @param {string} actionType - 액션 타입 ('typing', 'format', 'delete', 'paste', 'insert' 등)
+ */
+function recordHistory(actionType = 'unknown') {
+    const now = Date.now();
+    const currentSnapshot = createSnapshot();
+    
+    if (!currentSnapshot) return;
+    
+    // IME 조합 중에는 기록하지 않음
+    if (isComposing) {
+        pendingSnapshot = currentSnapshot;
+        return;
+    }
+    
+    // 타이핑 그룹핑: 짧은 시간 내의 연속 타이핑은 하나로 묶음
+    if (actionType === 'typing') {
+        const timeDiff = now - lastInputTime;
+        
+        // 첫 타이핑이거나 시간이 충분히 지났으면 새 히스토리 생성
+        if (lastInputType !== 'typing' || timeDiff > TYPING_GROUP_DELAY) {
+            pushToHistory(currentSnapshot);
+        }
+        // 그렇지 않으면 마지막 히스토리 업데이트 (그룹핑)
+    } else {
+        // 타이핑이 아닌 액션은 항상 새 히스토리
+        pushToHistory(currentSnapshot);
+    }
+    
+    lastInputTime = now;
+    lastInputType = actionType;
+}
+
+/**
+ * 변경 전에 호출하여 현재 상태를 저장
+ */
+function saveBeforeChange(actionType = 'unknown') {
+    const snapshot = createSnapshot();
+    if (snapshot) {
+        pushToHistory(snapshot);
+    }
+    lastInputType = actionType;
+}
+
+/**
+ * Undo 실행
+ */
+function performUndo() {
+    const editorBody = document.getElementById('editor-body');
+    if (!editorBody) return false;
+    
+    if (undoStack.length === 0) return false;
+    
+    // 현재 상태를 redo 스택에 저장
+    const currentSnapshot = createSnapshot();
+    if (currentSnapshot) {
+        redoStack.push(currentSnapshot);
+    }
+    
+    // 이전 상태 복원
+    const prevSnapshot = undoStack.pop();
+    restoreSnapshot(prevSnapshot);
+    
+    return true;
+}
+
+/**
+ * Redo 실행
+ */
+function performRedo() {
+    const editorBody = document.getElementById('editor-body');
+    if (!editorBody) return false;
+    
+    if (redoStack.length === 0) return false;
+    
+    // 현재 상태를 undo 스택에 저장
+    const currentSnapshot = createSnapshot();
+    if (currentSnapshot) {
+        undoStack.push(currentSnapshot);
+    }
+    
+    // 다음 상태 복원
+    const nextSnapshot = redoStack.pop();
+    restoreSnapshot(nextSnapshot);
+    
+    return true;
+}
+
+/**
+ * 히스토리 초기화
+ */
+function clearHistory() {
+    undoStack = [];
+    redoStack = [];
+    lastInputTime = 0;
+    lastInputType = '';
+    pendingSnapshot = null;
+}
+
+/**
+ * 초기 상태 저장 (에디터 열 때 호출)
+ */
+function saveInitialState() {
+    clearHistory();
+    const snapshot = createSnapshot();
+    if (snapshot) {
+        undoStack.push(snapshot);
+    }
+}
+
+// 이전 호환성을 위한 함수 (기존 코드에서 호출하는 곳용)
 function getCursorOffset(element) {
     const selection = window.getSelection();
     if (selection.rangeCount === 0) return 0;
@@ -62,17 +332,6 @@ function setCursorOffset(element, offset) {
                 nodeStack.push(node.childNodes[i]);
             }
         }
-    }
-}
-
-function recordHistory() {
-    const editorBody = document.getElementById('editor-body');
-    if (!editorBody) return;
-    const currentState = editorBody.innerHTML;
-    if (undoStack.length === 0 || undoStack[undoStack.length - 1] !== currentState) {
-        undoStack.push(currentState);
-        if (undoStack.length > MAX_HISTORY) undoStack.shift();
-        redoStack = []; 
     }
 }
 
@@ -222,14 +481,96 @@ function clearCellSelection() {
 
 function focusCell(cell) {
     if (!cell) return;
+    
+    // 셀에 포커스
     cell.focus();
+    
+    // 셀 내용 선택 (전체 선택 후 시작점으로 커서 이동)
     const sel = window.getSelection();
     const range = document.createRange();
-    range.selectNodeContents(cell);
-    range.collapse(true); 
+    
+    // 셀에 내용이 있으면 시작점에 커서, 없으면 셀 자체 선택
+    if (cell.firstChild) {
+        range.setStart(cell.firstChild, 0);
+        range.setEnd(cell.firstChild, 0);
+    } else {
+        range.selectNodeContents(cell);
+        range.collapse(true);
+    }
+    
     sel.removeAllRanges();
     sel.addRange(range);
     lastClickedCell = cell; 
+}
+
+/**
+ * 커서가 셀의 끝에 있는지 확인
+ */
+function isCaretAtEnd(cell) {
+    const selection = window.getSelection();
+    if (!selection.rangeCount) return true;
+    
+    const range = selection.getRangeAt(0);
+    if (!range.collapsed) return false;
+    
+    // 셀이 비어있거나 br만 있는 경우
+    const text = cell.textContent;
+    if (!text || text.trim() === '') return true;
+    
+    // 셀의 마지막 텍스트 노드 찾기
+    const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT, null, false);
+    let lastTextNode = null;
+    let node;
+    while (node = walker.nextNode()) {
+        lastTextNode = node;
+    }
+    
+    if (!lastTextNode) return true;
+    
+    // 커서가 마지막 텍스트 노드의 끝에 있는지 확인
+    if (range.endContainer === lastTextNode && range.endOffset === lastTextNode.length) {
+        return true;
+    }
+    
+    // 커서가 셀 자체에 있고 오프셋이 자식 노드 수와 같은 경우
+    if (range.endContainer === cell && range.endOffset === cell.childNodes.length) {
+        return true;
+    }
+    
+    return false;
+}
+
+/**
+ * 커서가 셀의 시작에 있는지 확인
+ */
+function isCaretAtStart(cell) {
+    const selection = window.getSelection();
+    if (!selection.rangeCount) return true;
+    
+    const range = selection.getRangeAt(0);
+    if (!range.collapsed) return false;
+    
+    // 셀이 비어있거나 br만 있는 경우
+    const text = cell.textContent;
+    if (!text || text.trim() === '') return true;
+    
+    // 셀의 첫 번째 텍스트 노드 찾기
+    const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT, null, false);
+    const firstTextNode = walker.nextNode();
+    
+    if (!firstTextNode) return true;
+    
+    // 커서가 첫 번째 텍스트 노드의 시작에 있는지 확인
+    if (range.startContainer === firstTextNode && range.startOffset === 0) {
+        return true;
+    }
+    
+    // 커서가 셀 자체에 있고 오프셋이 0인 경우
+    if (range.startContainer === cell && range.startOffset === 0) {
+        return true;
+    }
+    
+    return false;
 }
 
 function setupBasicHandling() {
@@ -237,25 +578,11 @@ function setupBasicHandling() {
     const editorContainer = document.getElementById('editor-container');
     if (!editorBody) return;
 
-    editorBody.onpaste = (e) => {
-        e.preventDefault();
-        recordHistory();
-        const html = e.clipboardData.getData('text/html');
-        if (html && html.includes('<table')) {
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
-            const cells = doc.querySelectorAll('td');
-            let combinedContent = "";
-            if (cells.length > 0) {
-                cells.forEach((cell, idx) => combinedContent += cell.innerHTML + (idx < cells.length - 1 ? " " : ""));
-                document.execCommand('insertHTML', false, combinedContent);
-            }
-        } else {
-            const text = e.clipboardData.getData('text/plain');
-            document.execCommand('insertText', false, text);
-        }
-        triggerAutoSave();
-    };
+    // 하이퍼링크 보존 기능 설정 (복사/잘라내기/붙여넣기)
+    setupLinkPreservation(editorBody, {
+        onBeforePaste: () => saveBeforeChange('paste'),
+        onAfterPaste: () => triggerAutoSave()
+    });
 
     editorBody.onmousemove = (e) => {
         if (!editorBody.isContentEditable || isColDragging || isRowDragging) return;
@@ -288,34 +615,258 @@ function setupBasicHandling() {
         else if (isSelectingCells && selectionStartCell) { const cell = document.elementFromPoint(e.clientX, e.clientY)?.closest('td'); if (cell && cell !== selectionStartCell) { window.getSelection().removeAllRanges(); selectCellRange(selectionStartCell, cell); } }
     });
 
-    window.addEventListener('mouseup', () => { if (isColDragging || isRowDragging) { recordHistory(); triggerAutoSave(); } isColDragging = false; isRowDragging = false; resizeTargetTd = null; isSelectingCells = false; document.querySelectorAll('table.selecting-cells').forEach(t => t.classList.remove('selecting-cells')); });
+    window.addEventListener('mouseup', () => { if (isColDragging || isRowDragging) { saveBeforeChange('resize'); triggerAutoSave(); } isColDragging = false; isRowDragging = false; resizeTargetTd = null; isSelectingCells = false; document.querySelectorAll('table.selecting-cells').forEach(t => t.classList.remove('selecting-cells')); });
 
     editorBody.onclick = (e) => {
         if (!editorBody.isContentEditable) return;
-        const target = e.target.closest('img, table'); const cell = e.target.closest('td');
-        if (cell) lastClickedCell = cell;
-        if (target) { const selectedCells = document.querySelectorAll('td.selected-cell'); if (selectedCells.length <= 1) { e.stopPropagation(); e.preventDefault(); selectElement(target); } } 
-        else { hideSelection(); if (!e.target.closest('td')) clearCellSelection(); }
-    };
-
-    editorBody.onkeydown = (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); formatDoc('undo'); return; }
-        if ((e.ctrlKey || e.metaKey) && e.key === 'y') { e.preventDefault(); formatDoc('redo'); return; }
-        if (e.key === 'Delete') {
-            const selectedCells = document.querySelectorAll('td.selected-cell');
-            if (selectedCells.length > 0) { e.preventDefault(); recordHistory(); selectedCells.forEach(cell => { const range = document.createRange(); range.selectNodeContents(cell); const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range); document.execCommand('delete', false, null); }); triggerAutoSave(); return; }
-            if (currentSelectedElement) { if (currentSelectedElement.tagName !== 'TABLE' && document.activeElement.tagName !== 'TD') { e.preventDefault(); recordHistory(); deleteSelectedElement(); } }
+        const target = e.target.closest('img, table'); 
+        const cell = e.target.closest('td');
+        
+        if (cell) {
+            lastClickedCell = cell;
+            // 셀 클릭 시 해당 표를 자동으로 선택하여 플로팅 UI 표시
+            const table = cell.closest('table');
+            if (table && currentSelectedElement !== table) {
+                selectTableFromCell(cell);
+            }
+        }
+        
+        if (target) { 
+            const selectedCells = document.querySelectorAll('td.selected-cell'); 
+            if (selectedCells.length <= 1) { 
+                e.stopPropagation(); 
+                e.preventDefault(); 
+                selectElement(target); 
+            } 
+        } else if (!cell) { 
+            // 셀 외부를 클릭하면 선택 해제
+            hideSelection(); 
+            clearCellSelection(); 
         }
     };
 
+    editorBody.onkeydown = (e) => {
+        // Ctrl+Z / Cmd+Z: Undo
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { 
+            e.preventDefault(); 
+            formatDoc('undo'); 
+            return; 
+        }
+        // Ctrl+Y / Cmd+Y 또는 Ctrl+Shift+Z / Cmd+Shift+Z: Redo
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { 
+            e.preventDefault(); 
+            formatDoc('redo'); 
+            return; 
+        }
+        
+        // 표 셀 내에서 Tab과 화살표 키 처리
+        const currentCell = e.target.closest ? e.target.closest('td') : null;
+        if (!currentCell) {
+            // 셀이 아닌 곳에서는 기본 동작
+            handleNonCellKeys(e);
+            return;
+        }
+        
+        const table = currentCell.closest('table');
+        if (!table) {
+            handleNonCellKeys(e);
+            return;
+        }
+        
+        const rowIdx = currentCell.parentElement.rowIndex;
+        const colIdx = currentCell.cellIndex;
+        const maxRow = table.rows.length - 1;
+        const maxCol = table.rows[0].cells.length - 1;
+        
+        // Tab: 오른쪽 셀로 이동
+        if (e.key === 'Tab' && !e.shiftKey) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            let nextCell = null;
+            if (colIdx < maxCol) {
+                // 오른쪽 셀로
+                nextCell = table.rows[rowIdx].cells[colIdx + 1];
+            } else if (rowIdx < maxRow) {
+                // 다음 줄 첫 셀로
+                nextCell = table.rows[rowIdx + 1].cells[0];
+            } else {
+                // 마지막 셀에서 Tab - 새 줄 추가
+                currentSelectedElement = table;
+                lastClickedCell = currentCell;
+                addRow();
+                nextCell = table.rows[rowIdx + 1]?.cells[0];
+            }
+            
+            if (nextCell) {
+                setTimeout(() => focusCell(nextCell), 0);
+            }
+            return;
+        }
+        
+        // Shift+Tab: 왼쪽 셀로 이동
+        if (e.key === 'Tab' && e.shiftKey) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            let prevCell = null;
+            if (colIdx > 0) {
+                prevCell = table.rows[rowIdx].cells[colIdx - 1];
+            } else if (rowIdx > 0) {
+                prevCell = table.rows[rowIdx - 1].cells[maxCol];
+            }
+            
+            if (prevCell) {
+                setTimeout(() => focusCell(prevCell), 0);
+            }
+            return;
+        }
+        
+        // 화살표 아래: 아래 셀로 이동
+        if (e.key === 'ArrowDown' && rowIdx < maxRow) {
+            e.preventDefault();
+            e.stopPropagation();
+            const nextCell = table.rows[rowIdx + 1].cells[Math.min(colIdx, table.rows[rowIdx + 1].cells.length - 1)];
+            if (nextCell) {
+                setTimeout(() => focusCell(nextCell), 0);
+            }
+            return;
+        }
+        
+        // 화살표 위: 위 셀로 이동
+        if (e.key === 'ArrowUp' && rowIdx > 0) {
+            e.preventDefault();
+            e.stopPropagation();
+            const prevCell = table.rows[rowIdx - 1].cells[Math.min(colIdx, table.rows[rowIdx - 1].cells.length - 1)];
+            if (prevCell) {
+                setTimeout(() => focusCell(prevCell), 0);
+            }
+            return;
+        }
+        
+        // 화살표 오른쪽: 셀 끝에서 오른쪽 셀로 이동
+        if (e.key === 'ArrowRight' && colIdx < maxCol) {
+            if (isCaretAtEnd(currentCell)) {
+                e.preventDefault();
+                e.stopPropagation();
+                const nextCell = table.rows[rowIdx].cells[colIdx + 1];
+                if (nextCell) {
+                    setTimeout(() => focusCell(nextCell), 0);
+                }
+                return;
+            }
+        }
+        
+        // 화살표 왼쪽: 셀 시작에서 왼쪽 셀로 이동
+        if (e.key === 'ArrowLeft' && colIdx > 0) {
+            if (isCaretAtStart(currentCell)) {
+                e.preventDefault();
+                e.stopPropagation();
+                const prevCell = table.rows[rowIdx].cells[colIdx - 1];
+                if (prevCell) {
+                    setTimeout(() => focusCell(prevCell), 0);
+                }
+                return;
+            }
+        }
+        
+        // 나머지 키는 기본 동작
+        handleNonCellKeys(e);
+    };
+    
+    // 셀이 아닌 곳에서의 키 처리
+    function handleNonCellKeys(e) {
+        // Delete 키로 선택된 셀 또는 요소 삭제
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+            const selectedCells = document.querySelectorAll('td.selected-cell');
+            if (selectedCells.length > 0) { 
+                e.preventDefault(); 
+                saveBeforeChange('delete'); 
+                selectedCells.forEach(cell => { 
+                    const range = document.createRange(); 
+                    range.selectNodeContents(cell); 
+                    const sel = window.getSelection(); 
+                    sel.removeAllRanges(); 
+                    sel.addRange(range); 
+                    document.execCommand('delete', false, null); 
+                }); 
+                triggerAutoSave(); 
+                return; 
+            }
+            if (currentSelectedElement && currentSelectedElement.tagName !== 'TABLE' && document.activeElement.tagName !== 'TD') { 
+                e.preventDefault(); 
+                saveBeforeChange('delete'); 
+                deleteSelectedElement(); 
+                return;
+            }
+        }
+        
+        // 일반 타이핑 시 히스토리 기록 (단어 경계에서)
+        if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1) {
+            if (WORD_BREAK_CHARS.includes(e.key)) {
+                saveBeforeChange('typing');
+            }
+        }
+    }
+
+    // IME 조합 이벤트 (한글 등)
+    editorBody.addEventListener('compositionstart', () => {
+        isComposing = true;
+        // 조합 시작 전 상태 저장
+        pendingSnapshot = createSnapshot();
+    });
+    
+    editorBody.addEventListener('compositionend', () => {
+        isComposing = false;
+        // 조합 완료 후 히스토리에 저장
+        if (pendingSnapshot) {
+            pushToHistory(pendingSnapshot);
+            pendingSnapshot = null;
+        }
+        lastInputTime = Date.now();
+        lastInputType = 'typing';
+    });
+
+    // input 이벤트: 타이핑 그룹핑 적용
     let inputTimer;
-    editorBody.addEventListener('input', () => { clearTimeout(inputTimer); inputTimer = setTimeout(recordHistory, 1000); updateSelectionBox(); triggerAutoSave(); });
+    editorBody.addEventListener('input', (e) => { 
+        clearTimeout(inputTimer); 
+        
+        // IME 조합 중이 아닐 때만 처리
+        if (!isComposing) {
+            // 일정 시간 후에 히스토리 기록 (타이핑 멈춤 감지)
+            inputTimer = setTimeout(() => {
+                recordHistory('typing');
+            }, TYPING_GROUP_DELAY);
+        }
+        
+        updateSelectionBox(); 
+        triggerAutoSave(); 
+    });
     
     const syncButtons = () => { if (currentSelectedElement) updateSelectionBox(); };
     editorContainer?.addEventListener('scroll', syncButtons);
     editorBody.addEventListener('scroll', (e) => { if (e.target.classList.contains('table-wrapper')) syncButtons(); }, true);
-    document.getElementById('edit-title')?.addEventListener('input', triggerAutoSave);
-    document.getElementById('edit-subtitle')?.addEventListener('input', triggerAutoSave);
+    
+    // 제목/소제목도 Undo 히스토리에 포함
+    const editTitle = document.getElementById('edit-title');
+    const editSubtitle = document.getElementById('edit-subtitle');
+    
+    let titleTimer, subtitleTimer;
+    editTitle?.addEventListener('input', () => { 
+        clearTimeout(titleTimer);
+        titleTimer = setTimeout(() => saveBeforeChange('title'), TYPING_GROUP_DELAY);
+        triggerAutoSave(); 
+    });
+    editTitle?.addEventListener('focus', () => saveBeforeChange('title'));
+    
+    editSubtitle?.addEventListener('input', () => { 
+        clearTimeout(subtitleTimer);
+        subtitleTimer = setTimeout(() => saveBeforeChange('subtitle'), TYPING_GROUP_DELAY);
+        triggerAutoSave(); 
+    });
+    editSubtitle?.addEventListener('focus', () => saveBeforeChange('subtitle'));
+    
     window.addEventListener('resize', () => { updateSelectionBox(); if(state.currentViewMode === 'book') handleBookResize(); });
 }
 
@@ -350,7 +901,9 @@ export function openEditor(isEdit, entryData) {
     if (fontSelect) fontSelect.value = state.currentFontFamily;
 
     toggleViewMode('default');
-    undoStack = []; redoStack = []; 
+    
+    // 초기 상태 저장 (Undo 히스토리 시작점)
+    saveInitialState();
 }
 
 export function refreshEditorContent() {
@@ -385,18 +938,21 @@ export function toggleViewMode(mode) {
 
 export function formatDoc(cmd, value = null) { 
     const editor = document.getElementById('editor-body'); if (!editor) return;
-    const currentOffset = getCursorOffset(editor);
 
     if (cmd === 'undo') {
-        if (undoStack.length > 0) { redoStack.push(editor.innerHTML); editor.innerHTML = undoStack.pop(); setCursorOffset(editor, currentOffset); triggerAutoSave(); return; } 
-        else { document.execCommand('undo', false, null); return; }
+        if (performUndo()) {
+            triggerAutoSave();
+        }
+        return;
     }
     if (cmd === 'redo') {
-        if (redoStack.length > 0) { undoStack.push(editor.innerHTML); editor.innerHTML = redoStack.pop(); setCursorOffset(editor, currentOffset); triggerAutoSave(); return; } 
-        else { document.execCommand('redo', false, null); return; }
+        if (performRedo()) {
+            triggerAutoSave();
+        }
+        return;
     }
 
-    recordHistory(); 
+    saveBeforeChange('format'); 
     if (!document.activeElement.closest('#editor-body')) editor.focus();
 
     if (cmd.startsWith('justify')) {
@@ -424,7 +980,7 @@ export function changeGlobalFontSize(newSize) {
     if (isNaN(size)) return;
     
     state.currentFontSize = size;
-    recordHistory();
+    saveBeforeChange('fontSize');
 
     if (selection.rangeCount > 0 && selection.toString().length > 0) {
         document.execCommand('fontSize', false, '7'); 
@@ -445,7 +1001,7 @@ export function changeGlobalFontSize(newSize) {
 export function changeGlobalFontFamily(newFont) {
     const selection = window.getSelection();
     state.currentFontFamily = newFont;
-    recordHistory();
+    saveBeforeChange('fontFamily');
 
     if (selection.rangeCount > 0 && selection.toString().length > 0) {
         document.execCommand('fontName', false, 'temp_font');
@@ -485,26 +1041,48 @@ export function applyFontStyle(f, s) {
 
 /* --- 리사이징 및 기타 유틸리티 --- */
 function selectElement(el) { currentSelectedElement = el; createSelectionUI(); updateSelectionBox(); }
-function hideSelection() { currentSelectedElement = null; ['img-selection-box','resize-handle','img-delete-btn','img-resize-group'].forEach(cls => { document.querySelectorAll('.'+cls).forEach(e => e.style.display = 'none'); }); if(tableControlGroup) tableControlGroup.style.display = 'none'; }
+function hideSelection() { 
+    currentSelectedElement = null; 
+    ['img-selection-box','resize-handle','img-delete-btn','img-resize-group'].forEach(cls => { 
+        document.querySelectorAll('.'+cls).forEach(e => e.style.display = 'none'); 
+    }); 
+    // 툴바의 표 편집 버튼 숨김
+    const toolbarTableEditBtn = document.getElementById('toolbar-table-edit-btn');
+    if (toolbarTableEditBtn) toolbarTableEditBtn.style.display = 'none';
+}
+
+/**
+ * 현재 커서가 있는 셀의 표를 선택
+ */
+function selectTableFromCell(cell) {
+    if (!cell) return;
+    const table = cell.closest('table');
+    if (table) {
+        currentSelectedElement = table;
+        lastClickedCell = cell;
+        createSelectionUI();
+        updateSelectionBox();
+    }
+}
+
 function createSelectionUI() {
     if (!selectionBox) {
         selectionBox = document.createElement('div'); selectionBox.className = 'img-selection-box'; document.body.appendChild(selectionBox);
         resizeHandle = document.createElement('div'); resizeHandle.className = 'resize-handle se'; document.body.appendChild(resizeHandle);
         resizeHandle.onmousedown = (e) => startResize(e);
         deleteBtn = document.createElement('button'); deleteBtn.className = 'img-delete-btn'; deleteBtn.innerHTML = '<i class="ph ph-trash"></i> 삭제'; document.body.appendChild(deleteBtn);
-        deleteBtn.onclick = () => { recordHistory(); deleteSelectedElement(); };
+        deleteBtn.onclick = () => { saveBeforeChange('delete'); deleteSelectedElement(); };
         resizeBtnGroup = document.createElement('div'); resizeBtnGroup.className = 'img-resize-group';
-        [25, 50, 75, 100].forEach(size => { const btn = document.createElement('button'); btn.className = 'img-resize-btn'; btn.innerText = size + '%'; btn.onclick = () => { if (currentSelectedElement) { recordHistory(); currentSelectedElement.style.width = size + '%'; currentSelectedElement.style.height = 'auto'; updateSelectionBox(); triggerAutoSave(); } }; resizeBtnGroup.appendChild(btn); });
+        [25, 50, 75, 100].forEach(size => { const btn = document.createElement('button'); btn.className = 'img-resize-btn'; btn.innerText = size + '%'; btn.onclick = () => { if (currentSelectedElement) { saveBeforeChange('resize'); currentSelectedElement.style.width = size + '%'; currentSelectedElement.style.height = 'auto'; updateSelectionBox(); triggerAutoSave(); } }; resizeBtnGroup.appendChild(btn); });
         document.body.appendChild(resizeBtnGroup);
     }
-    if (!tableControlGroup) {
-        tableControlGroup = document.createElement('div'); tableControlGroup.className = 'img-resize-group'; 
-        const createOpBtn = (label, icon, fn) => { const btn = document.createElement('button'); btn.className = 'img-resize-btn'; btn.innerHTML = `<i class="ph ${icon}"></i> ${label}`; btn.onclick = (e) => { e.stopPropagation(); fn(); updateSelectionBox(); triggerAutoSave(); }; return btn; };
-        tableControlGroup.appendChild(createOpBtn('줄+', 'ph-rows', addRow)); tableControlGroup.appendChild(createOpBtn('줄-', 'ph-minus', deleteRow)); tableControlGroup.appendChild(createOpBtn('칸+', 'ph-columns', addColumn)); tableControlGroup.appendChild(createOpBtn('칸-', 'ph-minus', deleteColumn));
-        document.body.appendChild(tableControlGroup);
-    }
     selectionBox.style.display = 'block'; resizeHandle.style.display = 'block'; deleteBtn.style.display = 'flex'; resizeBtnGroup.style.display = 'flex';
-    if(tableControlGroup) tableControlGroup.style.display = currentSelectedElement.tagName === 'TABLE' ? 'flex' : 'none';
+    
+    // 툴바의 표 편집 버튼 표시/숨김
+    const toolbarTableEditBtn = document.getElementById('toolbar-table-edit-btn');
+    if (toolbarTableEditBtn) {
+        toolbarTableEditBtn.style.display = currentSelectedElement.tagName === 'TABLE' ? 'flex' : 'none';
+    }
 }
 function updateSelectionBox() {
     if (!currentSelectedElement || !selectionBox) return;
@@ -513,9 +1091,8 @@ function updateSelectionBox() {
     resizeHandle.style.top = (rect.bottom + scrollTop - 10) + 'px'; resizeHandle.style.left = (rect.right + scrollLeft - 10) + 'px';
     const centerX = rect.left + scrollLeft + rect.width / 2;
     if (currentSelectedElement.tagName === 'TABLE') {
-        tableControlGroup.style.top = (rect.bottom + scrollTop + 15) + 'px'; tableControlGroup.style.left = centerX + 'px';
-        resizeBtnGroup.style.top = (rect.bottom + scrollTop + 55) + 'px'; resizeBtnGroup.style.left = centerX + 'px';
-        deleteBtn.style.top = (rect.bottom + scrollTop + 95) + 'px'; deleteBtn.style.left = centerX + 'px';
+        resizeBtnGroup.style.top = (rect.bottom + scrollTop + 15) + 'px'; resizeBtnGroup.style.left = centerX + 'px';
+        deleteBtn.style.top = (rect.bottom + scrollTop + 55) + 'px'; deleteBtn.style.left = centerX + 'px';
     } else {
         resizeBtnGroup.style.top = (rect.bottom + scrollTop + 15) + 'px'; resizeBtnGroup.style.left = centerX + 'px';
         deleteBtn.style.top = (rect.bottom + scrollTop + 55) + 'px'; deleteBtn.style.left = centerX + 'px';
@@ -523,16 +1100,118 @@ function updateSelectionBox() {
 }
 function deleteSelectedElement() { if (currentSelectedElement) { currentSelectedElement.remove(); hideSelection(); triggerAutoSave(); } }
 let isResizing = false, startX2, startY2, startWidth2, startHeight2;
-function startResize(e) { e.preventDefault(); isResizing = true; startX2 = e.clientX; startY2 = e.clientY; startWidth2 = currentSelectedElement.clientWidth; startHeight2 = currentSelectedElement.clientHeight; if (currentSelectedElement.tagName === 'TABLE') { startTableFontSize = parseInt(window.getComputedStyle(currentSelectedElement).fontSize) || 16; } document.addEventListener('mousemove', resizing); document.addEventListener('mouseup', stopResize); }
+function startResize(e) { e.preventDefault(); saveBeforeChange('resize'); isResizing = true; startX2 = e.clientX; startY2 = e.clientY; startWidth2 = currentSelectedElement.clientWidth; startHeight2 = currentSelectedElement.clientHeight; if (currentSelectedElement.tagName === 'TABLE') { startTableFontSize = parseInt(window.getComputedStyle(currentSelectedElement).fontSize) || 16; } document.addEventListener('mousemove', resizing); document.addEventListener('mouseup', stopResize); }
 function resizing(e) { if (!isResizing || !currentSelectedElement) return; const deltaX = e.clientX - startX2, newWidth = startWidth2 + deltaX, scaleRatio = newWidth / startWidth2, newHeight = startHeight2 + (e.clientY - startY2); if (newWidth > 50) { currentSelectedElement.style.width = newWidth + 'px'; if (currentSelectedElement.tagName === 'TABLE') { currentSelectedElement.style.fontSize = (startTableFontSize * scaleRatio) + 'px'; } } if (newHeight > 30) currentSelectedElement.style.height = newHeight + 'px'; updateSelectionBox(); }
-function stopResize() { if (isResizing) { recordHistory(); isResizing = false; } document.removeEventListener('mousemove', resizing); document.removeEventListener('mouseup', stopResize); triggerAutoSave(); }
+function stopResize() { isResizing = false; document.removeEventListener('mousemove', resizing); document.removeEventListener('mouseup', stopResize); triggerAutoSave(); }
 
-export function addRow() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE') return; recordHistory(); const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, refRow = targetCell ? targetCell.parentElement : table.rows[table.rows.length - 1], colIdx = targetCell ? targetCell.cellIndex : 0, newRow = table.insertRow(refRow.rowIndex + 1), colCount = table.rows[0].cells.length; let cellToFocus = null; for (let i = 0; i < colCount; i++) { const newCell = newRow.insertCell(i); newCell.innerHTML = '<br>'; if (i === colIdx) cellToFocus = newCell; } if (cellToFocus) focusCell(cellToFocus); }
-export function deleteRow() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE' || table.rows.length <= 1) return; recordHistory(); const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, refRow = targetCell ? targetCell.parentElement : table.rows[table.rows.length - 1]; table.deleteRow(refRow.rowIndex); lastClickedCell = null; }
-export function addColumn() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE') return; recordHistory(); const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1, rowIdx = targetCell ? targetCell.parentElement.rowIndex : 0; let cellToFocus = null; for (let i = 0; i < table.rows.length; i++) { const newCell = table.rows[i].insertCell(colIdx + 1); newCell.innerHTML = '<br>'; if (i === rowIdx) cellToFocus = newCell; } if (cellToFocus) focusCell(cellToFocus); }
-export function deleteColumn() { const table = currentSelectedElement; if (!table || table.tagName !== 'TABLE' || table.rows[0].cells.length <= 1) return; recordHistory(); const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null, colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1; for (let i = 0; i < table.rows.length; i++) { table.rows[i].deleteCell(colIdx); } lastClickedCell = null; }
+export function addRow() { 
+    const table = currentSelectedElement; 
+    if (!table || table.tagName !== 'TABLE') return; 
+    saveBeforeChange('tableEdit'); 
+    const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null;
+    const refRow = targetCell ? targetCell.parentElement : table.rows[table.rows.length - 1];
+    const colIdx = targetCell ? targetCell.cellIndex : 0;
+    const newRow = table.insertRow(refRow.rowIndex + 1);
+    const colCount = table.rows[0].cells.length; 
+    let cellToFocus = null; 
+    for (let i = 0; i < colCount; i++) { 
+        const newCell = newRow.insertCell(i); 
+        newCell.innerHTML = '<br>'; 
+        if (i === colIdx) cellToFocus = newCell; 
+    } 
+    if (cellToFocus) focusCell(cellToFocus); 
+}
 
-export function insertSticker(emoji) { recordHistory(); document.execCommand('insertText', false, emoji); triggerAutoSave(); }
-export function insertImage(src) { recordHistory(); document.execCommand('insertImage', false, src); triggerAutoSave(); }
-export function insertTable(rows, cols) { recordHistory(); let tableHtml = '<div class="table-wrapper"><table style="width: 100%; table-layout: fixed;"><tbody>'; for (let i = 0; i < rows; i++) { tableHtml += '<tr>'; for (let j = 0; j < cols; j++) { tableHtml += '<td><br></td>'; } tableHtml += '</tr>'; } tableHtml += '</tbody></table></div><p><br></p>'; const editor = document.getElementById('editor-body'); editor.focus(); document.execCommand('insertHTML', false, tableHtml); triggerAutoSave(); }
-export function createHyperlink() { const selection = window.getSelection(); if (selection.rangeCount > 0 && selection.toString().length > 0) { const url = prompt("연결할 주소(URL)를 입력하세요:", "https://"); if (url && url !== "https://") { recordHistory(); document.execCommand('createLink', false, url); const anchor = selection.anchorNode.parentElement; if (anchor && anchor.tagName === 'A') { anchor.target = '_blank'; anchor.style.color = '#2563EB'; anchor.style.textDecoration = 'underline'; anchor.style.cursor = 'pointer'; } triggerAutoSave(); } } else { alert("링크를 걸 문구를 먼저 드래그하여 선택해주세요."); } }
+export function deleteRow() { 
+    const table = currentSelectedElement; 
+    if (!table || table.tagName !== 'TABLE' || table.rows.length <= 1) return; 
+    saveBeforeChange('tableEdit'); 
+    const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null;
+    const refRow = targetCell ? targetCell.parentElement : table.rows[table.rows.length - 1];
+    const rowIdx = refRow.rowIndex;
+    const colIdx = targetCell ? targetCell.cellIndex : 0;
+    table.deleteRow(rowIdx);
+    // 삭제 후 인접 셀로 커서 이동
+    const newRowIdx = Math.min(rowIdx, table.rows.length - 1);
+    if (newRowIdx >= 0 && table.rows[newRowIdx]) {
+        const newCell = table.rows[newRowIdx].cells[Math.min(colIdx, table.rows[newRowIdx].cells.length - 1)];
+        if (newCell) focusCell(newCell);
+    }
+}
+
+export function addColumn() { 
+    const table = currentSelectedElement; 
+    if (!table || table.tagName !== 'TABLE') return; 
+    saveBeforeChange('tableEdit'); 
+    const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null;
+    const colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1;
+    const rowIdx = targetCell ? targetCell.parentElement.rowIndex : 0; 
+    let cellToFocus = null; 
+    for (let i = 0; i < table.rows.length; i++) { 
+        const newCell = table.rows[i].insertCell(colIdx + 1); 
+        newCell.innerHTML = '<br>'; 
+        if (i === rowIdx) cellToFocus = newCell; 
+    } 
+    if (cellToFocus) focusCell(cellToFocus); 
+}
+
+export function deleteColumn() { 
+    const table = currentSelectedElement; 
+    if (!table || table.tagName !== 'TABLE' || table.rows[0].cells.length <= 1) return; 
+    saveBeforeChange('tableEdit'); 
+    const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null;
+    const colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1;
+    const rowIdx = targetCell ? targetCell.parentElement.rowIndex : 0;
+    for (let i = 0; i < table.rows.length; i++) { 
+        table.rows[i].deleteCell(colIdx); 
+    }
+    // 삭제 후 인접 셀로 커서 이동
+    const newColIdx = Math.min(colIdx, table.rows[0].cells.length - 1);
+    if (newColIdx >= 0 && table.rows[rowIdx]) {
+        const newCell = table.rows[rowIdx].cells[newColIdx];
+        if (newCell) focusCell(newCell);
+    }
+}
+
+export function insertSticker(emoji) { saveBeforeChange('insert'); document.execCommand('insertText', false, emoji); triggerAutoSave(); }
+export function insertImage(src) { saveBeforeChange('insert'); document.execCommand('insertImage', false, src); triggerAutoSave(); }
+export function insertTable(rows, cols) { saveBeforeChange('insert'); let tableHtml = '<div class="table-wrapper"><table style="width: 100%; table-layout: fixed;"><tbody>'; for (let i = 0; i < rows; i++) { tableHtml += '<tr>'; for (let j = 0; j < cols; j++) { tableHtml += '<td><br></td>'; } tableHtml += '</tr>'; } tableHtml += '</tbody></table></div><p><br></p>'; const editor = document.getElementById('editor-body'); editor.focus(); document.execCommand('insertHTML', false, tableHtml); triggerAutoSave(); }
+export function createHyperlink() { const selection = window.getSelection(); if (selection.rangeCount > 0 && selection.toString().length > 0) { const url = prompt("연결할 주소(URL)를 입력하세요:", "https://"); if (url && url !== "https://") { saveBeforeChange('link'); document.execCommand('createLink', false, url); const anchor = selection.anchorNode.parentElement; if (anchor && anchor.tagName === 'A') { anchor.target = '_blank'; anchor.style.color = '#2563EB'; anchor.style.textDecoration = 'underline'; anchor.style.cursor = 'pointer'; } triggerAutoSave(); } } else { alert("링크를 걸 문구를 먼저 드래그하여 선택해주세요."); } }
+
+/**
+ * 표 편집 모달 열기 (편집 모드)
+ */
+export function openTableEditModal() {
+    const tableModal = document.getElementById('table-modal');
+    const tableModalTitle = document.getElementById('table-modal-title');
+    const tableInsertSection = document.getElementById('table-insert-section');
+    const tableEditSection = document.getElementById('table-edit-section');
+    const btnConfirmTable = document.getElementById('btn-confirm-table');
+    
+    if (tableModal) {
+        tableModalTitle.textContent = '표 편집';
+        tableInsertSection.classList.add('hidden');
+        tableEditSection.classList.remove('hidden');
+        btnConfirmTable.classList.add('hidden');
+        tableModal.classList.remove('hidden');
+    }
+}
+
+/**
+ * 표 삽입 모달 열기 (삽입 모드)
+ */
+export function openTableInsertModal() {
+    const tableModal = document.getElementById('table-modal');
+    const tableModalTitle = document.getElementById('table-modal-title');
+    const tableInsertSection = document.getElementById('table-insert-section');
+    const tableEditSection = document.getElementById('table-edit-section');
+    const btnConfirmTable = document.getElementById('btn-confirm-table');
+    
+    if (tableModal) {
+        tableModalTitle.textContent = '표 삽입';
+        tableInsertSection.classList.remove('hidden');
+        tableEditSection.classList.add('hidden');
+        btnConfirmTable.classList.remove('hidden');
+        tableModal.classList.remove('hidden');
+    }
+}

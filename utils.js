@@ -30,82 +30,152 @@ export function autoLink(text) {
 /**
  * 에디터에 복사/붙여넣기 이벤트 리스너를 추가하여 하이퍼링크를 유지합니다.
  * editor-body 요소에 이 함수를 호출하세요.
+ * @param {HTMLElement} editorElement - 에디터 요소
+ * @param {Object} callbacks - 콜백 함수들 { onBeforePaste, onAfterPaste }
  */
-export function setupLinkPreservation(editorElement) {
+export function setupLinkPreservation(editorElement, callbacks = {}) {
     if (!editorElement) return;
     
-    // 복사 이벤트: 선택된 HTML을 클립보드에 저장
+    // 이미 설정된 경우 중복 설정 방지
+    if (editorElement._linkPreservationSetup) return;
+    editorElement._linkPreservationSetup = true;
+    
+    // 내부 클립보드 (브라우저 제한 우회용)
+    let internalClipboard = { html: '', text: '' };
+    
+    /**
+     * 선택 영역의 HTML을 가져오되, 부분 선택된 링크도 완전히 포함
+     */
+    function getSelectionHtmlWithLinks() {
+        const selection = window.getSelection();
+        if (!selection.rangeCount) return { html: '', text: '' };
+        
+        const range = selection.getRangeAt(0);
+        const fragment = range.cloneContents();
+        const div = document.createElement('div');
+        div.appendChild(fragment.cloneNode(true));
+        
+        // 선택 시작점이 링크 내부인 경우 처리
+        let startNode = range.startContainer;
+        let startAnchor = startNode.nodeType === 3 ? startNode.parentElement?.closest('a') : startNode.closest?.('a');
+        
+        // 선택 끝점이 링크 내부인 경우 처리
+        let endNode = range.endContainer;
+        let endAnchor = endNode.nodeType === 3 ? endNode.parentElement?.closest('a') : endNode.closest?.('a');
+        
+        let html = div.innerHTML;
+        
+        // 시작점이 링크 내부이고, 복사된 HTML에 <a> 태그가 없으면 링크로 감싸기
+        if (startAnchor && !html.includes('<a ')) {
+            const href = startAnchor.getAttribute('href');
+            const target = startAnchor.getAttribute('target') || '_blank';
+            const style = startAnchor.getAttribute('style') || 'color:#2563EB; text-decoration:underline; cursor:pointer;';
+            html = `<a href="${href}" target="${target}" style="${style}">${html}</a>`;
+        }
+        
+        return { html, text: selection.toString() };
+    }
+    
+    // 복사 이벤트
     editorElement.addEventListener('copy', (e) => {
         const selection = window.getSelection();
-        if (!selection.rangeCount) return;
+        if (!selection.rangeCount || selection.isCollapsed) return;
         
-        const range = selection.getRangeAt(0);
-        const fragment = range.cloneContents();
-        const div = document.createElement('div');
-        div.appendChild(fragment);
+        const { html, text } = getSelectionHtmlWithLinks();
         
-        // HTML과 텍스트 둘 다 클립보드에 저장
-        e.clipboardData.setData('text/html', div.innerHTML);
-        e.clipboardData.setData('text/plain', selection.toString());
+        // 클립보드에 저장
+        e.clipboardData.setData('text/html', html);
+        e.clipboardData.setData('text/plain', text);
+        
+        // 내부 클립보드에도 저장 (브라우저 제한 우회)
+        internalClipboard = { html, text };
+        
         e.preventDefault();
     });
     
-    // 잘라내기 이벤트: 선택된 HTML을 클립보드에 저장하고 삭제
+    // 잘라내기 이벤트
     editorElement.addEventListener('cut', (e) => {
         const selection = window.getSelection();
-        if (!selection.rangeCount) return;
+        if (!selection.rangeCount || selection.isCollapsed) return;
         
-        const range = selection.getRangeAt(0);
-        const fragment = range.cloneContents();
-        const div = document.createElement('div');
-        div.appendChild(fragment);
+        const { html, text } = getSelectionHtmlWithLinks();
         
-        // HTML과 텍스트 둘 다 클립보드에 저장
-        e.clipboardData.setData('text/html', div.innerHTML);
-        e.clipboardData.setData('text/plain', selection.toString());
+        // 클립보드에 저장
+        e.clipboardData.setData('text/html', html);
+        e.clipboardData.setData('text/plain', text);
+        
+        // 내부 클립보드에도 저장
+        internalClipboard = { html, text };
         
         // 선택된 내용 삭제
+        const range = selection.getRangeAt(0);
         range.deleteContents();
+        
+        // 콜백 호출
+        if (callbacks.onAfterPaste) callbacks.onAfterPaste();
+        
         e.preventDefault();
     });
     
-    // 붙여넣기 이벤트: HTML 형식으로 붙여넣기
+    // 붙여넣기 이벤트
     editorElement.addEventListener('paste', (e) => {
         e.preventDefault();
         
-        // HTML 형식 우선, 없으면 일반 텍스트
+        // 콜백: 히스토리 기록
+        if (callbacks.onBeforePaste) callbacks.onBeforePaste();
+        
+        // 시스템 클립보드에서 데이터 가져오기
         let html = e.clipboardData.getData('text/html');
-        const text = e.clipboardData.getData('text/plain');
+        let text = e.clipboardData.getData('text/plain');
         
-        if (!html && text) {
-            // HTML이 없으면 텍스트에서 URL을 찾아 링크로 변환
-            html = autoLink(text);
-        }
-        
-        if (html || text) {
-            // 현재 커서 위치에 삽입
-            const selection = window.getSelection();
-            if (selection.rangeCount) {
-                const range = selection.getRangeAt(0);
-                range.deleteContents();
-                
-                const temp = document.createElement('div');
-                temp.innerHTML = html || text;
-                
-                const fragment = document.createDocumentFragment();
-                let node;
-                while ((node = temp.firstChild)) {
-                    fragment.appendChild(node);
-                }
-                
-                range.insertNode(fragment);
-                
-                // 커서를 삽입된 내용 끝으로 이동
-                range.collapse(false);
-                selection.removeAllRanges();
-                selection.addRange(range);
+        // 테이블이 포함된 경우 셀 내용만 추출
+        if (html && html.includes('<table')) {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            const cells = doc.querySelectorAll('td');
+            if (cells.length > 0) {
+                let combinedContent = "";
+                cells.forEach((cell, idx) => {
+                    combinedContent += cell.innerHTML + (idx < cells.length - 1 ? " " : "");
+                });
+                document.execCommand('insertHTML', false, combinedContent);
+                if (callbacks.onAfterPaste) callbacks.onAfterPaste();
+                return;
             }
         }
+        
+        // 시스템 클립보드의 HTML에 링크가 없고, 내부 클립보드에 링크가 있으면 내부 클립보드 사용
+        if (internalClipboard.html && internalClipboard.html.includes('<a ')) {
+            if (internalClipboard.text === text || !html || !html.includes('<a ')) {
+                html = internalClipboard.html;
+            }
+        }
+        
+        // HTML이 있으면 HTML로 삽입
+        if (html) {
+            // HTML 파싱하여 body 내용만 추출 (메타 태그 등 제거)
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            const bodyContent = doc.body.innerHTML;
+            
+            if (bodyContent) {
+                document.execCommand('insertHTML', false, bodyContent);
+                if (callbacks.onAfterPaste) callbacks.onAfterPaste();
+                return;
+            }
+        }
+        
+        // HTML이 없으면 텍스트에서 URL 자동 링크
+        if (text) {
+            const linkedText = text.replace(
+                /(https?:\/\/[^\s]+)/g, 
+                '<a href="$1" target="_blank" style="color:#2563EB; text-decoration:underline; cursor:pointer;">$1</a>'
+            );
+            document.execCommand('insertHTML', false, linkedText);
+        }
+        
+        // 콜백: 자동 저장
+        if (callbacks.onAfterPaste) callbacks.onAfterPaste();
     });
 }
 
