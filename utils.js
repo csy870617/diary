@@ -27,9 +27,12 @@ export function autoLink(text) {
     return div.innerHTML;
 }
 
+// 전역 셀 클립보드
+let globalCellClipboard = { cellData: null, rows: 0, cols: 0 };
+
 /**
- * 에디터에 복사/붙여넣기 이벤트 리스너를 추가하여 하이퍼링크를 유지합니다.
- * editor-body 요소에 이 함수를 호출하세요.
+ * 에디터에 복사/붙여넣기 이벤트 리스너를 추가합니다.
+ * 표 셀의 복사/잘라내기/붙여넣기와 하이퍼링크 유지를 지원합니다.
  * @param {HTMLElement} editorElement - 에디터 요소
  * @param {Object} callbacks - 콜백 함수들 { onBeforePaste, onAfterPaste }
  */
@@ -40,8 +43,73 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
     if (editorElement._linkPreservationSetup) return;
     editorElement._linkPreservationSetup = true;
     
-    // 내부 클립보드 (브라우저 제한 우회용)
+    // 내부 클립보드 (링크 보존용)
     let internalClipboard = { html: '', text: '' };
+    
+    /**
+     * 선택된 셀들의 데이터를 가져옵니다
+     */
+    function getSelectedCellsData() {
+        const selectedCells = document.querySelectorAll('td.selected-cell');
+        if (selectedCells.length === 0) return null;
+        
+        const table = selectedCells[0].closest('table');
+        if (!table) return null;
+        
+        let minRow = Infinity, maxRow = -1, minCol = Infinity, maxCol = -1;
+        
+        selectedCells.forEach(cell => {
+            const row = cell.parentElement.rowIndex;
+            const col = cell.cellIndex;
+            minRow = Math.min(minRow, row);
+            maxRow = Math.max(maxRow, row);
+            minCol = Math.min(minCol, col);
+            maxCol = Math.max(maxCol, col);
+        });
+        
+        const cellData = [];
+        for (let r = minRow; r <= maxRow; r++) {
+            const rowData = [];
+            for (let c = minCol; c <= maxCol; c++) {
+                const cell = table.rows[r]?.cells[c];
+                if (cell && cell.classList.contains('selected-cell')) {
+                    rowData.push(cell.innerHTML);
+                } else {
+                    rowData.push('');
+                }
+            }
+            cellData.push(rowData);
+        }
+        
+        return { cellData, rows: maxRow - minRow + 1, cols: maxCol - minCol + 1 };
+    }
+    
+    /**
+     * 셀 데이터를 대상 셀에 붙여넣기
+     */
+    function pasteCellData(targetCell, data) {
+        if (!targetCell || !data || !data.cellData) return false;
+        
+        const table = targetCell.closest('table');
+        if (!table) return false;
+        
+        const startRow = targetCell.parentElement.rowIndex;
+        const startCol = targetCell.cellIndex;
+        
+        data.cellData.forEach((rowData, rIdx) => {
+            rowData.forEach((cellContent, cIdx) => {
+                const targetRow = table.rows[startRow + rIdx];
+                if (targetRow) {
+                    const cell = targetRow.cells[startCol + cIdx];
+                    if (cell) {
+                        cell.innerHTML = cellContent || '<br>';
+                    }
+                }
+            });
+        });
+        
+        return true;
+    }
     
     /**
      * 선택 영역의 HTML을 가져오되, 부분 선택된 링크도 완전히 포함
@@ -55,17 +123,11 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
         const div = document.createElement('div');
         div.appendChild(fragment.cloneNode(true));
         
-        // 선택 시작점이 링크 내부인 경우 처리
         let startNode = range.startContainer;
         let startAnchor = startNode.nodeType === 3 ? startNode.parentElement?.closest('a') : startNode.closest?.('a');
         
-        // 선택 끝점이 링크 내부인 경우 처리
-        let endNode = range.endContainer;
-        let endAnchor = endNode.nodeType === 3 ? endNode.parentElement?.closest('a') : endNode.closest?.('a');
-        
         let html = div.innerHTML;
         
-        // 시작점이 링크 내부이고, 복사된 HTML에 <a> 태그가 없으면 링크로 감싸기
         if (startAnchor && !html.includes('<a ')) {
             const href = startAnchor.getAttribute('href');
             const target = startAnchor.getAttribute('target') || '_blank';
@@ -76,84 +138,261 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
         return { html, text: selection.toString() };
     }
     
-    // 복사 이벤트
+    /**
+     * 현재 커서가 있는 셀 찾기
+     */
+    function getCurrentCell() {
+        const selection = window.getSelection();
+        if (!selection.anchorNode) return null;
+        
+        let node = selection.anchorNode;
+        if (node.nodeType === 3) {
+            node = node.parentElement;
+        }
+        
+        return node?.closest?.('td') || null;
+    }
+    
+    /**
+     * 셀 선택 해제
+     */
+    function clearCellSelection() {
+        document.querySelectorAll('td.selected-cell').forEach(td => {
+            td.classList.remove('selected-cell');
+        });
+        document.querySelectorAll('table.selecting-cells').forEach(t => {
+            t.classList.remove('selecting-cells');
+        });
+    }
+    
+    // ========== 키보드 이벤트 핸들러 ==========
+    const handleKeyDown = (e) => {
+        // 에디터가 보이지 않으면 무시
+        const writeModal = document.getElementById('write-modal');
+        if (!writeModal || writeModal.classList.contains('hidden')) return;
+        
+        const selectedCells = document.querySelectorAll('td.selected-cell');
+        
+        // Ctrl+C / Cmd+C: 복사
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+            if (selectedCells.length > 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const data = getSelectedCellsData();
+                if (data) {
+                    globalCellClipboard = data;
+                    
+                    // 텍스트로 변환하여 시스템 클립보드에도 복사
+                    const textContent = data.cellData.map(row => 
+                        row.map(cell => {
+                            const div = document.createElement('div');
+                            div.innerHTML = cell;
+                            return div.textContent || '';
+                        }).join('\t')
+                    ).join('\n');
+                    
+                    navigator.clipboard?.writeText(textContent).catch(() => {});
+                    
+                    // 복사 완료 시각적 피드백
+                    selectedCells.forEach(cell => {
+                        cell.style.transition = 'background-color 0.2s';
+                        const originalBg = cell.style.backgroundColor;
+                        cell.style.backgroundColor = 'rgba(59, 130, 246, 0.4)';
+                        setTimeout(() => {
+                            cell.style.backgroundColor = originalBg || '';
+                        }, 200);
+                    });
+                    
+                    console.log('셀 복사:', data.rows, 'x', data.cols);
+                }
+                return;
+            }
+        }
+        
+        // Ctrl+X / Cmd+X: 잘라내기
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
+            if (selectedCells.length > 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const data = getSelectedCellsData();
+                if (data) {
+                    globalCellClipboard = data;
+                    
+                    const textContent = data.cellData.map(row => 
+                        row.map(cell => {
+                            const div = document.createElement('div');
+                            div.innerHTML = cell;
+                            return div.textContent || '';
+                        }).join('\t')
+                    ).join('\n');
+                    
+                    navigator.clipboard?.writeText(textContent).catch(() => {});
+                    
+                    // 셀 내용 삭제
+                    if (callbacks.onBeforePaste) callbacks.onBeforePaste();
+                    selectedCells.forEach(cell => {
+                        cell.innerHTML = '<br>';
+                    });
+                    if (callbacks.onAfterPaste) callbacks.onAfterPaste();
+                    
+                    console.log('셀 잘라내기:', data.rows, 'x', data.cols);
+                }
+                return;
+            }
+        }
+        
+        // Ctrl+V / Cmd+V: 붙여넣기
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+            // 대상 셀 찾기: 선택된 셀 중 첫 번째 또는 현재 커서 위치의 셀
+            let targetCell = null;
+            
+            if (selectedCells.length > 0) {
+                // 선택된 셀 중 가장 왼쪽 위 셀 찾기
+                let minRow = Infinity, minCol = Infinity;
+                selectedCells.forEach(cell => {
+                    const row = cell.parentElement.rowIndex;
+                    const col = cell.cellIndex;
+                    if (row < minRow || (row === minRow && col < minCol)) {
+                        minRow = row;
+                        minCol = col;
+                        targetCell = cell;
+                    }
+                });
+            } else {
+                targetCell = getCurrentCell();
+            }
+            
+            // 셀 클립보드에 데이터가 있고 대상 셀이 있으면 셀 붙여넣기
+            if (globalCellClipboard.cellData && targetCell) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                if (callbacks.onBeforePaste) callbacks.onBeforePaste();
+                
+                if (pasteCellData(targetCell, globalCellClipboard)) {
+                    clearCellSelection();
+                    if (callbacks.onAfterPaste) callbacks.onAfterPaste();
+                    console.log('셀 붙여넣기 완료');
+                }
+                return;
+            }
+        }
+    };
+    
+    // Document 레벨 키 이벤트 (캡처 단계에서 처리)
+    document.addEventListener('keydown', handleKeyDown, true);
+    
+    // ========== 일반 복사 이벤트 (링크 보존) ==========
     editorElement.addEventListener('copy', (e) => {
+        // 선택된 셀이 있으면 키보드 핸들러에서 처리됨
+        const selectedCells = document.querySelectorAll('td.selected-cell');
+        if (selectedCells.length > 0) return;
+        
+        // 일반 텍스트 선택 복사
         const selection = window.getSelection();
         if (!selection.rangeCount || selection.isCollapsed) return;
         
         const { html, text } = getSelectionHtmlWithLinks();
         
-        // 클립보드에 저장
         e.clipboardData.setData('text/html', html);
         e.clipboardData.setData('text/plain', text);
-        
-        // 내부 클립보드에도 저장 (브라우저 제한 우회)
         internalClipboard = { html, text };
         
         e.preventDefault();
     });
     
-    // 잘라내기 이벤트
+    // ========== 일반 잘라내기 이벤트 ==========
     editorElement.addEventListener('cut', (e) => {
+        const selectedCells = document.querySelectorAll('td.selected-cell');
+        if (selectedCells.length > 0) return;
+        
         const selection = window.getSelection();
         if (!selection.rangeCount || selection.isCollapsed) return;
         
         const { html, text } = getSelectionHtmlWithLinks();
         
-        // 클립보드에 저장
         e.clipboardData.setData('text/html', html);
         e.clipboardData.setData('text/plain', text);
-        
-        // 내부 클립보드에도 저장
         internalClipboard = { html, text };
         
-        // 선택된 내용 삭제
         const range = selection.getRangeAt(0);
         range.deleteContents();
         
-        // 콜백 호출
         if (callbacks.onAfterPaste) callbacks.onAfterPaste();
-        
         e.preventDefault();
     });
     
-    // 붙여넣기 이벤트
+    // ========== 붙여넣기 이벤트 ==========
     editorElement.addEventListener('paste', (e) => {
-        e.preventDefault();
+        const selectedCells = document.querySelectorAll('td.selected-cell');
+        const currentCell = getCurrentCell();
         
-        // 콜백: 히스토리 기록
+        // 셀 클립보드에 데이터가 있고 대상 셀이 있으면 셀 붙여넣기
+        if (globalCellClipboard.cellData && (selectedCells.length > 0 || currentCell)) {
+            e.preventDefault();
+            
+            if (callbacks.onBeforePaste) callbacks.onBeforePaste();
+            
+            let targetCell = currentCell;
+            if (selectedCells.length > 0) {
+                let minRow = Infinity, minCol = Infinity;
+                selectedCells.forEach(cell => {
+                    const row = cell.parentElement.rowIndex;
+                    const col = cell.cellIndex;
+                    if (row < minRow || (row === minRow && col < minCol)) {
+                        minRow = row;
+                        minCol = col;
+                        targetCell = cell;
+                    }
+                });
+            }
+            
+            if (targetCell && pasteCellData(targetCell, globalCellClipboard)) {
+                clearCellSelection();
+                if (callbacks.onAfterPaste) callbacks.onAfterPaste();
+            }
+            return;
+        }
+        
+        e.preventDefault();
         if (callbacks.onBeforePaste) callbacks.onBeforePaste();
         
-        // 시스템 클립보드에서 데이터 가져오기
         let html = e.clipboardData.getData('text/html');
         let text = e.clipboardData.getData('text/plain');
-
-        // 테이블이 포함된 경우: 커서가 테이블 셀 안이 아닐 때만 셀 내용 합치기
-        // (셀 안에서의 테이블 붙여넣기는 editor.js의 handleCellPaste가 capture phase에서 처리)
-        if (html && html.includes('<table')) {
-            const selection = window.getSelection();
-            const cursorNode = selection.rangeCount > 0 ? selection.getRangeAt(0).startContainer : null;
-            const inCell = cursorNode && (cursorNode.nodeType === 3
-                ? cursorNode.parentElement?.closest('td')
-                : cursorNode.closest?.('td'));
-
-            if (!inCell) {
+        
+        // 외부에서 복사한 테이블이 있고 현재 셀 안에 있는 경우
+        if (html && html.includes('<table') && currentCell) {
+            const table = currentCell.closest('table');
+            if (table) {
                 const parser = new DOMParser();
                 const doc = parser.parseFromString(html, 'text/html');
-                const cells = doc.querySelectorAll('td');
-                if (cells.length > 0) {
-                    let combinedContent = "";
-                    cells.forEach((cell, idx) => {
-                        combinedContent += cell.innerHTML + (idx < cells.length - 1 ? " " : "");
+                const pastedTable = doc.querySelector('table');
+                
+                if (pastedTable) {
+                    const startRow = currentCell.parentElement.rowIndex;
+                    const startCol = currentCell.cellIndex;
+                    
+                    Array.from(pastedTable.rows).forEach((pastedRow, rIdx) => {
+                        const targetRow = table.rows[startRow + rIdx];
+                        if (targetRow) {
+                            Array.from(pastedRow.cells).forEach((pastedCell, cIdx) => {
+                                const targetCellEl = targetRow.cells[startCol + cIdx];
+                                if (targetCellEl) {
+                                    targetCellEl.innerHTML = pastedCell.innerHTML || '<br>';
+                                }
+                            });
+                        }
                     });
-                    document.execCommand('insertHTML', false, combinedContent);
+                    
                     if (callbacks.onAfterPaste) callbacks.onAfterPaste();
                     return;
                 }
             }
         }
         
-        // 시스템 클립보드의 HTML에 링크가 없고, 내부 클립보드에 링크가 있으면 내부 클립보드 사용
+        // 내부 클립보드에 링크가 있으면 사용
         if (internalClipboard.html && internalClipboard.html.includes('<a ')) {
             if (internalClipboard.text === text || !html || !html.includes('<a ')) {
                 html = internalClipboard.html;
@@ -162,7 +401,6 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
         
         // HTML이 있으면 HTML로 삽입
         if (html) {
-            // HTML 파싱하여 body 내용만 추출 (메타 태그 등 제거)
             const parser = new DOMParser();
             const doc = parser.parseFromString(html, 'text/html');
             const bodyContent = doc.body.innerHTML;
@@ -183,31 +421,39 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
             document.execCommand('insertHTML', false, linkedText);
         }
         
-        // 콜백: 자동 저장
         if (callbacks.onAfterPaste) callbacks.onAfterPaste();
     });
 }
 
 /**
+ * 셀 클립보드 데이터 가져오기 (외부에서 접근용)
+ */
+export function getCellClipboard() {
+    return globalCellClipboard;
+}
+
+/**
+ * 셀 클립보드 데이터 설정 (외부에서 접근용)
+ */
+export function setCellClipboard(data) {
+    globalCellClipboard = data;
+}
+
+/**
  * 표(table) 셀 안에서 더블클릭으로 단어를 선택할 수 있게 합니다.
- * editor-body 요소에 이 함수를 호출하세요.
  */
 export function setupTableTextSelection(editorElement) {
     if (!editorElement) return;
     
     editorElement.addEventListener('dblclick', (e) => {
-        // td 또는 th 요소를 찾기
         let target = e.target;
         while (target && target !== editorElement) {
             if (target.tagName === 'TD' || target.tagName === 'TH') {
-                // 더블클릭한 위치에서 단어 선택
                 const selection = window.getSelection();
                 const range = document.createRange();
                 
-                // 클릭한 텍스트 노드 찾기
                 let node = e.target;
                 if (node.nodeType !== Node.TEXT_NODE) {
-                    // 텍스트 노드가 아니면 자식 중 텍스트 노드 찾기
                     const walker = document.createTreeWalker(
                         node,
                         NodeFilter.SHOW_TEXT,
@@ -221,24 +467,19 @@ export function setupTableTextSelection(editorElement) {
                     const text = node.textContent;
                     const clickOffset = getClickOffset(node, e);
                     
-                    // 단어의 시작과 끝 찾기
                     let start = clickOffset;
                     let end = clickOffset;
                     
-                    // 단어 경계 문자 (공백, 구두점 등)
                     const wordBoundary = /[\s\.,;:!?\(\)\[\]\{\}'"]/;
                     
-                    // 시작 위치 찾기
                     while (start > 0 && !wordBoundary.test(text[start - 1])) {
                         start--;
                     }
                     
-                    // 끝 위치 찾기
                     while (end < text.length && !wordBoundary.test(text[end])) {
                         end++;
                     }
                     
-                    // 단어 선택
                     if (start !== end) {
                         range.setStart(node, start);
                         range.setEnd(node, end);
@@ -255,9 +496,6 @@ export function setupTableTextSelection(editorElement) {
     });
 }
 
-/**
- * 클릭한 위치의 텍스트 오프셋을 계산합니다.
- */
 function getClickOffset(textNode, event) {
     if (document.caretRangeFromPoint) {
         const range = document.caretRangeFromPoint(event.clientX, event.clientY);
@@ -266,6 +504,5 @@ function getClickOffset(textNode, event) {
         }
     }
     
-    // 폴백: 텍스트 중간 위치 반환
     return Math.floor(textNode.textContent.length / 2);
 }

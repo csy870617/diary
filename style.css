@@ -135,12 +135,55 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 
 /* 이미지 및 표 관련 스타일 */
 .editor-body img { max-width: 100%; height: auto; border-radius: 8px; margin: 10px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: inline-block; cursor: pointer; vertical-align: middle; }
-.table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 15px 0; padding-bottom: 10px; }
+
+/* [수정] 표 wrapper - 가로/세로 스크롤 지원 */
+.table-wrapper { 
+    width: 100%; 
+    overflow-x: auto; 
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch; 
+    margin: 15px 0; 
+    padding-bottom: 10px;
+    position: relative;
+}
+
+/* 스크롤바 표시 (표 영역만) */
 .table-wrapper::-webkit-scrollbar { display: block; height: 6px; }
 .table-wrapper::-webkit-scrollbar-track { background: var(--gray-100); border-radius: 10px; }
 .table-wrapper::-webkit-scrollbar-thumb { background: var(--gray-400); border-radius: 10px; }
-.editor-body table { width: 100%; border-collapse: collapse; table-layout: fixed; cursor: pointer; user-select: text; }
-.editor-body table td { border: 1px solid var(--gray-200); padding: 8px; min-height: 34px; word-break: break-all; position: relative; overflow: hidden; }
+
+/* [수정] 표 스타일 - 기본은 내용에 맞게, 인라인 스타일 있으면 그것 우선 */
+.editor-body table { 
+    border-collapse: collapse; 
+    cursor: pointer; 
+    user-select: text;
+    min-width: fit-content;
+    table-layout: auto;
+}
+
+/* 인라인 width 스타일이 없는 표만 max-content 적용 */
+.editor-body table:not([style*="width"]) {
+    width: max-content;
+}
+
+/* [수정] 셀 스타일 - 최소 너비 설정 */
+.editor-body table td { 
+    border: 1px solid var(--gray-200); 
+    padding: 8px 12px; 
+    min-height: 34px; 
+    min-width: 60px;
+    word-break: normal;
+    white-space: nowrap;
+    position: relative; 
+    overflow: visible;
+}
+
+/* 셀 내 줄바꿈 허용 클래스 (필요시 사용) */
+.editor-body table td.wrap-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .editor-body table td.selected-cell { background-color: rgba(59, 130, 246, 0.15) !important; outline: 1px solid var(--selection-color) !important; }
 .editor-body table.selecting-cells { user-select: none !important; -webkit-user-select: none !important; }
 
@@ -200,7 +243,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .card-meta { font-family: var(--text-sans); font-size: 12px; color: var(--gray-500); }
 .hidden { display: none !important; }
 
-/* 모바일 반응형 스타일 유지 */
+/* 모바일 반응형 스타일 */
 @media screen and (max-width: 650px) {
     .layout { padding: 0 16px 100px; width: 100%; }
     .brunch-header { padding: 0 4px; margin-top: 50px; margin-bottom: 20px; flex-direction: row; align-items: flex-end; }
@@ -221,6 +264,36 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     #write-modal.mode-book .editor-body { padding: 20px 20px 200px 20px; }
     #write-modal.mode-book .editor-title, #write-modal.mode-book .editor-subtitle { padding: 0 20px; }
     #write-modal.mode-book .meta-info-row, #write-modal.mode-book .divider { margin-left: 20px; margin-right: 20px; }
+    
+    /* [추가] 모바일 표 스크롤 힌트 */
+    .table-wrapper {
+        position: relative;
+    }
+    
+    /* 스크롤 가능 표시 (그라데이션) */
+    .table-wrapper::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 10px;
+        width: 20px;
+        background: linear-gradient(to right, transparent, rgba(255,255,255,0.9));
+        pointer-events: none;
+        opacity: 1;
+        transition: opacity 0.3s;
+    }
+    
+    /* 스크롤이 끝에 도달하면 그라데이션 숨김 */
+    .table-wrapper.scrolled-end::after {
+        opacity: 0;
+    }
+    
+    /* 모바일에서 셀 최소 너비 조정 */
+    .editor-body table td {
+        min-width: 80px;
+        padding: 10px 12px;
+    }
 }
 
 #btn-empty-trash { font-size: 13px; color: var(--danger); font-weight: 600; padding: 6px 12px; border-radius: 6px; background-color: #FEE2E2; border: none; cursor: pointer; transition: background-color 0.2s; font-family: var(--text-sans); margin-left: auto; }
