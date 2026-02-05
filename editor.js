@@ -532,24 +532,49 @@ function clearCellSelection() {
 function focusCell(cell) {
     if (!cell) return;
     
+    // 셀 선택 해제
+    clearCellSelection();
+    
     // 셀에 포커스
     cell.focus();
     
-    // 셀 내용 선택 (전체 선택 후 시작점으로 커서 이동)
+    // 커서를 셀의 시작점에 위치
     const sel = window.getSelection();
     const range = document.createRange();
     
-    // 셀에 내용이 있으면 시작점에 커서, 없으면 셀 자체 선택
-    if (cell.firstChild) {
-        range.setStart(cell.firstChild, 0);
-        range.setEnd(cell.firstChild, 0);
-    } else {
+    try {
+        // 셀에 내용이 있으면
+        if (cell.childNodes.length > 0) {
+            const firstChild = cell.childNodes[0];
+            if (firstChild.nodeType === Node.TEXT_NODE) {
+                // 텍스트 노드면 시작점에 커서
+                range.setStart(firstChild, 0);
+                range.setEnd(firstChild, 0);
+            } else if (firstChild.nodeName === 'BR') {
+                // BR 태그면 셀 자체 선택
+                range.selectNodeContents(cell);
+                range.collapse(true);
+            } else {
+                // 다른 요소면 그 안에 커서
+                range.selectNodeContents(firstChild);
+                range.collapse(true);
+            }
+        } else {
+            // 빈 셀이면 셀 자체 선택
+            range.selectNodeContents(cell);
+            range.collapse(true);
+        }
+        
+        sel.removeAllRanges();
+        sel.addRange(range);
+    } catch (e) {
+        // 에러 발생 시 셀 전체 선택
         range.selectNodeContents(cell);
         range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
     }
     
-    sel.removeAllRanges();
-    sel.addRange(range);
     lastClickedCell = cell; 
 }
 
@@ -710,7 +735,14 @@ function setupBasicHandling() {
         }
         
         // 표 셀 내에서 Tab과 화살표 키 처리
-        const currentCell = e.target.closest ? e.target.closest('td') : null;
+        let currentCell = null;
+        if (e.target.closest) {
+            currentCell = e.target.closest('td');
+        } else if (e.target.parentElement) {
+            // 텍스트 노드인 경우
+            currentCell = e.target.parentElement.closest ? e.target.parentElement.closest('td') : null;
+        }
+        
         if (!currentCell) {
             // 셀이 아닌 곳에서는 기본 동작
             handleNonCellKeys(e);
@@ -749,7 +781,7 @@ function setupBasicHandling() {
             }
             
             if (nextCell) {
-                setTimeout(() => focusCell(nextCell), 0);
+                focusCell(nextCell);
             }
             return;
         }
@@ -767,31 +799,35 @@ function setupBasicHandling() {
             }
             
             if (prevCell) {
-                setTimeout(() => focusCell(prevCell), 0);
+                focusCell(prevCell);
             }
             return;
         }
         
         // 화살표 아래: 아래 셀로 이동
-        if (e.key === 'ArrowDown' && rowIdx < maxRow) {
-            e.preventDefault();
-            e.stopPropagation();
-            const nextCell = table.rows[rowIdx + 1].cells[Math.min(colIdx, table.rows[rowIdx + 1].cells.length - 1)];
-            if (nextCell) {
-                setTimeout(() => focusCell(nextCell), 0);
+        if (e.key === 'ArrowDown') {
+            if (rowIdx < maxRow) {
+                e.preventDefault();
+                e.stopPropagation();
+                const nextCell = table.rows[rowIdx + 1].cells[Math.min(colIdx, table.rows[rowIdx + 1].cells.length - 1)];
+                if (nextCell) {
+                    focusCell(nextCell);
+                }
+                return;
             }
-            return;
         }
         
         // 화살표 위: 위 셀로 이동
-        if (e.key === 'ArrowUp' && rowIdx > 0) {
-            e.preventDefault();
-            e.stopPropagation();
-            const prevCell = table.rows[rowIdx - 1].cells[Math.min(colIdx, table.rows[rowIdx - 1].cells.length - 1)];
-            if (prevCell) {
-                setTimeout(() => focusCell(prevCell), 0);
+        if (e.key === 'ArrowUp') {
+            if (rowIdx > 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                const prevCell = table.rows[rowIdx - 1].cells[Math.min(colIdx, table.rows[rowIdx - 1].cells.length - 1)];
+                if (prevCell) {
+                    focusCell(prevCell);
+                }
+                return;
             }
-            return;
         }
         
         // 화살표 오른쪽: 셀 끝에서 오른쪽 셀로 이동
@@ -801,7 +837,7 @@ function setupBasicHandling() {
                 e.stopPropagation();
                 const nextCell = table.rows[rowIdx].cells[colIdx + 1];
                 if (nextCell) {
-                    setTimeout(() => focusCell(nextCell), 0);
+                    focusCell(nextCell);
                 }
                 return;
             }
@@ -814,7 +850,7 @@ function setupBasicHandling() {
                 e.stopPropagation();
                 const prevCell = table.rows[rowIdx].cells[colIdx - 1];
                 if (prevCell) {
-                    setTimeout(() => focusCell(prevCell), 0);
+                    focusCell(prevCell);
                 }
                 return;
             }
@@ -1309,6 +1345,244 @@ export function deleteColumn() {
         const newCell = table.rows[rowIdx].cells[newColIdx];
         if (newCell) focusCell(newCell);
     }
+}
+
+/**
+ * 선택된 셀들을 합치기
+ */
+export function mergeCells() {
+    const selectedCells = document.querySelectorAll('td.selected-cell');
+    if (selectedCells.length < 2) {
+        alert('합칠 셀을 2개 이상 선택해주세요.\n(셀을 드래그하여 선택)');
+        return;
+    }
+    
+    const table = selectedCells[0].closest('table');
+    if (!table) return;
+    
+    // 선택된 셀들의 행/열 인덱스 수집
+    let minRow = Infinity, maxRow = -1, minCol = Infinity, maxCol = -1;
+    const cellsInfo = [];
+    
+    selectedCells.forEach(cell => {
+        const rowIdx = cell.parentElement.rowIndex;
+        const colIdx = cell.cellIndex;
+        
+        minRow = Math.min(minRow, rowIdx);
+        maxRow = Math.max(maxRow, rowIdx);
+        minCol = Math.min(minCol, colIdx);
+        maxCol = Math.max(maxCol, colIdx);
+        
+        cellsInfo.push({ cell, rowIdx, colIdx });
+    });
+    
+    // 직사각형 영역 확인
+    const expectedCount = (maxRow - minRow + 1) * (maxCol - minCol + 1);
+    if (selectedCells.length !== expectedCount) {
+        alert('직사각형 형태로만 셀을 합칠 수 있습니다.');
+        return;
+    }
+    
+    saveBeforeChange('mergeCell');
+    
+    // 내용 수집 (행 순서대로)
+    let mergedContent = '';
+    cellsInfo.sort((a, b) => a.rowIdx - b.rowIdx || a.colIdx - b.colIdx);
+    
+    cellsInfo.forEach(info => {
+        const content = info.cell.innerHTML.trim();
+        if (content && content !== '<br>') {
+            if (mergedContent) mergedContent += ' ';
+            mergedContent += content;
+        }
+    });
+    
+    // 첫 번째 셀 (왼쪽 위)
+    const firstCell = table.rows[minRow].cells[minCol];
+    if (!firstCell) return;
+    
+    // 각 행에서 삭제할 셀 수 계산 (colspan)
+    const colsToMerge = maxCol - minCol + 1;
+    const rowsToMerge = maxRow - minRow + 1;
+    
+    // 셀 삭제 (역순으로 - 인덱스 변경 방지)
+    for (let r = maxRow; r >= minRow; r--) {
+        const row = table.rows[r];
+        if (!row) continue;
+        
+        // 같은 행에서 오른쪽부터 삭제
+        for (let c = maxCol; c >= minCol; c--) {
+            // 첫 번째 셀은 삭제하지 않음
+            if (r === minRow && c === minCol) continue;
+            
+            const cell = row.cells[c];
+            if (cell) {
+                cell.remove();
+            }
+        }
+    }
+    
+    // 첫 번째 셀에 colspan, rowspan 설정
+    if (colsToMerge > 1) {
+        firstCell.colSpan = colsToMerge;
+    }
+    if (rowsToMerge > 1) {
+        firstCell.rowSpan = rowsToMerge;
+    }
+    
+    firstCell.innerHTML = mergedContent || '<br>';
+    firstCell.classList.remove('selected-cell');
+    
+    // 선택 해제
+    clearCellSelection();
+    focusCell(firstCell);
+    triggerAutoSave();
+}
+
+/**
+ * 합쳐진 셀을 나누기
+ */
+export function splitCell() {
+    // 선택된 셀 또는 마지막 클릭된 셀 확인
+    let targetCell = null;
+    const selectedCells = document.querySelectorAll('td.selected-cell');
+    
+    if (selectedCells.length === 1) {
+        targetCell = selectedCells[0];
+    } else if (selectedCells.length === 0 && lastClickedCell) {
+        targetCell = lastClickedCell;
+    } else if (selectedCells.length > 1) {
+        // 여러 셀이 선택된 경우, 합쳐진 셀만 찾기
+        for (const cell of selectedCells) {
+            if (cell.colSpan > 1 || cell.rowSpan > 1) {
+                targetCell = cell;
+                break;
+            }
+        }
+    }
+    
+    if (!targetCell) {
+        alert('나눌 셀을 선택해주세요.');
+        return;
+    }
+    
+    const colspan = targetCell.colSpan || 1;
+    const rowspan = targetCell.rowSpan || 1;
+    
+    if (colspan === 1 && rowspan === 1) {
+        alert('합쳐진 셀만 나눌 수 있습니다.');
+        return;
+    }
+    
+    const table = targetCell.closest('table');
+    if (!table) return;
+    
+    saveBeforeChange('splitCell');
+    
+    const startRowIdx = targetCell.parentElement.rowIndex;
+    const startColIdx = targetCell.cellIndex;
+    
+    // colspan, rowspan 초기화
+    targetCell.removeAttribute('colspan');
+    targetCell.removeAttribute('rowspan');
+    
+    // 첫 번째 행: 원래 셀 옆에 (colspan - 1)개 셀 추가
+    if (colspan > 1) {
+        const firstRow = table.rows[startRowIdx];
+        const nextSibling = targetCell.nextSibling;
+        
+        for (let c = 1; c < colspan; c++) {
+            const newCell = document.createElement('td');
+            newCell.innerHTML = '<br>';
+            
+            if (nextSibling) {
+                firstRow.insertBefore(newCell, nextSibling);
+            } else {
+                firstRow.appendChild(newCell);
+            }
+        }
+    }
+    
+    // 나머지 행들: 각각 colspan개의 셀 추가
+    for (let r = 1; r < rowspan; r++) {
+        const row = table.rows[startRowIdx + r];
+        if (!row) continue;
+        
+        // 삽입할 위치 찾기
+        const refCell = row.cells[startColIdx];
+        
+        for (let c = 0; c < colspan; c++) {
+            const newCell = document.createElement('td');
+            newCell.innerHTML = '<br>';
+            
+            if (refCell) {
+                row.insertBefore(newCell, refCell);
+            } else {
+                row.appendChild(newCell);
+            }
+        }
+    }
+    
+    clearCellSelection();
+    focusCell(targetCell);
+    triggerAutoSave();
+}
+
+/**
+ * 셀의 실제 열 인덱스 계산 (colspan 고려)
+ */
+function getCellColumnIndex(cell) {
+    const row = cell.parentElement;
+    let colIndex = 0;
+    
+    for (let i = 0; i < row.cells.length; i++) {
+        if (row.cells[i] === cell) {
+            return colIndex;
+        }
+        colIndex += row.cells[i].colSpan || 1;
+    }
+    
+    return colIndex;
+}
+
+/**
+ * 특정 행/열 위치의 셀 찾기
+ */
+function getCellAt(table, rowIndex, colIndex) {
+    const row = table.rows[rowIndex];
+    if (!row) return null;
+    
+    let currentCol = 0;
+    for (let i = 0; i < row.cells.length; i++) {
+        const cell = row.cells[i];
+        const colspan = cell.colSpan || 1;
+        
+        if (currentCol === colIndex) {
+            return cell;
+        }
+        if (currentCol < colIndex && currentCol + colspan > colIndex) {
+            return cell; // colspan 범위 내
+        }
+        currentCol += colspan;
+    }
+    
+    return null;
+}
+
+/**
+ * 행에서 특정 열 위치에 삽입할 인덱스 찾기
+ */
+function findInsertPosition(row, targetCol) {
+    let currentCol = 0;
+    
+    for (let i = 0; i < row.cells.length; i++) {
+        if (currentCol >= targetCol) {
+            return i;
+        }
+        currentCol += row.cells[i].colSpan || 1;
+    }
+    
+    return null;
 }
 
 export function insertSticker(emoji) { saveBeforeChange('insert'); document.execCommand('insertText', false, emoji); triggerAutoSave(); }

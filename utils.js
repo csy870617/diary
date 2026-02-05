@@ -207,6 +207,9 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
                     console.log('셀 복사:', data.rows, 'x', data.cols);
                 }
                 return;
+            } else {
+                // 일반 복사 - 셀 클립보드 초기화
+                globalCellClipboard = { cellData: null, rows: 0, cols: 0 };
             }
         }
         
@@ -240,6 +243,9 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
                     console.log('셀 잘라내기:', data.rows, 'x', data.cols);
                 }
                 return;
+            } else {
+                // 일반 잘라내기 - 셀 클립보드 초기화
+                globalCellClipboard = { cellData: null, rows: 0, cols: 0 };
             }
         }
         
@@ -284,13 +290,32 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
     // Document 레벨 키 이벤트 (캡처 단계에서 처리)
     document.addEventListener('keydown', handleKeyDown, true);
     
+    // Document 레벨 copy 이벤트 - 에디터 외부에서 복사해도 셀 클립보드 초기화
+    document.addEventListener('copy', (e) => {
+        // 선택된 셀이 없으면 셀 클립보드 초기화
+        const selectedCells = document.querySelectorAll('td.selected-cell');
+        if (selectedCells.length === 0) {
+            globalCellClipboard = { cellData: null, rows: 0, cols: 0 };
+        }
+    });
+    
+    document.addEventListener('cut', (e) => {
+        // 선택된 셀이 없으면 셀 클립보드 초기화
+        const selectedCells = document.querySelectorAll('td.selected-cell');
+        if (selectedCells.length === 0) {
+            globalCellClipboard = { cellData: null, rows: 0, cols: 0 };
+        }
+    });
+    
     // ========== 일반 복사 이벤트 (링크 보존) ==========
     editorElement.addEventListener('copy', (e) => {
         // 선택된 셀이 있으면 키보드 핸들러에서 처리됨
         const selectedCells = document.querySelectorAll('td.selected-cell');
         if (selectedCells.length > 0) return;
         
-        // 일반 텍스트 선택 복사
+        // 일반 텍스트 선택 복사 - 셀 클립보드 초기화
+        globalCellClipboard = { cellData: null, rows: 0, cols: 0 };
+        
         const selection = window.getSelection();
         if (!selection.rangeCount || selection.isCollapsed) return;
         
@@ -307,6 +332,9 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
     editorElement.addEventListener('cut', (e) => {
         const selectedCells = document.querySelectorAll('td.selected-cell');
         if (selectedCells.length > 0) return;
+        
+        // 일반 텍스트 잘라내기 - 셀 클립보드 초기화
+        globalCellClipboard = { cellData: null, rows: 0, cols: 0 };
         
         const selection = window.getSelection();
         if (!selection.rangeCount || selection.isCollapsed) return;
