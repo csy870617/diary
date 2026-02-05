@@ -420,33 +420,32 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
             }
         }
         
-        // 내부 클립보드에 링크가 있으면 사용
-        if (internalClipboard.html && internalClipboard.html.includes('<a ')) {
-            if (internalClipboard.text === text || !html || !html.includes('<a ')) {
-                html = internalClipboard.html;
-            }
+        // 내부에서 복사한 것인지 확인 (텍스트 내용이 같으면 내부 복사)
+        const isInternalCopy = internalClipboard.text && internalClipboard.text === text;
+        
+        // 내부에서 복사한 링크가 있으면 서식 유지
+        if (isInternalCopy && internalClipboard.html && internalClipboard.html.includes('<a ')) {
+            document.execCommand('insertHTML', false, internalClipboard.html);
+            if (callbacks.onAfterPaste) callbacks.onAfterPaste();
+            return;
         }
         
-        // HTML이 있으면 HTML로 삽입
-        if (html) {
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
-            const bodyContent = doc.body.innerHTML;
-            
-            if (bodyContent) {
-                document.execCommand('insertHTML', false, bodyContent);
-                if (callbacks.onAfterPaste) callbacks.onAfterPaste();
-                return;
-            }
-        }
-        
-        // HTML이 없으면 텍스트에서 URL 자동 링크
+        // 외부에서 복사한 것은 순수 텍스트로 붙여넣기 (URL만 자동 링크)
         if (text) {
-            const linkedText = text.replace(
-                /(https?:\/\/[^\s]+)/g, 
+            // 줄바꿈 유지하면서 HTML 이스케이프
+            let cleanText = text
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/\n/g, '<br>');
+            
+            // URL 자동 링크
+            cleanText = cleanText.replace(
+                /(https?:\/\/[^\s<]+)/g, 
                 '<a href="$1" target="_blank" style="color:#2563EB; text-decoration:underline; cursor:pointer;">$1</a>'
             );
-            document.execCommand('insertHTML', false, linkedText);
+            
+            document.execCommand('insertHTML', false, cleanText);
         }
         
         if (callbacks.onAfterPaste) callbacks.onAfterPaste();
