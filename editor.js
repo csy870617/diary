@@ -25,6 +25,9 @@ let isRowDragging = false;
 let resizeTargetTd = null;
 let startX, startY, startW, startH;
 
+let savedRange = null; // 표 삽입 시 커서 위치 저장용
+let lastLocalEditTime = 0; // 마지막 로컬 편집 시간 (동기화 충돌 방지)
+
 let undoStack = [];
 let redoStack = [];
 const MAX_HISTORY = 100;
@@ -231,6 +234,17 @@ function saveBeforeChange(actionType = 'unknown') {
         pushToHistory(snapshot);
     }
     lastInputType = actionType;
+    lastLocalEditTime = Date.now();
+}
+
+/**
+ * 현재 커서 위치를 저장 (표 삽입 등 모달 열기 전에 호출)
+ */
+export function saveCurrentSelection() {
+    const selection = window.getSelection();
+    if (selection.rangeCount > 0) {
+        savedRange = selection.getRangeAt(0).cloneRange();
+    }
 }
 
 /**
@@ -674,9 +688,29 @@ function setupBasicHandling() {
         if (!editorBody.isContentEditable) return;
         const td = e.target.closest('td');
         if (td) {
-            if (td.style.cursor === 'col-resize') { isColDragging = true; resizeTargetTd = td; startX = e.clientX; startW = td.offsetWidth; e.preventDefault(); return; }
-            else if (td.style.cursor === 'row-resize') { isRowDragging = true; resizeTargetTd = td; startY = e.clientY; startH = td.offsetHeight; e.preventDefault(); return; }
-            isSelectingCells = true; selectionStartCell = td; clearCellSelection(); 
+            if (td.style.cursor === 'col-resize') {
+                saveBeforeChange('resize');
+                isColDragging = true;
+                resizeTargetTd = td;
+                startX = e.clientX;
+                // table-layout: fixed에서는 첫 번째 행 셀의 너비가 열 너비를 결정
+                const table = td.closest('table');
+                const colIdx = td.cellIndex;
+                const firstRowCell = (table && table.rows[0]) ? table.rows[0].cells[colIdx] : td;
+                startW = firstRowCell ? firstRowCell.offsetWidth : td.offsetWidth;
+                e.preventDefault();
+                return;
+            }
+            else if (td.style.cursor === 'row-resize') {
+                saveBeforeChange('resize');
+                isRowDragging = true;
+                resizeTargetTd = td;
+                startY = e.clientY;
+                startH = td.parentElement.offsetHeight; // tr의 높이 기준
+                e.preventDefault();
+                return;
+            }
+            isSelectingCells = true; selectionStartCell = td; clearCellSelection();
         }
     };
 
@@ -685,12 +719,39 @@ function setupBasicHandling() {
     editorBody.ontouchend = () => { clearTimeout(mobileLongPressTimer); isSelectingCells = false; };
 
     window.addEventListener('mousemove', (e) => {
-        if (isColDragging && resizeTargetTd) { const newWidth = startW + (e.clientX - startX); if (newWidth > 30) { resizeTargetTd.style.width = newWidth + 'px'; updateSelectionBox(); } } 
-        else if (isRowDragging && resizeTargetTd) { const newHeight = startH + (e.clientY - startY); if (newHeight > 20) { resizeTargetTd.style.height = newHeight + 'px'; updateSelectionBox(); } } 
-        else if (isSelectingCells && selectionStartCell) { const cell = document.elementFromPoint(e.clientX, e.clientY)?.closest('td'); if (cell && cell !== selectionStartCell) { window.getSelection().removeAllRanges(); selectCellRange(selectionStartCell, cell); } }
+        if (isColDragging && resizeTargetTd) {
+            const newWidth = startW + (e.clientX - startX);
+            if (newWidth > 30) {
+                const table = resizeTargetTd.closest('table');
+                const colIdx = resizeTargetTd.cellIndex;
+                // table-layout: fixed에서 첫 번째 행 셀의 width가 열 전체 너비를 결정
+                if (table && table.rows[0] && table.rows[0].cells[colIdx]) {
+                    table.rows[0].cells[colIdx].style.width = newWidth + 'px';
+                }
+                resizeTargetTd.style.width = newWidth + 'px';
+                updateSelectionBox();
+            }
+        }
+        else if (isRowDragging && resizeTargetTd) {
+            const newHeight = startH + (e.clientY - startY);
+            if (newHeight > 20) {
+                // tr 요소에 높이 설정 (행 전체에 적용)
+                const tr = resizeTargetTd.parentElement;
+                if (tr) tr.style.height = newHeight + 'px';
+                resizeTargetTd.style.height = newHeight + 'px';
+                updateSelectionBox();
+            }
+        }
+        else if (isSelectingCells && selectionStartCell) {
+            const cell = document.elementFromPoint(e.clientX, e.clientY)?.closest('td');
+            if (cell && cell !== selectionStartCell) {
+                window.getSelection().removeAllRanges();
+                selectCellRange(selectionStartCell, cell);
+            }
+        }
     });
 
-    window.addEventListener('mouseup', () => { if (isColDragging || isRowDragging) { saveBeforeChange('resize'); triggerAutoSave(); } isColDragging = false; isRowDragging = false; resizeTargetTd = null; isSelectingCells = false; document.querySelectorAll('table.selecting-cells').forEach(t => t.classList.remove('selecting-cells')); });
+    window.addEventListener('mouseup', () => { if (isColDragging || isRowDragging) { triggerAutoSave(); } isColDragging = false; isRowDragging = false; resizeTargetTd = null; isSelectingCells = false; document.querySelectorAll('table.selecting-cells').forEach(t => t.classList.remove('selecting-cells')); });
 
     editorBody.onclick = (e) => {
         if (!editorBody.isContentEditable) return;
@@ -992,6 +1053,11 @@ export function openEditor(isEdit, entryData) {
 export function refreshEditorContent() {
     const writeModal = document.getElementById('write-modal');
     if (writeModal.classList.contains('hidden') || !state.editingId) return;
+    // 최근 로컬 편집 후 5초 이내이면 동기화로 인한 덮어쓰기 방지
+    if (Date.now() - lastLocalEditTime < 5000) return;
+    // 표 편집 모달이 열려있으면 덮어쓰기 방지
+    const tableModal = document.getElementById('table-modal');
+    if (tableModal && !tableModal.classList.contains('hidden')) return;
     const latestEntry = state.entries.find(e => e.id === state.editingId);
     if (!latestEntry) return;
     const editTitle = document.getElementById('edit-title'), editSubtitle = document.getElementById('edit-subtitle'), editBody = document.getElementById('editor-body');
@@ -1278,28 +1344,29 @@ function stopResizeTouch() {
     triggerAutoSave();
 }
 
-export function addRow() { 
-    const table = currentSelectedElement; 
-    if (!table || table.tagName !== 'TABLE') return; 
-    saveBeforeChange('tableEdit'); 
+export function addRow() {
+    const table = currentSelectedElement;
+    if (!table || table.tagName !== 'TABLE') return;
+    saveBeforeChange('tableEdit');
     const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null;
     const refRow = targetCell ? targetCell.parentElement : table.rows[table.rows.length - 1];
     const colIdx = targetCell ? targetCell.cellIndex : 0;
     const newRow = table.insertRow(refRow.rowIndex + 1);
-    const colCount = table.rows[0].cells.length; 
-    let cellToFocus = null; 
-    for (let i = 0; i < colCount; i++) { 
-        const newCell = newRow.insertCell(i); 
-        newCell.innerHTML = '<br>'; 
-        if (i === colIdx) cellToFocus = newCell; 
-    } 
-    if (cellToFocus) focusCell(cellToFocus); 
+    const colCount = table.rows[0].cells.length;
+    let cellToFocus = null;
+    for (let i = 0; i < colCount; i++) {
+        const newCell = newRow.insertCell(i);
+        newCell.innerHTML = '<br>';
+        if (i === colIdx) cellToFocus = newCell;
+    }
+    if (cellToFocus) focusCell(cellToFocus);
+    triggerAutoSave();
 }
 
-export function deleteRow() { 
-    const table = currentSelectedElement; 
-    if (!table || table.tagName !== 'TABLE' || table.rows.length <= 1) return; 
-    saveBeforeChange('tableEdit'); 
+export function deleteRow() {
+    const table = currentSelectedElement;
+    if (!table || table.tagName !== 'TABLE' || table.rows.length <= 1) return;
+    saveBeforeChange('tableEdit');
     const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null;
     const refRow = targetCell ? targetCell.parentElement : table.rows[table.rows.length - 1];
     const rowIdx = refRow.rowIndex;
@@ -1309,42 +1376,51 @@ export function deleteRow() {
     const newRowIdx = Math.min(rowIdx, table.rows.length - 1);
     if (newRowIdx >= 0 && table.rows[newRowIdx]) {
         const newCell = table.rows[newRowIdx].cells[Math.min(colIdx, table.rows[newRowIdx].cells.length - 1)];
-        if (newCell) focusCell(newCell);
+        if (newCell) {
+            focusCell(newCell);
+            lastClickedCell = newCell;
+        }
     }
+    triggerAutoSave();
 }
 
-export function addColumn() { 
-    const table = currentSelectedElement; 
-    if (!table || table.tagName !== 'TABLE') return; 
-    saveBeforeChange('tableEdit'); 
-    const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null;
-    const colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1;
-    const rowIdx = targetCell ? targetCell.parentElement.rowIndex : 0; 
-    let cellToFocus = null; 
-    for (let i = 0; i < table.rows.length; i++) { 
-        const newCell = table.rows[i].insertCell(colIdx + 1); 
-        newCell.innerHTML = '<br>'; 
-        if (i === rowIdx) cellToFocus = newCell; 
-    } 
-    if (cellToFocus) focusCell(cellToFocus); 
-}
-
-export function deleteColumn() { 
-    const table = currentSelectedElement; 
-    if (!table || table.tagName !== 'TABLE' || table.rows[0].cells.length <= 1) return; 
-    saveBeforeChange('tableEdit'); 
+export function addColumn() {
+    const table = currentSelectedElement;
+    if (!table || table.tagName !== 'TABLE') return;
+    saveBeforeChange('tableEdit');
     const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null;
     const colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1;
     const rowIdx = targetCell ? targetCell.parentElement.rowIndex : 0;
-    for (let i = 0; i < table.rows.length; i++) { 
-        table.rows[i].deleteCell(colIdx); 
+    let cellToFocus = null;
+    for (let i = 0; i < table.rows.length; i++) {
+        const newCell = table.rows[i].insertCell(colIdx + 1);
+        newCell.innerHTML = '<br>';
+        if (i === rowIdx) cellToFocus = newCell;
+    }
+    if (cellToFocus) focusCell(cellToFocus);
+    triggerAutoSave();
+}
+
+export function deleteColumn() {
+    const table = currentSelectedElement;
+    if (!table || table.tagName !== 'TABLE' || table.rows[0].cells.length <= 1) return;
+    saveBeforeChange('tableEdit');
+    const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null;
+    const colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1;
+    const rowIdx = targetCell ? targetCell.parentElement.rowIndex : 0;
+    for (let i = 0; i < table.rows.length; i++) {
+        table.rows[i].deleteCell(colIdx);
     }
     // 삭제 후 인접 셀로 커서 이동
     const newColIdx = Math.min(colIdx, table.rows[0].cells.length - 1);
     if (newColIdx >= 0 && table.rows[rowIdx]) {
         const newCell = table.rows[rowIdx].cells[newColIdx];
-        if (newCell) focusCell(newCell);
+        if (newCell) {
+            focusCell(newCell);
+            lastClickedCell = newCell;
+        }
     }
+    triggerAutoSave();
 }
 
 /**
@@ -1440,19 +1516,17 @@ export function mergeCells() {
 }
 
 /**
- * 합쳐진 셀을 나누기
+ * 합쳐진 셀의 나누기 대상 셀 찾기 (공통 헬퍼)
  */
-export function splitCell() {
-    // 선택된 셀 또는 마지막 클릭된 셀 확인
+function findSplitTargetCell() {
     let targetCell = null;
     const selectedCells = document.querySelectorAll('td.selected-cell');
-    
+
     if (selectedCells.length === 1) {
         targetCell = selectedCells[0];
     } else if (selectedCells.length === 0 && lastClickedCell) {
         targetCell = lastClickedCell;
     } else if (selectedCells.length > 1) {
-        // 여러 셀이 선택된 경우, 합쳐진 셀만 찾기
         for (const cell of selectedCells) {
             if (cell.colSpan > 1 || cell.rowSpan > 1) {
                 targetCell = cell;
@@ -1460,69 +1534,100 @@ export function splitCell() {
             }
         }
     }
-    
+    return targetCell;
+}
+
+/**
+ * 칸 나누기 (colspan만 분리 - 가로 방향)
+ */
+export function splitCellColumns() {
+    const targetCell = findSplitTargetCell();
     if (!targetCell) {
         alert('나눌 셀을 선택해주세요.');
         return;
     }
-    
+
     const colspan = targetCell.colSpan || 1;
-    const rowspan = targetCell.rowSpan || 1;
-    
-    if (colspan === 1 && rowspan === 1) {
-        alert('합쳐진 셀만 나눌 수 있습니다.');
+    if (colspan <= 1) {
+        alert('가로로 합쳐진 셀만 칸 나누기가 가능합니다.');
         return;
     }
-    
+
     const table = targetCell.closest('table');
     if (!table) return;
-    
-    saveBeforeChange('splitCell');
-    
+
+    saveBeforeChange('splitCellCol');
+
     const startRowIdx = targetCell.parentElement.rowIndex;
-    const startColIdx = targetCell.cellIndex;
-    
-    // colspan, rowspan 초기화
+    const rowspan = targetCell.rowSpan || 1;
+
+    // colspan 제거
     targetCell.removeAttribute('colspan');
-    targetCell.removeAttribute('rowspan');
-    
+
     // 첫 번째 행: 원래 셀 옆에 (colspan - 1)개 셀 추가
-    if (colspan > 1) {
-        const firstRow = table.rows[startRowIdx];
-        const nextSibling = targetCell.nextSibling;
-        
-        for (let c = 1; c < colspan; c++) {
-            const newCell = document.createElement('td');
-            newCell.innerHTML = '<br>';
-            
-            if (nextSibling) {
-                firstRow.insertBefore(newCell, nextSibling);
-            } else {
-                firstRow.appendChild(newCell);
-            }
+    const firstRow = table.rows[startRowIdx];
+    const nextSibling = targetCell.nextElementSibling;
+    for (let c = 1; c < colspan; c++) {
+        const newCell = document.createElement('td');
+        newCell.innerHTML = '<br>';
+        if (rowspan > 1) newCell.rowSpan = rowspan;
+        if (nextSibling) {
+            firstRow.insertBefore(newCell, nextSibling);
+        } else {
+            firstRow.appendChild(newCell);
         }
     }
-    
-    // 나머지 행들: 각각 colspan개의 셀 추가
+
+    clearCellSelection();
+    focusCell(targetCell);
+    triggerAutoSave();
+}
+
+/**
+ * 줄 나누기 (rowspan만 분리 - 세로 방향)
+ */
+export function splitCellRows() {
+    const targetCell = findSplitTargetCell();
+    if (!targetCell) {
+        alert('나눌 셀을 선택해주세요.');
+        return;
+    }
+
+    const rowspan = targetCell.rowSpan || 1;
+    if (rowspan <= 1) {
+        alert('세로로 합쳐진 셀만 줄 나누기가 가능합니다.');
+        return;
+    }
+
+    const table = targetCell.closest('table');
+    if (!table) return;
+
+    saveBeforeChange('splitCellRow');
+
+    const startRowIdx = targetCell.parentElement.rowIndex;
+    const startColIdx = targetCell.cellIndex;
+    const colspan = targetCell.colSpan || 1;
+
+    // rowspan 제거
+    targetCell.removeAttribute('rowspan');
+
+    // 아래 행들에 셀 추가
     for (let r = 1; r < rowspan; r++) {
         const row = table.rows[startRowIdx + r];
         if (!row) continue;
-        
-        // 삽입할 위치 찾기
+
         const refCell = row.cells[startColIdx];
-        
-        for (let c = 0; c < colspan; c++) {
-            const newCell = document.createElement('td');
-            newCell.innerHTML = '<br>';
-            
-            if (refCell) {
-                row.insertBefore(newCell, refCell);
-            } else {
-                row.appendChild(newCell);
-            }
+        const newCell = document.createElement('td');
+        newCell.innerHTML = '<br>';
+        if (colspan > 1) newCell.colSpan = colspan;
+
+        if (refCell) {
+            row.insertBefore(newCell, refCell);
+        } else {
+            row.appendChild(newCell);
         }
     }
-    
+
     clearCellSelection();
     focusCell(targetCell);
     triggerAutoSave();
@@ -1587,27 +1692,36 @@ function findInsertPosition(row, targetCol) {
 
 export function insertSticker(emoji) { saveBeforeChange('insert'); document.execCommand('insertText', false, emoji); triggerAutoSave(); }
 export function insertImage(src) { saveBeforeChange('insert'); document.execCommand('insertImage', false, src); triggerAutoSave(); }
-export function insertTable(rows, cols) { 
-    saveBeforeChange('insert'); 
-    let tableHtml = '<div class="table-wrapper"><table><tbody>'; 
-    for (let i = 0; i < rows; i++) { 
-        tableHtml += '<tr>'; 
-        for (let j = 0; j < cols; j++) { 
-            tableHtml += '<td><br></td>'; 
-        } 
-        tableHtml += '</tr>'; 
-    } 
-    tableHtml += '</tbody></table></div><p><br></p>'; 
-    const editor = document.getElementById('editor-body'); 
-    editor.focus(); 
-    document.execCommand('insertHTML', false, tableHtml); 
-    
+export function insertTable(rows, cols) {
+    saveBeforeChange('insert');
+    let tableHtml = '<div class="table-wrapper"><table><tbody>';
+    for (let i = 0; i < rows; i++) {
+        tableHtml += '<tr>';
+        for (let j = 0; j < cols; j++) {
+            tableHtml += '<td><br></td>';
+        }
+        tableHtml += '</tr>';
+    }
+    tableHtml += '</tbody></table></div><p><br></p>';
+    const editor = document.getElementById('editor-body');
+    editor.focus();
+
+    // 저장된 커서 위치가 있으면 복원하여 해당 위치에 표 삽입
+    if (savedRange) {
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(savedRange);
+        savedRange = null;
+    }
+
+    document.execCommand('insertHTML', false, tableHtml);
+
     // 새로 삽입된 표에 스크롤 이벤트 리스너 추가
     setTimeout(() => {
         setupTableWrapperScroll(editor);
     }, 100);
-    
-    triggerAutoSave(); 
+
+    triggerAutoSave();
 }
 export function createHyperlink() { const selection = window.getSelection(); if (selection.rangeCount > 0 && selection.toString().length > 0) { const url = prompt("연결할 주소(URL)를 입력하세요:", "https://"); if (url && url !== "https://") { saveBeforeChange('link'); document.execCommand('createLink', false, url); const anchor = selection.anchorNode.parentElement; if (anchor && anchor.tagName === 'A') { anchor.target = '_blank'; anchor.style.color = '#2563EB'; anchor.style.textDecoration = 'underline'; anchor.style.cursor = 'pointer'; } triggerAutoSave(); } } else { alert("링크를 걸 문구를 먼저 드래그하여 선택해주세요."); } }
 
