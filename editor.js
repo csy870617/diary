@@ -545,10 +545,11 @@ function clearCellSelection() {
 
 function focusCell(cell) {
     if (!cell) return;
-    
-    // 셀 선택 해제
+
+    // 셀 선택 해제 후 현재 셀 선택
     clearCellSelection();
-    
+    cell.classList.add('selected-cell');
+
     // 셀에 포커스
     cell.focus();
     
@@ -760,6 +761,9 @@ function setupBasicHandling() {
         
         if (cell) {
             lastClickedCell = cell;
+            // 단일 셀 선택 표시
+            clearCellSelection();
+            cell.classList.add('selected-cell');
             // 셀 클릭 시 해당 표를 자동으로 선택하여 플로팅 UI 표시
             const table = cell.closest('table');
             if (table && currentSelectedElement !== table) {
@@ -797,11 +801,11 @@ function setupBasicHandling() {
         
         // 표 셀 내에서 Tab과 화살표 키 처리
         let currentCell = null;
-        if (e.target.closest) {
-            currentCell = e.target.closest('td');
-        } else if (e.target.parentElement) {
-            // 텍스트 노드인 경우
-            currentCell = e.target.parentElement.closest ? e.target.parentElement.closest('td') : null;
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0) {
+            let node = sel.getRangeAt(0).startContainer;
+            if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+            currentCell = node?.closest ? node.closest('td') : null;
         }
         
         if (!currentCell) {
@@ -818,16 +822,17 @@ function setupBasicHandling() {
         
         const rowIdx = currentCell.parentElement.rowIndex;
         const colIdx = currentCell.cellIndex;
+        const logicalColIdx = getCellColumnIndex(currentCell);
         const maxRow = table.rows.length - 1;
-        const maxCol = table.rows[0].cells.length - 1;
-        
+        const currentRowCells = table.rows[rowIdx].cells.length - 1;
+
         // Tab: 오른쪽 셀로 이동
         if (e.key === 'Tab' && !e.shiftKey) {
             e.preventDefault();
             e.stopPropagation();
-            
+
             let nextCell = null;
-            if (colIdx < maxCol) {
+            if (colIdx < currentRowCells) {
                 // 오른쪽 셀로
                 nextCell = table.rows[rowIdx].cells[colIdx + 1];
             } else if (rowIdx < maxRow) {
@@ -840,59 +845,60 @@ function setupBasicHandling() {
                 addRow();
                 nextCell = table.rows[rowIdx + 1]?.cells[0];
             }
-            
+
             if (nextCell) {
                 focusCell(nextCell);
             }
             return;
         }
-        
+
         // Shift+Tab: 왼쪽 셀로 이동
         if (e.key === 'Tab' && e.shiftKey) {
             e.preventDefault();
             e.stopPropagation();
-            
+
             let prevCell = null;
             if (colIdx > 0) {
                 prevCell = table.rows[rowIdx].cells[colIdx - 1];
             } else if (rowIdx > 0) {
-                prevCell = table.rows[rowIdx - 1].cells[maxCol];
+                const prevRow = table.rows[rowIdx - 1];
+                prevCell = prevRow.cells[prevRow.cells.length - 1];
             }
-            
+
             if (prevCell) {
                 focusCell(prevCell);
             }
             return;
         }
-        
+
         // 화살표 아래: 아래 셀로 이동
         if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            e.stopPropagation();
             if (rowIdx < maxRow) {
-                e.preventDefault();
-                e.stopPropagation();
-                const nextCell = table.rows[rowIdx + 1].cells[Math.min(colIdx, table.rows[rowIdx + 1].cells.length - 1)];
+                const nextCell = getCellAt(table, rowIdx + 1, logicalColIdx);
                 if (nextCell) {
                     focusCell(nextCell);
                 }
-                return;
             }
+            return;
         }
-        
+
         // 화살표 위: 위 셀로 이동
         if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            e.stopPropagation();
             if (rowIdx > 0) {
-                e.preventDefault();
-                e.stopPropagation();
-                const prevCell = table.rows[rowIdx - 1].cells[Math.min(colIdx, table.rows[rowIdx - 1].cells.length - 1)];
+                const prevCell = getCellAt(table, rowIdx - 1, logicalColIdx);
                 if (prevCell) {
                     focusCell(prevCell);
                 }
-                return;
             }
+            return;
         }
-        
+
         // 화살표 오른쪽: 셀 끝에서 오른쪽 셀로 이동
-        if (e.key === 'ArrowRight' && colIdx < maxCol) {
+        if (e.key === 'ArrowRight' && colIdx < currentRowCells) {
             if (isCaretAtEnd(currentCell)) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -903,7 +909,7 @@ function setupBasicHandling() {
                 return;
             }
         }
-        
+
         // 화살표 왼쪽: 셀 시작에서 왼쪽 셀로 이동
         if (e.key === 'ArrowLeft' && colIdx > 0) {
             if (isCaretAtStart(currentCell)) {
@@ -1605,7 +1611,7 @@ export function splitCellRows() {
     saveBeforeChange('splitCellRow');
 
     const startRowIdx = targetCell.parentElement.rowIndex;
-    const startColIdx = targetCell.cellIndex;
+    const targetColIdx = getCellColumnIndex(targetCell);
     const colspan = targetCell.colSpan || 1;
 
     // rowspan 제거
@@ -1616,13 +1622,13 @@ export function splitCellRows() {
         const row = table.rows[startRowIdx + r];
         if (!row) continue;
 
-        const refCell = row.cells[startColIdx];
         const newCell = document.createElement('td');
         newCell.innerHTML = '<br>';
         if (colspan > 1) newCell.colSpan = colspan;
 
-        if (refCell) {
-            row.insertBefore(newCell, refCell);
+        const insertIdx = findInsertPosition(row, targetColIdx);
+        if (insertIdx !== null && row.cells[insertIdx]) {
+            row.insertBefore(newCell, row.cells[insertIdx]);
         } else {
             row.appendChild(newCell);
         }
