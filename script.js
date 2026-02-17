@@ -1,7 +1,7 @@
 import { state, loadCategoriesFromLocal, saveCategoriesToLocal } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
 import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameCategoryAction, deleteCategoryAction, addNewCategory } from './ui.js';
-import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, splitCell } from './editor.js';
+import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, splitCellColumns, splitCellRows, saveCurrentSelection } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, saveToDrive, syncFromDrive } from './drive.js';
 
@@ -233,8 +233,9 @@ function setupUIListeners() {
 
     const tableModal = document.getElementById('table-modal');
     
-    // 툴바에서 표 삽입 버튼 클릭 시 삽입 모드로 모달 열기
-    document.getElementById('toolbar-table-btn')?.addEventListener('click', () => { 
+    // 툴바에서 표 삽입 버튼 클릭 시 커서 위치 저장 후 삽입 모드로 모달 열기
+    document.getElementById('toolbar-table-btn')?.addEventListener('click', () => {
+        saveCurrentSelection();
         openTableInsertModal();
     });
     
@@ -269,11 +270,14 @@ function setupUIListeners() {
     document.getElementById('btn-delete-col')?.addEventListener('click', () => { 
         deleteColumn(); 
     });
-    document.getElementById('btn-merge-cells')?.addEventListener('click', () => { 
-        mergeCells(); 
+    document.getElementById('btn-merge-cells')?.addEventListener('click', () => {
+        mergeCells();
     });
-    document.getElementById('btn-split-cell')?.addEventListener('click', () => { 
-        splitCell(); 
+    document.getElementById('btn-split-col')?.addEventListener('click', () => {
+        splitCellColumns();
+    });
+    document.getElementById('btn-split-row')?.addEventListener('click', () => {
+        splitCellRows();
     });
 
     document.getElementById('sticker-btn')?.addEventListener('click', (e) => { 
