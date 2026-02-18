@@ -933,14 +933,14 @@ function setupBasicHandling() {
         
         // Delete 키로 선택된 셀 또는 요소 삭제
         if (e.key === 'Delete' || e.key === 'Backspace') {
-            if (selectedCells.length > 0) { 
-                e.preventDefault(); 
-                saveBeforeChange('delete'); 
-                selectedCells.forEach(cell => { 
+            if (selectedCells.length > 1) {
+                e.preventDefault();
+                saveBeforeChange('delete');
+                selectedCells.forEach(cell => {
                     cell.innerHTML = '<br>';
-                }); 
-                triggerAutoSave(); 
-                return; 
+                });
+                triggerAutoSave();
+                return;
             }
             if (currentSelectedElement && currentSelectedElement.tagName !== 'TABLE' && document.activeElement.tagName !== 'TD') { 
                 e.preventDefault(); 
