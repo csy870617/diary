@@ -3,7 +3,7 @@ import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntr
 import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameCategoryAction, deleteCategoryAction, addNewCategory } from './ui.js';
 import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, splitCellColumns, splitCellRows, saveCurrentSelection } from './editor.js';
 import { setupAuthListeners } from './auth.js';
-import { initGoogleDrive, saveToDrive, syncFromDrive } from './drive.js';
+import { initGoogleDrive, saveToDrive, syncFromDrive, ensureTokenOnResume } from './drive.js';
 
 window.addNewCategory = addNewCategory;
 window.restoreEntry = restoreEntry;
@@ -40,8 +40,11 @@ function init() {
             renderTabs();
             renderEntries(); 
             if (!window.syncInterval) {
-                window.syncInterval = setInterval(() => {
-                    if (!document.hidden && window.gapi?.client?.getToken()) syncFromDrive();
+                window.syncInterval = setInterval(async () => {
+                    if (!document.hidden && localStorage.getItem('is_faith_logged_in') === 'true') {
+                        const valid = await ensureTokenOnResume();
+                        if (valid) syncFromDrive();
+                    }
                 }, 20000);
             }
         }
@@ -69,9 +72,24 @@ function init() {
         }
     }
 
-    window.addEventListener('focus', () => { if (window.gapi?.client?.getToken()) syncFromDrive(); });
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && window.gapi?.client?.getToken()) syncFromDrive(); });
-    window.addEventListener('online', () => syncFromDrive());
+    window.addEventListener('focus', async () => {
+        if (localStorage.getItem('is_faith_logged_in') === 'true') {
+            const valid = await ensureTokenOnResume();
+            if (valid) syncFromDrive();
+        }
+    });
+    document.addEventListener('visibilitychange', async () => {
+        if (document.visibilityState === 'visible' && localStorage.getItem('is_faith_logged_in') === 'true') {
+            const valid = await ensureTokenOnResume();
+            if (valid) syncFromDrive();
+        }
+    });
+    window.addEventListener('online', async () => {
+        if (localStorage.getItem('is_faith_logged_in') === 'true') {
+            const valid = await ensureTokenOnResume();
+            if (valid) syncFromDrive();
+        }
+    });
 
     setupListeners();
     renderStickers();

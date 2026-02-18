@@ -8,13 +8,15 @@ let gapiInited = false;
 let gisInited = false;
 let isSyncing = false;
 let pendingSync = false;
-let lastCloudModifiedTime = null; 
-let syncTimeoutTimer = null; 
-let refreshTimer = null; // [추가] 토큰 자동 갱신용 타이머
+let lastCloudModifiedTime = null;
+let syncTimeoutTimer = null;
+let refreshTimer = null;
+let keepAliveTimer = null;
 
 /**
- * [핵심 수정] 토큰 유효성 검사 및 자동 갱신 로직 강화
- * 사용자가 로그아웃하기 전까지 세션을 유지합니다.
+ * 토큰 유효성 검사 및 자동 갱신 로직
+ * - 실패 시 최대 3회 재시도 (지수 백오프)
+ * - 로그인 상태를 유지하여 세션이 끊기지 않도록 함
  */
 async function ensureValidToken(isAutoSave = false) {
     const storedToken = localStorage.getItem('faith_token');
@@ -22,7 +24,7 @@ async function ensureValidToken(isAutoSave = false) {
     const isLoggedIn = localStorage.getItem('is_faith_logged_in') === 'true';
     const now = Date.now();
 
-    // 1. 토큰이 유효한 경우
+    // 1. 토큰이 유효한 경우 (만료 5분 전까지 유효)
     if (storedToken && storedExp && now < (parseInt(storedExp) - 300000)) {
         if (!gapi.client.getToken()) {
             gapi.client.setToken({ access_token: storedToken });
@@ -30,37 +32,84 @@ async function ensureValidToken(isAutoSave = false) {
         return true;
     }
 
-    // 2. 세션이 만료되었지만 로그인 상태인 경우 (배경에서 조용히 복구)
+    // 2. 세션이 만료되었지만 로그인 상태인 경우 → 재시도 포함 자동 복구
     if (isLoggedIn && tokenClient) {
-        return new Promise((resolve) => {
-            tokenClient.callback = async (resp) => {
-                if (resp.error) {
-                    if (!isAutoSave) localStorage.removeItem('is_faith_logged_in');
-                    resolve(false);
-                    return;
-                }
-                saveTokenInfo(resp);
-                resolve(true);
-            };
-            tokenClient.requestAccessToken({ prompt: '' }); 
-        });
+        return await silentTokenRefreshWithRetry();
     }
     return false;
 }
 
 /**
- * [추가] 토큰 정보 저장 및 UI 갱신 알림
+ * 토큰 갱신을 최대 3회 재시도 (1초, 2초, 4초 간격)
  */
+async function silentTokenRefreshWithRetry(maxRetries = 3) {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        const success = await silentTokenRefresh();
+        if (success) return true;
+        if (attempt < maxRetries - 1) {
+            await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+        }
+    }
+    return false;
+}
+
+function silentTokenRefresh() {
+    return new Promise((resolve) => {
+        const timeout = setTimeout(() => resolve(false), 10000);
+        tokenClient.callback = async (resp) => {
+            clearTimeout(timeout);
+            if (resp.error) {
+                resolve(false);
+                return;
+            }
+            saveTokenInfo(resp);
+            resolve(true);
+        };
+        tokenClient.requestAccessToken({ prompt: '' });
+    });
+}
+
 function saveTokenInfo(resp) {
-    const expiresIn = resp.expires_in || 3599; 
+    const expiresIn = resp.expires_in || 3599;
     const expTime = Date.now() + (expiresIn * 1000);
     localStorage.setItem('faith_token', resp.access_token);
     localStorage.setItem('faith_token_exp', expTime);
     localStorage.setItem('is_faith_logged_in', 'true');
     gapi.client.setToken({ access_token: resp.access_token });
-    
+
+    // 만료 10분 전에 자동 갱신 예약
     if (refreshTimer) clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => ensureValidToken(true), (expiresIn - 600) * 1000);
+}
+
+/**
+ * 주기적으로 토큰 유효성을 확인하여 세션이 끊기지 않도록 함
+ * - 15분마다 토큰 상태 확인
+ * - 만료가 임박하면 자동 갱신
+ */
+export function startKeepAlive() {
+    if (keepAliveTimer) clearInterval(keepAliveTimer);
+    keepAliveTimer = setInterval(async () => {
+        if (localStorage.getItem('is_faith_logged_in') !== 'true') return;
+        const storedExp = localStorage.getItem('faith_token_exp');
+        const now = Date.now();
+        // 만료 15분 이내이면 미리 갱신
+        if (storedExp && now > (parseInt(storedExp) - 900000)) {
+            await ensureValidToken(true);
+        }
+    }, 15 * 60 * 1000); // 15분
+}
+
+function stopKeepAlive() {
+    if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
+}
+
+/**
+ * 탭이 다시 활성화될 때 토큰 유효성을 확인하고 필요시 갱신
+ */
+export async function ensureTokenOnResume() {
+    if (localStorage.getItem('is_faith_logged_in') !== 'true') return false;
+    return await ensureValidToken(true);
 }
 
 export function initGoogleDrive(callback) {
@@ -81,6 +130,7 @@ export function initGoogleDrive(callback) {
             if (localStorage.getItem('is_faith_logged_in') === 'true') {
                 const success = await ensureValidToken(true);
                 if (success) {
+                    startKeepAlive();
                     await checkAuthAndSync(callback);
                     return;
                 }
@@ -102,6 +152,7 @@ export function initGoogleDrive(callback) {
         callback: async (resp) => {
             if (resp.error) return;
             saveTokenInfo(resp);
+            startKeepAlive();
             await checkAuthAndSync(callback);
             if (window.onAuthSuccess) window.onAuthSuccess(); // auth.js 연동
         },
@@ -125,6 +176,7 @@ export function handleSignoutClick(callback) {
     localStorage.removeItem('is_faith_logged_in');
     state.currentUser = null;
     if (refreshTimer) clearTimeout(refreshTimer);
+    stopKeepAlive();
     if(callback) callback();
 }
 
