@@ -297,15 +297,17 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
         opacity: 0;
     }
     
-    /* 모바일에서 표 스타일 */
+    /* 모바일에서 표 스타일 - 압축 없이 가로 스크롤 */
     .editor-body table {
         min-width: max-content;
+        table-layout: auto;
+        width: auto;
     }
-    
+
     /* 모바일에서 셀 스타일 */
     .editor-body table td {
-        min-width: 100px;
-        max-width: 200px;
+        min-width: 80px;
+        max-width: none;
         padding: 10px 12px;
         font-size: 14px;
     }
