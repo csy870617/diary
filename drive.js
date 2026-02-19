@@ -13,6 +13,7 @@ let syncTimeoutTimer = null;
 let refreshTimer = null;
 let keepAliveTimer = null;
 let mainTokenCallback = null; // 원본 tokenClient 콜백 보존용
+let silentRefreshAbortFn = null; // silent refresh 중단용
 
 /**
  * 토큰 유효성 검사 및 자동 갱신 로직
@@ -58,11 +59,20 @@ function silentTokenRefresh() {
     return new Promise((resolve) => {
         const restoreCallback = () => {
             if (mainTokenCallback) tokenClient.callback = mainTokenCallback;
+            silentRefreshAbortFn = null;
         };
         const timeout = setTimeout(() => {
             restoreCallback();
             resolve(false);
         }, 10000);
+
+        // handleAuthClick에서 호출하여 silent refresh를 중단할 수 있도록 함
+        silentRefreshAbortFn = () => {
+            clearTimeout(timeout);
+            restoreCallback();
+            resolve(false);
+        };
+
         tokenClient.callback = async (resp) => {
             clearTimeout(timeout);
             restoreCallback();
@@ -113,11 +123,21 @@ function stopKeepAlive() {
 }
 
 /**
- * 탭이 다시 활성화될 때 토큰 유효성을 확인하고 필요시 갱신
+ * 탭이 다시 활성화될 때 토큰 유효성을 확인
+ * (팝업을 띄우는 silentTokenRefresh는 사용하지 않음)
  */
 export async function ensureTokenOnResume() {
     if (localStorage.getItem('is_faith_logged_in') !== 'true') return false;
-    return await ensureValidToken(true);
+    const storedToken = localStorage.getItem('faith_token');
+    const storedExp = localStorage.getItem('faith_token_exp');
+    const now = Date.now();
+    if (storedToken && storedExp && now < (parseInt(storedExp) - 300000)) {
+        if (!gapi.client.getToken()) {
+            gapi.client.setToken({ access_token: storedToken });
+        }
+        return true;
+    }
+    return false;
 }
 
 export function initGoogleDrive(callback) {
@@ -134,14 +154,21 @@ export function initGoogleDrive(callback) {
             });
             gapiInited = true;
             
-            // 로그인 플래그가 있다면 자동 로그인 시도
+            // 로그인 플래그가 있다면 저장된 토큰으로 자동 로그인 시도
+            // (팝업을 띄우는 silentTokenRefresh는 사용하지 않음)
             if (localStorage.getItem('is_faith_logged_in') === 'true') {
-                const success = await ensureValidToken(true);
-                if (success) {
+                const storedToken = localStorage.getItem('faith_token');
+                const storedExp = localStorage.getItem('faith_token_exp');
+                const now = Date.now();
+
+                if (storedToken && storedExp && now < (parseInt(storedExp) - 300000)) {
+                    // 토큰이 아직 유효 → 팝업 없이 바로 사용
+                    gapi.client.setToken({ access_token: storedToken });
                     startKeepAlive();
                     await checkAuthAndSync(callback);
                     return;
                 }
+                // 토큰 만료 → 팝업 띄우지 않고 로그인 버튼 표시
             }
             state.isLoading = false;
             renderEntries();
@@ -175,8 +202,15 @@ export function initGoogleDrive(callback) {
 }
 
 export function handleAuthClick() {
-    // 웨일에서 가장 안정적인 select_account 옵션 사용
-    if (tokenClient) tokenClient.requestAccessToken({ prompt: 'select_account' });
+    // 진행 중인 silent refresh가 있으면 중단 (콜백 충돌 방지)
+    if (silentRefreshAbortFn) {
+        silentRefreshAbortFn();
+    }
+    if (tokenClient) {
+        // 유저 로그인 응답이 mainTokenCallback으로 처리되도록 보장
+        tokenClient.callback = mainTokenCallback;
+        tokenClient.requestAccessToken({ prompt: 'select_account' });
+    }
 }
 
 export function handleSignoutClick(callback) {
