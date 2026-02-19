@@ -1,7 +1,7 @@
 import { state, loadCategoriesFromLocal, saveCategoriesToLocal } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
 import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameCategoryAction, deleteCategoryAction, addNewCategory } from './ui.js';
-import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, splitCellColumns, splitCellRows, saveCurrentSelection } from './editor.js';
+import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, saveToDrive, syncFromDrive, ensureTokenOnResume } from './drive.js';
 
@@ -290,12 +290,6 @@ function setupUIListeners() {
     });
     document.getElementById('btn-merge-cells')?.addEventListener('click', () => {
         mergeCells();
-    });
-    document.getElementById('btn-split-col')?.addEventListener('click', () => {
-        splitCellColumns();
-    });
-    document.getElementById('btn-split-row')?.addEventListener('click', () => {
-        splitCellRows();
     });
 
     document.getElementById('sticker-btn')?.addEventListener('click', (e) => { 
