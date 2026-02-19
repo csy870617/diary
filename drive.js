@@ -12,6 +12,7 @@ let lastCloudModifiedTime = null;
 let syncTimeoutTimer = null;
 let refreshTimer = null;
 let keepAliveTimer = null;
+let mainTokenCallback = null; // 원본 tokenClient 콜백 보존용
 
 /**
  * 토큰 유효성 검사 및 자동 갱신 로직
@@ -55,9 +56,16 @@ async function silentTokenRefreshWithRetry(maxRetries = 3) {
 
 function silentTokenRefresh() {
     return new Promise((resolve) => {
-        const timeout = setTimeout(() => resolve(false), 10000);
+        const restoreCallback = () => {
+            if (mainTokenCallback) tokenClient.callback = mainTokenCallback;
+        };
+        const timeout = setTimeout(() => {
+            restoreCallback();
+            resolve(false);
+        }, 10000);
         tokenClient.callback = async (resp) => {
             clearTimeout(timeout);
+            restoreCallback();
             if (resp.error) {
                 resolve(false);
                 return;
@@ -146,16 +154,22 @@ export function initGoogleDrive(callback) {
         }
     });
 
+    mainTokenCallback = async (resp) => {
+        if (resp.error) {
+            console.error("Google 인증 오류:", resp.error);
+            if (callback) callback(false);
+            return;
+        }
+        saveTokenInfo(resp);
+        startKeepAlive();
+        await checkAuthAndSync(callback);
+        if (window.onAuthSuccess) window.onAuthSuccess(); // auth.js 연동
+    };
+
     tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: GOOGLE_CONFIG.CLIENT_ID,
         scope: GOOGLE_CONFIG.SCOPES,
-        callback: async (resp) => {
-            if (resp.error) return;
-            saveTokenInfo(resp);
-            startKeepAlive();
-            await checkAuthAndSync(callback);
-            if (window.onAuthSuccess) window.onAuthSuccess(); // auth.js 연동
-        },
+        callback: mainTokenCallback,
     });
     gisInited = true;
 }
@@ -188,10 +202,24 @@ async function checkAuthAndSync(callback) {
     try {
         const userInfo = await gapi.client.drive.about.get({ fields: 'user' });
         state.currentUser = userInfo.result.user;
-        await syncFromDrive(); 
-        if(callback) callback(true);
     } catch (err) {
-        if(callback) callback(false);
+        console.error("사용자 정보 조회 실패:", err);
+        // 토큰이 유효하지 않은 경우 (401) → 로그아웃 처리
+        if (err.status === 401) {
+            localStorage.removeItem('faith_token');
+            localStorage.removeItem('faith_token_exp');
+            localStorage.removeItem('is_faith_logged_in');
+            if(callback) callback(false);
+            return;
+        }
+        // 다른 오류 (네트워크 등) → 로그인 상태 유지, 동기화만 실패
+    }
+    // 로그인 성공으로 UI 업데이트 (동기화 실패와 무관하게)
+    if(callback) callback(true);
+    try {
+        await syncFromDrive();
+    } catch (syncErr) {
+        console.error("초기 동기화 실패:", syncErr);
     }
 }
 
