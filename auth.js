@@ -2,21 +2,20 @@ import { handleAuthClick, handleSignoutClick } from './drive.js';
 import { openModal, closeAllModals } from './ui.js';
 
 export function setupAuthListeners() {
-    // 헤더의 '구글 로그인' 버튼
+    // 헤더의 '동기화' 버튼 → 바로 구글 계정 선택 화면 호출
     const loginTriggerBtn = document.getElementById('login-trigger-btn');
     if(loginTriggerBtn) {
         loginTriggerBtn.addEventListener('click', () => {
-            openModal(document.getElementById('login-modal'));
+            handleAuthClick(); // 바로 구글 로그인 팝업 호출
         });
     }
 
-    // 모달 내부의 '구글로 계속하기' 버튼
+    // 모달 내부의 '구글로 계속하기' 버튼 (모달에서도 동작하도록 유지)
     const googleLoginBtn = document.getElementById('google-login-btn');
     if(googleLoginBtn) {
         googleLoginBtn.addEventListener('click', (e) => {
             e.preventDefault();
-            handleAuthClick(); // drive.js의 로그인 트리거
-            // 인증 팝업 호출 후 즉시 닫지 않고, 성공 콜백에서 처리하도록 수정
+            handleAuthClick();
         });
     }
 
