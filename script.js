@@ -237,6 +237,18 @@ function setupUIListeners() {
     document.getElementById('btn-download')?.addEventListener('click', () => {
         const element = document.getElementById('editor-container');
         const title = document.getElementById('edit-title').value || '신앙일지';
+
+        // PDF 렌더링 시 html2canvas가 text-decoration:underline 위치를 잘못 그리므로
+        // 임시로 border-bottom으로 대체 후 복원
+        const links = element.querySelectorAll('a');
+        const originalStyles = [];
+        links.forEach(link => {
+            originalStyles.push(link.getAttribute('style'));
+            link.style.textDecoration = 'none';
+            link.style.borderBottom = '1px solid #2563EB';
+            link.style.paddingBottom = '1px';
+        });
+
         const opt = {
             margin: 10,
             filename: `${title}.pdf`,
@@ -244,7 +256,13 @@ function setupUIListeners() {
             html2canvas: { scale: 2, useCORS: true },
             jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
         };
-        html2pdf().set(opt).from(element).save();
+        html2pdf().set(opt).from(element).save().then(() => {
+            // 원래 스타일 복원
+            links.forEach((link, i) => {
+                if (originalStyles[i]) link.setAttribute('style', originalStyles[i]);
+                else link.removeAttribute('style');
+            });
+        });
     });
 
     document.getElementById('toolbar-link-btn')?.addEventListener('click', () => { createHyperlink(); });

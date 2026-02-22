@@ -546,9 +546,8 @@ function clearCellSelection() {
 function focusCell(cell) {
     if (!cell) return;
 
-    // 셀 선택 해제 후 현재 셀 선택
+    // 셀 선택 해제
     clearCellSelection();
-    cell.classList.add('selected-cell');
 
     // 셀에 포커스
     cell.focus();
@@ -761,9 +760,8 @@ function setupBasicHandling() {
         
         if (cell) {
             lastClickedCell = cell;
-            // 단일 셀 선택 표시
+            // 단일 셀 클릭 시 선택 해제하고 일반 편집 모드 유지
             clearCellSelection();
-            cell.classList.add('selected-cell');
             // 셀 클릭 시 해당 표를 자동으로 선택하여 플로팅 UI 표시
             const table = cell.closest('table');
             if (table && currentSelectedElement !== table) {
