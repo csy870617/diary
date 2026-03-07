@@ -222,7 +222,10 @@ export function handleSignoutClick(callback) {
     localStorage.removeItem('faith_token');
     localStorage.removeItem('faith_token_exp');
     localStorage.removeItem('is_faith_logged_in');
+    localStorage.removeItem('faithLogDB');
+    localStorage.removeItem('faithCatData');
     state.currentUser = null;
+    state.entries = [];
     if (refreshTimer) clearTimeout(refreshTimer);
     stopKeepAlive();
     if(callback) callback();
