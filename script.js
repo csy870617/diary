@@ -93,6 +93,12 @@ function init() {
 
     setupListeners();
     renderStickers();
+
+    // 로그인 안 된 상태면 로그인 모달을 바로 표시
+    if (localStorage.getItem('is_faith_logged_in') !== 'true') {
+        const loginModal = document.getElementById('login-modal');
+        if (loginModal) openModal(loginModal);
+    }
 }
 
 function updateAuthUI(isLoggedIn) {
