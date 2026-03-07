@@ -36,6 +36,179 @@ let globalCellClipboard = { cellData: null, rows: 0, cols: 0 };
  * @param {HTMLElement} editorElement - 에디터 요소
  * @param {Object} callbacks - 콜백 함수들 { onBeforePaste, onAfterPaste }
  */
+/**
+ * 외부에서 복사한 HTML을 안전하게 정제합니다.
+ * 서식(색상, 굵기, 기울임, 밑줄, 글꼴 등)은 보존하고
+ * 위험한 요소(script, iframe 등)는 제거합니다.
+ */
+function sanitizeExternalHtml(html) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+
+    // 위험한 요소 제거
+    const dangerousTags = ['script', 'iframe', 'object', 'embed', 'form', 'input',
+        'textarea', 'select', 'button', 'meta', 'link', 'style', 'base'];
+    dangerousTags.forEach(tag => {
+        doc.querySelectorAll(tag).forEach(el => el.remove());
+    });
+
+    // 허용할 태그 목록
+    const allowedTags = new Set([
+        'p', 'br', 'div', 'span',
+        'b', 'strong', 'i', 'em', 'u', 's', 'strike', 'del', 'sub', 'sup',
+        'font', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'ul', 'ol', 'li',
+        'a', 'img',
+        'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th',
+        'blockquote', 'pre', 'code', 'hr'
+    ]);
+
+    // 허용할 CSS 속성 목록 (서식 관련)
+    const allowedStyleProps = new Set([
+        'color', 'background-color', 'background',
+        'font-size', 'font-family', 'font-weight', 'font-style', 'font-variant',
+        'text-decoration', 'text-decoration-line', 'text-decoration-color', 'text-decoration-style',
+        'text-align', 'text-indent', 'text-transform',
+        'line-height', 'letter-spacing', 'word-spacing',
+        'vertical-align',
+        'margin', 'margin-top', 'margin-bottom', 'margin-left', 'margin-right',
+        'padding', 'padding-top', 'padding-bottom', 'padding-left', 'padding-right',
+        'border', 'border-top', 'border-bottom', 'border-left', 'border-right',
+        'border-color', 'border-width', 'border-style', 'border-collapse',
+        'width', 'height', 'min-width', 'max-width',
+        'list-style-type', 'list-style',
+        'white-space', 'word-break', 'overflow-wrap'
+    ]);
+
+    // 허용할 속성 목록
+    const allowedAttrs = {
+        '*': ['style', 'class'],
+        'a': ['href', 'target', 'title'],
+        'img': ['src', 'alt', 'width', 'height'],
+        'font': ['color', 'size', 'face'],
+        'td': ['colspan', 'rowspan', 'align', 'valign'],
+        'th': ['colspan', 'rowspan', 'align', 'valign'],
+        'ol': ['start', 'type'],
+        'li': ['value']
+    };
+
+    function sanitizeStyle(styleStr) {
+        if (!styleStr) return '';
+        const filtered = [];
+        // style 문자열 파싱
+        const props = styleStr.split(';');
+        for (const prop of props) {
+            const colonIdx = prop.indexOf(':');
+            if (colonIdx === -1) continue;
+            const name = prop.substring(0, colonIdx).trim().toLowerCase();
+            const value = prop.substring(colonIdx + 1).trim();
+            if (allowedStyleProps.has(name) && !value.includes('expression') && !value.includes('javascript')) {
+                filtered.push(`${name}: ${value}`);
+            }
+        }
+        return filtered.join('; ');
+    }
+
+    function sanitizeNode(node) {
+        if (node.nodeType === Node.TEXT_NODE) return;
+        if (node.nodeType !== Node.ELEMENT_NODE) {
+            node.remove();
+            return;
+        }
+
+        const tag = node.tagName.toLowerCase();
+
+        // 허용되지 않는 태그는 내용만 유지
+        if (!allowedTags.has(tag)) {
+            const parent = node.parentNode;
+            while (node.firstChild) {
+                parent.insertBefore(node.firstChild, node);
+            }
+            parent.removeChild(node);
+            return;
+        }
+
+        // 속성 정제
+        const attrs = Array.from(node.attributes);
+        const tagAllowed = allowedAttrs[tag] || [];
+        const globalAllowed = allowedAttrs['*'] || [];
+        const permitted = new Set([...globalAllowed, ...tagAllowed]);
+
+        for (const attr of attrs) {
+            const name = attr.name.toLowerCase();
+            if (!permitted.has(name)) {
+                node.removeAttribute(attr.name);
+                continue;
+            }
+            // on* 이벤트 핸들러 제거
+            if (name.startsWith('on')) {
+                node.removeAttribute(attr.name);
+                continue;
+            }
+            // javascript: URL 차단
+            if ((name === 'href' || name === 'src') && attr.value.trim().toLowerCase().startsWith('javascript:')) {
+                node.removeAttribute(attr.name);
+            }
+        }
+
+        // style 속성 정제
+        if (node.hasAttribute('style')) {
+            const cleaned = sanitizeStyle(node.getAttribute('style'));
+            if (cleaned) {
+                node.setAttribute('style', cleaned);
+            } else {
+                node.removeAttribute('style');
+            }
+        }
+
+        // a 태그에 target="_blank" 보장
+        if (tag === 'a' && node.hasAttribute('href')) {
+            node.setAttribute('target', '_blank');
+        }
+
+        // 자식 노드 재귀 처리 (역순 순회 - 노드 변경에 안전)
+        const children = Array.from(node.childNodes);
+        for (const child of children) {
+            sanitizeNode(child);
+        }
+    }
+
+    const body = doc.body;
+    const children = Array.from(body.childNodes);
+    for (const child of children) {
+        sanitizeNode(child);
+    }
+
+    let result = body.innerHTML.trim();
+
+    // URL 자동 링크 (링크가 아닌 텍스트 내 URL)
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = result;
+    const walker = document.createTreeWalker(tempDiv, NodeFilter.SHOW_TEXT, null, false);
+    let textNode;
+    const nodesToProcess = [];
+    while (textNode = walker.nextNode()) {
+        if (textNode.parentElement.tagName === 'A') continue;
+        if (textNode.nodeValue.match(/(https?:\/\/[^\s]+)/)) {
+            nodesToProcess.push(textNode);
+        }
+    }
+    nodesToProcess.forEach(tn => {
+        const span = document.createElement('span');
+        span.innerHTML = tn.nodeValue.replace(/(https?:\/\/[^\s]+)/g,
+            '<a href="$1" target="_blank" style="color:#2563EB; text-decoration:underline; cursor:pointer;">$1</a>');
+        tn.parentElement.replaceChild(span, tn);
+        const parent = span.parentElement;
+        while (span.firstChild) {
+            parent.insertBefore(span.firstChild, span);
+        }
+        parent.removeChild(span);
+    });
+    result = tempDiv.innerHTML;
+
+    return result || null;
+}
+
 export function setupLinkPreservation(editorElement, callbacks = {}) {
     if (!editorElement) return;
     
@@ -129,29 +302,58 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
     }
     
     /**
-     * 선택 영역의 HTML을 가져오되, 부분 선택된 링크도 완전히 포함
+     * 선택 영역의 HTML을 가져오되, 부분 선택된 링크도 완전히 포함하고
+     * 모든 서식(색상, 굵기, 기울임 등)을 보존합니다.
      */
-    function getSelectionHtmlWithLinks() {
+    function getSelectionHtmlWithFormatting() {
         const selection = window.getSelection();
         if (!selection.rangeCount) return { html: '', text: '' };
-        
+
         const range = selection.getRangeAt(0);
         const fragment = range.cloneContents();
         const div = document.createElement('div');
         div.appendChild(fragment.cloneNode(true));
-        
+
+        // 부분 선택된 링크 복원
         let startNode = range.startContainer;
         let startAnchor = startNode.nodeType === 3 ? startNode.parentElement?.closest('a') : startNode.closest?.('a');
-        
+
         let html = div.innerHTML;
-        
+
         if (startAnchor && !html.includes('<a ')) {
             const href = startAnchor.getAttribute('href');
             const target = startAnchor.getAttribute('target') || '_blank';
             const style = startAnchor.getAttribute('style') || 'color:#2563EB; text-decoration:underline; cursor:pointer;';
             html = `<a href="${href}" target="${target}" style="${style}">${html}</a>`;
         }
-        
+
+        // 부분 선택된 상위 서식 요소(span, b, i, u, s, font 등) 복원
+        let ancestor = range.commonAncestorContainer;
+        if (ancestor.nodeType === 3) ancestor = ancestor.parentElement;
+
+        // 에디터 루트까지 올라가며 서식 태그 수집
+        const formatWrappers = [];
+        let node = ancestor;
+        while (node && node !== editorElement) {
+            const tag = node.tagName?.toLowerCase();
+            if (['span', 'b', 'strong', 'i', 'em', 'u', 's', 'strike', 'font', 'sub', 'sup'].includes(tag)) {
+                const clone = node.cloneNode(false);
+                formatWrappers.unshift(clone.outerHTML.replace(clone.innerHTML, ''));
+            }
+            node = node.parentElement;
+        }
+
+        // 서식 래퍼 적용 (이미 fragment에 포함되어 있지 않은 경우)
+        if (formatWrappers.length > 0 && div.children.length === 0 && div.childNodes.length > 0) {
+            // 텍스트만 있는 경우 상위 서식 적용
+            let wrapped = html;
+            for (const wrapper of formatWrappers) {
+                const closingTag = '</' + wrapper.match(/<(\w+)/)[1] + '>';
+                wrapped = wrapper + wrapped + closingTag;
+            }
+            html = wrapped;
+        }
+
         return { html, text: selection.toString() };
     }
     
@@ -345,47 +547,47 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
         }
     });
     
-    // ========== 일반 복사 이벤트 (링크 보존) ==========
+    // ========== 일반 복사 이벤트 (서식 보존) ==========
     editorElement.addEventListener('copy', (e) => {
         // 다중 셀이 선택되어 있으면 키보드 핸들러에서 처리됨
         const selectedCells = document.querySelectorAll('td.selected-cell');
         if (selectedCells.length > 1) return;
-        
+
         // 일반 텍스트 선택 복사 - 셀 클립보드 초기화
         globalCellClipboard = { cellData: null, rows: 0, cols: 0 };
-        
+
         const selection = window.getSelection();
         if (!selection.rangeCount || selection.isCollapsed) return;
-        
-        const { html, text } = getSelectionHtmlWithLinks();
-        
+
+        const { html, text } = getSelectionHtmlWithFormatting();
+
         e.clipboardData.setData('text/html', html);
         e.clipboardData.setData('text/plain', text);
         internalClipboard = { html, text };
-        
+
         e.preventDefault();
     });
-    
+
     // ========== 일반 잘라내기 이벤트 ==========
     editorElement.addEventListener('cut', (e) => {
         const selectedCells = document.querySelectorAll('td.selected-cell');
         if (selectedCells.length > 1) return;
-        
+
         // 일반 텍스트 잘라내기 - 셀 클립보드 초기화
         globalCellClipboard = { cellData: null, rows: 0, cols: 0 };
-        
+
         const selection = window.getSelection();
         if (!selection.rangeCount || selection.isCollapsed) return;
-        
-        const { html, text } = getSelectionHtmlWithLinks();
-        
+
+        const { html, text } = getSelectionHtmlWithFormatting();
+
         e.clipboardData.setData('text/html', html);
         e.clipboardData.setData('text/plain', text);
         internalClipboard = { html, text };
-        
+
         const range = selection.getRangeAt(0);
         range.deleteContents();
-        
+
         if (callbacks.onAfterPaste) callbacks.onAfterPaste();
         e.preventDefault();
     });
@@ -483,32 +685,40 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
         
         // 내부에서 복사한 것인지 확인 (텍스트 내용이 같으면 내부 복사)
         const isInternalCopy = internalClipboard.text && internalClipboard.text === text;
-        
-        // 내부에서 복사한 링크가 있으면 서식 유지
-        if (isInternalCopy && internalClipboard.html && internalClipboard.html.includes('<a ')) {
+
+        // 내부에서 복사한 것이면 서식 전체 유지
+        if (isInternalCopy && internalClipboard.html) {
             document.execCommand('insertHTML', false, internalClipboard.html);
             if (callbacks.onAfterPaste) callbacks.onAfterPaste();
             return;
         }
-        
-        // 외부에서 복사한 것은 순수 텍스트로 붙여넣기 (URL만 자동 링크)
+
+        // 외부에서 복사한 HTML이 있으면 서식(색상, 굵기 등) 보존하며 붙여넣기
+        if (html) {
+            const sanitized = sanitizeExternalHtml(html);
+            if (sanitized) {
+                document.execCommand('insertHTML', false, sanitized);
+                if (callbacks.onAfterPaste) callbacks.onAfterPaste();
+                return;
+            }
+        }
+
+        // HTML이 없으면 순수 텍스트로 붙여넣기 (URL만 자동 링크)
         if (text) {
-            // 줄바꿈 유지하면서 HTML 이스케이프
             let cleanText = text
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;')
                 .replace(/\n/g, '<br>');
-            
-            // URL 자동 링크
+
             cleanText = cleanText.replace(
-                /(https?:\/\/[^\s<]+)/g, 
+                /(https?:\/\/[^\s<]+)/g,
                 '<a href="$1" target="_blank" style="color:#2563EB; text-decoration:underline; cursor:pointer;">$1</a>'
             );
-            
+
             document.execCommand('insertHTML', false, cleanText);
         }
-        
+
         if (callbacks.onAfterPaste) callbacks.onAfterPaste();
     });
 }
