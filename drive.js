@@ -102,7 +102,7 @@ function saveTokenInfo(resp) {
 
 /**
  * 주기적으로 토큰 유효성을 확인하여 세션이 끊기지 않도록 함
- * - 15분마다 토큰 상태 확인
+ * - 5분마다 토큰 상태 확인
  * - 만료가 임박하면 자동 갱신
  */
 export function startKeepAlive() {
@@ -115,7 +115,7 @@ export function startKeepAlive() {
         if (storedExp && now > (parseInt(storedExp) - 900000)) {
             await ensureValidToken(true);
         }
-    }, 15 * 60 * 1000); // 15분
+    }, 5 * 60 * 1000); // 5분
 }
 
 function stopKeepAlive() {
@@ -124,7 +124,8 @@ function stopKeepAlive() {
 
 /**
  * 탭이 다시 활성화될 때 토큰 유효성을 확인
- * (팝업을 띄우는 silentTokenRefresh는 사용하지 않음)
+ * - 토큰이 유효하면 바로 사용
+ * - 만료되었으면 silent refresh 시도 (페이지 활성 상태 유지)
  */
 export async function ensureTokenOnResume() {
     if (localStorage.getItem('is_faith_logged_in') !== 'true') return false;
@@ -136,6 +137,10 @@ export async function ensureTokenOnResume() {
             gapi.client.setToken({ access_token: storedToken });
         }
         return true;
+    }
+    // 토큰 만료 시 silent refresh 시도 (로그인 상태 유지)
+    if (tokenClient) {
+        return await silentTokenRefreshWithRetry();
     }
     return false;
 }
@@ -155,7 +160,6 @@ export function initGoogleDrive(callback) {
             gapiInited = true;
             
             // 로그인 플래그가 있다면 저장된 토큰으로 자동 로그인 시도
-            // (팝업을 띄우는 silentTokenRefresh는 사용하지 않음)
             if (localStorage.getItem('is_faith_logged_in') === 'true') {
                 const storedToken = localStorage.getItem('faith_token');
                 const storedExp = localStorage.getItem('faith_token_exp');
@@ -168,7 +172,19 @@ export function initGoogleDrive(callback) {
                     await checkAuthAndSync(callback);
                     return;
                 }
-                // 토큰 만료 → 팝업 띄우지 않고 로그인 버튼 표시
+                // 토큰 만료 → silent refresh 시도 (팝업 없이 자동 갱신)
+                // initTokenClient 완료 후 실행되도록 지연
+                setTimeout(async () => {
+                    if (tokenClient) {
+                        const refreshed = await silentTokenRefreshWithRetry();
+                        if (refreshed) {
+                            startKeepAlive();
+                            await checkAuthAndSync(callback);
+                            if (window.onAuthSuccess) window.onAuthSuccess();
+                        }
+                    }
+                }, 500);
+                return;
             }
             state.isLoading = false;
             renderEntries();
@@ -241,13 +257,37 @@ async function checkAuthAndSync(callback) {
         state.currentUser = userInfo.result.user;
     } catch (err) {
         console.error("사용자 정보 조회 실패:", err);
-        // 토큰이 유효하지 않은 경우 (401) → 로그아웃 처리
+        // 토큰이 유효하지 않은 경우 (401) → 토큰 갱신 시도 후 재확인
         if (err.status === 401) {
-            localStorage.removeItem('faith_token');
-            localStorage.removeItem('faith_token_exp');
-            localStorage.removeItem('is_faith_logged_in');
-            if(callback) callback(false);
-            return;
+            if (tokenClient) {
+                const refreshed = await silentTokenRefreshWithRetry();
+                if (refreshed) {
+                    try {
+                        const retryInfo = await gapi.client.drive.about.get({ fields: 'user' });
+                        state.currentUser = retryInfo.result.user;
+                    } catch (retryErr) {
+                        // 갱신 후에도 실패 → 로그아웃
+                        localStorage.removeItem('faith_token');
+                        localStorage.removeItem('faith_token_exp');
+                        localStorage.removeItem('is_faith_logged_in');
+                        if(callback) callback(false);
+                        return;
+                    }
+                } else {
+                    // 갱신 실패 → 로그아웃
+                    localStorage.removeItem('faith_token');
+                    localStorage.removeItem('faith_token_exp');
+                    localStorage.removeItem('is_faith_logged_in');
+                    if(callback) callback(false);
+                    return;
+                }
+            } else {
+                localStorage.removeItem('faith_token');
+                localStorage.removeItem('faith_token_exp');
+                localStorage.removeItem('is_faith_logged_in');
+                if(callback) callback(false);
+                return;
+            }
         }
         // 다른 오류 (네트워크 등) → 로그인 상태 유지, 동기화만 실패
     }
