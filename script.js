@@ -3,7 +3,7 @@ import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntr
 import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameCategoryAction, deleteCategoryAction, addNewCategory } from './ui.js';
 import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection } from './editor.js';
 import { setupAuthListeners } from './auth.js';
-import { initGoogleDrive, saveToDrive, syncFromDrive, ensureTokenOnResume } from './drive.js';
+import { initGoogleDrive, saveToDrive, syncFromDrive, ensureTokenOnResume, startKeepAlive } from './drive.js';
 
 window.addNewCategory = addNewCategory;
 window.restoreEntry = restoreEntry;
@@ -89,6 +89,25 @@ function init() {
             const valid = await ensureTokenOnResume();
             if (valid) syncFromDrive();
         }
+    });
+
+    // 사용자 활동 감지 → 토큰 만료 임박 시 자동 갱신 (페이지 활성 상태에서 로그아웃 방지)
+    let lastActivityRefresh = 0;
+    const activityRefreshInterval = 3 * 60 * 1000; // 최소 3분 간격으로 체크
+    const handleUserActivity = async () => {
+        const now = Date.now();
+        if (now - lastActivityRefresh < activityRefreshInterval) return;
+        if (localStorage.getItem('is_faith_logged_in') !== 'true') return;
+        const storedExp = localStorage.getItem('faith_token_exp');
+        if (!storedExp) return;
+        // 만료 15분 이내이면 사용자 활동 시점에 미리 갱신
+        if (now > (parseInt(storedExp) - 900000)) {
+            lastActivityRefresh = now;
+            await ensureTokenOnResume();
+        }
+    };
+    ['click', 'keydown', 'scroll', 'touchstart'].forEach(evt => {
+        document.addEventListener(evt, handleUserActivity, { passive: true });
     });
 
     setupListeners();
