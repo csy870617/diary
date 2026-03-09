@@ -114,9 +114,10 @@ function init() {
     renderStickers();
 
     // 로그인 안 된 상태면 로그인 모달을 바로 표시
+    // openModal 대신 직접 hidden 제거 (히스토리 push 없이 표시하여 모바일 루프 방지)
     if (localStorage.getItem('is_faith_logged_in') !== 'true') {
         const loginModal = document.getElementById('login-modal');
-        if (loginModal) openModal(loginModal);
+        if (loginModal) loginModal.classList.remove('hidden');
     }
 }
 

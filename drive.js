@@ -181,7 +181,22 @@ export function initGoogleDrive(callback) {
                             startKeepAlive();
                             await checkAuthAndSync(callback);
                             if (window.onAuthSuccess) window.onAuthSuccess();
+                        } else {
+                            // silent refresh 실패 → 로그인 상태 제거 후 UI 업데이트
+                            localStorage.removeItem('faith_token');
+                            localStorage.removeItem('faith_token_exp');
+                            localStorage.removeItem('is_faith_logged_in');
+                            state.isLoading = false;
+                            renderEntries();
+                            if (callback) callback(false);
+                            // 로그인 모달 표시 (히스토리 push 없이)
+                            const loginModal = document.getElementById('login-modal');
+                            if (loginModal) loginModal.classList.remove('hidden');
                         }
+                    } else {
+                        state.isLoading = false;
+                        renderEntries();
+                        if (callback) callback(false);
                     }
                 }, 500);
                 return;
