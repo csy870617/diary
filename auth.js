@@ -20,8 +20,12 @@ export function setupAuthListeners() {
     }
 
     // [추가] drive.js에서 인증이 성공했을 때 호출될 글로벌 함수
+    // history.back() 대신 replaceState로 히스토리 정리 (모바일 popstate 루프 방지)
     window.onAuthSuccess = () => {
-        closeAllModals(true);
+        closeAllModals(false);
+        if (history.state && history.state.modal === 'open') {
+            history.replaceState({ modal: 'main' }, null, '');
+        }
         console.log("구글 인증 성공: 모달을 닫습니다.");
     };
 
