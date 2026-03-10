@@ -48,8 +48,9 @@ function init() {
                 }, 20000);
             }
         } else {
-            // 비로그인 상태면 구글 로그인 팝업을 바로 띄움
-            handleAuthClick();
+            // 비로그인 상태면 로그인 모달 표시 (자동 팝업은 모바일에서 리다이렉트 루프 유발)
+            const loginModal = document.getElementById('login-modal');
+            if (loginModal) loginModal.classList.remove('hidden');
         }
     });
 
