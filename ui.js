@@ -5,6 +5,13 @@ import { saveToDrive, syncFromDrive } from './drive.js';
 
 const getEl = (id) => document.getElementById(id);
 
+function stripHtml(html) {
+    if (!html) return '';
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    return div.textContent || '';
+}
+
 export function renderEntries(keyword = '') {
     const entryList = getEl('entry-list');
     if(!entryList) return;
@@ -19,7 +26,7 @@ export function renderEntries(keyword = '') {
         !entry.isPurged && 
         !entry.isDeleted && 
         entry.category === state.currentCategory && 
-        (entry.title.includes(keyword) || (entry.body && entry.body.includes(keyword)))
+        (entry.title.includes(keyword) || stripHtml(entry.body).includes(keyword))
     );
     
     filtered.sort((a, b) => { 
@@ -98,8 +105,9 @@ export function renderTabs() {
     tabContainer.appendChild(addBtn);
 }
 
-export function renderTrash() { 
+export function renderTrash() {
     const trashList = getEl('trash-list');
+    if (!trashList) return;
     trashList.innerHTML = `<div style="padding:10px 0; text-align:center; font-size:12px; color:#9CA3AF; font-family:'Pretendard'; margin-bottom:10px;">휴지통에 보관된 글은 30일 후 자동 삭제됩니다.</div>`;
     const deleted = state.entries.filter(e => e.isDeleted && !e.isPurged); 
     if(deleted.length === 0) { 
@@ -217,10 +225,14 @@ export function deleteCategoryAction() {
     getEl('category-context-menu')?.classList.add('hidden');
     const cat = state.allCategories.find(c => c.id === state.contextCatId);
     if (!cat || state.allCategories.length <= 1) return;
-    if (confirm(`'${cat.name}' 주제를 삭제하시겠습니까?`)) {
+    if (confirm(`'${cat.name}' 주제를 삭제하시겠습니까?\n(소속된 글은 첫 번째 주제로 이동됩니다)`)) {
         state.allCategories = state.allCategories.filter(c => c.id !== state.contextCatId);
         state.categoryOrder = state.categoryOrder.filter(id => id !== state.contextCatId);
-        if (state.currentCategory === state.contextCatId) state.currentCategory = state.allCategories[0].id;
+        const newCatId = state.allCategories[0].id;
+        // 삭제된 카테고리에 속한 글을 첫 번째 카테고리로 이동
+        state.entries.forEach(e => { if (e.category === state.contextCatId) e.category = newCatId; });
+        localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+        if (state.currentCategory === state.contextCatId) state.currentCategory = newCatId;
         state.categoryUpdatedAt = new Date().toISOString();
         saveCategoriesToLocal(); renderTabs(); renderEntries(); saveToDrive(); 
     }
