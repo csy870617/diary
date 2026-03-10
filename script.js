@@ -3,7 +3,7 @@ import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntr
 import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameCategoryAction, deleteCategoryAction, addNewCategory } from './ui.js';
 import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection } from './editor.js';
 import { setupAuthListeners } from './auth.js';
-import { initGoogleDrive, saveToDrive, syncFromDrive, ensureTokenOnResume, startKeepAlive } from './drive.js';
+import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, ensureTokenOnResume, startKeepAlive } from './drive.js';
 
 window.addNewCategory = addNewCategory;
 window.restoreEntry = restoreEntry;
@@ -38,7 +38,7 @@ function init() {
         updateAuthUI(isLoggedIn);
         if (isLoggedIn) {
             renderTabs();
-            renderEntries(); 
+            renderEntries();
             if (!window.syncInterval) {
                 window.syncInterval = setInterval(async () => {
                     if (!document.hidden && localStorage.getItem('is_faith_logged_in') === 'true') {
@@ -47,6 +47,9 @@ function init() {
                     }
                 }, 20000);
             }
+        } else {
+            // 비로그인 상태면 구글 로그인 팝업을 바로 띄움
+            handleAuthClick();
         }
     });
 
@@ -113,7 +116,7 @@ function init() {
     setupListeners();
     renderStickers();
 
-    // 로그인 안 된 상태면 로그인 모달을 바로 표시
+    // 로그인 안 된 상태면 로그인 모달을 표시 (팝업 차단 시 수동 로그인 폴백용)
     // openModal 대신 직접 hidden 제거 (히스토리 push 없이 표시하여 모바일 루프 방지)
     if (localStorage.getItem('is_faith_logged_in') !== 'true') {
         const loginModal = document.getElementById('login-modal');
