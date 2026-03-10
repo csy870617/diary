@@ -55,14 +55,14 @@ function init() {
 
     if (sharedData) {
         try {
-            const raw = JSON.parse(decodeURIComponent(atob(sharedData)));
+            const raw = JSON.parse(decodeURIComponent(escape(atob(sharedData))));
             const entry = {
                 title: raw.t || raw.title || '제목 없음',
                 subtitle: raw.s || raw.subtitle || '',
                 body: raw.b || raw.body || '',
                 date: raw.d || raw.date || new Date().toLocaleDateString('ko-KR'),
                 fontFamily: raw.f || raw.fontFamily || 'Pretendard',
-                fontSize: raw.z || raw.fontSize || 10 
+                fontSize: raw.z || raw.fontSize || 16
             };
             setTimeout(() => {
                 openEditor(true, entry);

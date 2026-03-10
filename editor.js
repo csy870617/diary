@@ -662,10 +662,13 @@ function isCaretAtStart(cell) {
     return false;
 }
 
+let basicHandlingSetup = false;
 function setupBasicHandling() {
     const editorBody = document.getElementById('editor-body');
     const editorContainer = document.getElementById('editor-container');
     if (!editorBody) return;
+    if (basicHandlingSetup) return;
+    basicHandlingSetup = true;
 
     // 하이퍼링크 보존 기능 설정 (복사/잘라내기/붙여넣기)
     setupLinkPreservation(editorBody, {
