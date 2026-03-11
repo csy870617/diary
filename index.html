@@ -96,8 +96,13 @@
                         <option value="Noto Serif KR">명조</option>
                         <option value="Nanum Pen Script">손글씨</option>
                     </select>
-                    <div class="font-size-controls" style="display: flex; align-items: center; gap: 8px; margin-left: 5px;">
-                        <input type="number" id="font-size-input" value="16" min="1" max="100" style="width: 50px; padding: 4px; border: 1px solid #ddd; border-radius: 4px; text-align: center;">
+                    <div class="font-size-controls" style="display: flex; align-items: center; gap: 2px; margin-left: 5px;">
+                        <button class="tool-btn font-size-step-btn" id="font-size-decrease" title="글자 크기 줄이기"><i class="ph ph-minus"></i></button>
+                        <div class="font-size-combo" id="font-size-combo">
+                            <input type="text" id="font-size-input" value="16" style="width: 42px; padding: 4px 2px; border: 1px solid #ddd; border-radius: 4px; text-align: center; font-size: 13px;">
+                            <div class="font-size-dropdown" id="font-size-dropdown"></div>
+                        </div>
+                        <button class="tool-btn font-size-step-btn" id="font-size-increase" title="글자 크기 키우기"><i class="ph ph-plus"></i></button>
                         <button class="tool-btn" id="toolbar-table-btn" title="표 삽입"><i class="ph ph-table"></i></button>
                         <button class="tool-btn" id="toolbar-table-edit-btn" title="표 편집" style="display:none;"><i class="ph ph-pencil-simple"></i></button>
                         <button class="tool-btn" id="toolbar-link-btn" title="하이퍼링크"><i class="ph ph-link"></i></button>

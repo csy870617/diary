@@ -70,6 +70,16 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .tool-btn:active, .tool-btn.active { background-color: var(--active-bg); color: var(--active-text); }
 .font-select { border: 1px solid var(--gray-200); border-radius: 6px; padding: 6px; font-size: 13px; outline: none; background: white; width: 70px; }
 .font-size-controls { display: flex; gap: 4px; }
+.font-size-step-btn { font-size: 16px !important; padding: 2px !important; }
+.font-size-combo { position: relative; display: inline-block; }
+.font-size-combo input { -moz-appearance: textfield; }
+.font-size-combo input::-webkit-outer-spin-button,
+.font-size-combo input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.font-size-dropdown { display: none; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); background: white; border: 1px solid var(--gray-200); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 2010; max-height: 200px; overflow-y: auto; min-width: 52px; margin-top: 2px; }
+.font-size-dropdown.show { display: block; }
+.font-size-option { padding: 5px 10px; cursor: pointer; font-size: 13px; text-align: center; white-space: nowrap; font-family: var(--text-sans); }
+.font-size-option:hover { background-color: var(--active-bg); color: var(--active-text); }
+.font-size-option.active { background-color: var(--active-bg); color: var(--active-text); font-weight: 600; }
 
 /* 팔레트 */
 .sticker-palette { position: fixed; top: 110px; bottom: auto; left: 50%; transform: translateX(-50%); background: white; border: 1px solid var(--gray-200); padding: 10px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); width: fit-content; max-width: 90%; z-index: 2003; max-height: 250px; overflow-y: auto; }
