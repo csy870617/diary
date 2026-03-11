@@ -82,9 +82,10 @@ function silentTokenRefresh() {
             silentRefreshAbortFn = null;
         };
         const timeout = setTimeout(() => {
+            console.warn("Silent token refresh 타임아웃 (15초)");
             restoreCallback();
             resolve(false);
-        }, 10000);
+        }, 15000);
 
         // handleAuthClick에서 호출하여 silent refresh를 중단할 수 있도록 함
         silentRefreshAbortFn = () => {
@@ -93,10 +94,20 @@ function silentTokenRefresh() {
             resolve(false);
         };
 
+        // error_callback: FedCM 또는 팝업이 차단/실패 시 즉시 호출됨
+        // (타임아웃까지 기다리지 않고 빠르게 실패 처리)
+        tokenClient.error_callback = (err) => {
+            clearTimeout(timeout);
+            restoreCallback();
+            console.warn("Silent refresh 실패 (error_callback):", err?.type || err?.message || err);
+            resolve(false);
+        };
+
         tokenClient.callback = async (resp) => {
             clearTimeout(timeout);
             restoreCallback();
             if (resp.error) {
+                console.warn("Silent refresh 응답 오류:", resp.error);
                 resolve(false);
                 return;
             }
@@ -115,9 +126,10 @@ function saveTokenInfo(resp) {
     localStorage.setItem('is_faith_logged_in', 'true');
     gapi.client.setToken({ access_token: resp.access_token });
 
-    // 만료 10분 전에 자동 갱신 예약
+    // 만료 20분 전에 자동 갱신 예약 (여유를 두어 갱신 실패 시 재시도 시간 확보)
     if (refreshTimer) clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => ensureValidToken(true), (expiresIn - 600) * 1000);
+    const refreshLeadTime = Math.max(expiresIn - 1200, 60); // 최소 60초 후
+    refreshTimer = setTimeout(() => ensureValidToken(true), refreshLeadTime * 1000);
 }
 
 /**
@@ -286,6 +298,9 @@ export function initGoogleDrive(callback) {
         client_id: GOOGLE_CONFIG.CLIENT_ID,
         scope: GOOGLE_CONFIG.SCOPES,
         callback: mainTokenCallback,
+        // FedCM을 사용하면 서드파티 쿠키가 차단된 환경(Safari, Firefox 등)에서도
+        // 팝업 없이 silent token refresh가 가능해져 로그인 화면 빈도를 줄임
+        use_fedcm_for_prompt: true,
     });
     gisInited = true;
 }
