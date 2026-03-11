@@ -76,24 +76,18 @@ function init() {
         }
     }
 
-    window.addEventListener('focus', async () => {
+    // 탭 복귀 시 토큰 확인 및 동기화 (ensureTokenOnResume 내부에서 디바운스 처리)
+    const handleResume = async () => {
         if (localStorage.getItem('is_faith_logged_in') === 'true') {
             const valid = await ensureTokenOnResume();
             if (valid) syncFromDrive();
         }
+    };
+    window.addEventListener('focus', handleResume);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') handleResume();
     });
-    document.addEventListener('visibilitychange', async () => {
-        if (document.visibilityState === 'visible' && localStorage.getItem('is_faith_logged_in') === 'true') {
-            const valid = await ensureTokenOnResume();
-            if (valid) syncFromDrive();
-        }
-    });
-    window.addEventListener('online', async () => {
-        if (localStorage.getItem('is_faith_logged_in') === 'true') {
-            const valid = await ensureTokenOnResume();
-            if (valid) syncFromDrive();
-        }
-    });
+    window.addEventListener('online', handleResume);
 
     // 사용자 활동 감지 → 토큰 만료 임박 시 자동 갱신 (페이지 활성 상태에서 로그아웃 방지)
     let lastActivityRefresh = 0;
