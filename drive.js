@@ -14,6 +14,9 @@ let refreshTimer = null;
 let keepAliveTimer = null;
 let mainTokenCallback = null; // 원본 tokenClient 콜백 보존용
 let silentRefreshAbortFn = null; // silent refresh 중단용
+let isRefreshing = false; // 토큰 갱신 중복 방지 뮤텍스
+let refreshPromise = null; // 진행 중인 갱신 Promise 공유용
+let lastResumeCheck = 0; // resume 이벤트 디바운스용
 
 /**
  * 토큰 유효성 검사 및 자동 갱신 로직
@@ -43,16 +46,33 @@ async function ensureValidToken(isAutoSave = false) {
 
 /**
  * 토큰 갱신을 최대 3회 재시도 (1초, 2초, 4초 간격)
+ * - 뮤텍스로 동시 갱신 요청을 방지하여 콜백 충돌 제거
+ * - 이미 갱신 중이면 진행 중인 Promise를 공유하여 중복 호출 방지
  */
 async function silentTokenRefreshWithRetry(maxRetries = 3) {
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-        const success = await silentTokenRefresh();
-        if (success) return true;
-        if (attempt < maxRetries - 1) {
-            await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
-        }
+    // 이미 갱신 중이면 진행 중인 Promise 결과를 기다림
+    if (isRefreshing && refreshPromise) {
+        return await refreshPromise;
     }
-    return false;
+
+    isRefreshing = true;
+    refreshPromise = (async () => {
+        try {
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                const success = await silentTokenRefresh();
+                if (success) return true;
+                if (attempt < maxRetries - 1) {
+                    await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+                }
+            }
+            return false;
+        } finally {
+            isRefreshing = false;
+            refreshPromise = null;
+        }
+    })();
+
+    return await refreshPromise;
 }
 
 function silentTokenRefresh() {
@@ -91,13 +111,25 @@ function saveTokenInfo(resp) {
     const expiresIn = resp.expires_in || 3599;
     const expTime = Date.now() + (expiresIn * 1000);
     localStorage.setItem('faith_token', resp.access_token);
-    localStorage.setItem('faith_token_exp', expTime);
+    localStorage.setItem('faith_token_exp', String(expTime));
     localStorage.setItem('is_faith_logged_in', 'true');
     gapi.client.setToken({ access_token: resp.access_token });
 
     // 만료 10분 전에 자동 갱신 예약
     if (refreshTimer) clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => ensureValidToken(true), (expiresIn - 600) * 1000);
+}
+
+/**
+ * 사용자 이메일을 저장하여 재로그인 시 login_hint로 사용
+ * → 계정 선택 화면 없이 바로 로그인 가능
+ */
+function saveUserEmail(email) {
+    if (email) localStorage.setItem('faith_user_email', email);
+}
+
+function getSavedUserEmail() {
+    return localStorage.getItem('faith_user_email') || '';
 }
 
 /**
@@ -124,14 +156,25 @@ function stopKeepAlive() {
 
 /**
  * 탭이 다시 활성화될 때 토큰 유효성을 확인
+ * - 디바운스 적용: 2초 이내 중복 호출 방지 (focus + visibilitychange 동시 발생 대응)
  * - 토큰이 유효하면 바로 사용
  * - 만료되었으면 silent refresh 시도 (페이지 활성 상태 유지)
  */
 export async function ensureTokenOnResume() {
     if (localStorage.getItem('is_faith_logged_in') !== 'true') return false;
+
+    // 디바운스: 2초 이내 중복 호출 방지
+    const now = Date.now();
+    if (now - lastResumeCheck < 2000) {
+        // 최근에 이미 확인했으면 현재 토큰 상태만 반환
+        const storedToken = localStorage.getItem('faith_token');
+        const storedExp = localStorage.getItem('faith_token_exp');
+        return !!(storedToken && storedExp && now < (parseInt(storedExp) - 300000));
+    }
+    lastResumeCheck = now;
+
     const storedToken = localStorage.getItem('faith_token');
     const storedExp = localStorage.getItem('faith_token_exp');
-    const now = Date.now();
     if (storedToken && storedExp && now < (parseInt(storedExp) - 300000)) {
         if (!gapi.client.getToken()) {
             gapi.client.setToken({ access_token: storedToken });
@@ -140,7 +183,13 @@ export async function ensureTokenOnResume() {
     }
     // 토큰 만료 시 silent refresh 시도 (로그인 상태 유지)
     if (tokenClient) {
-        return await silentTokenRefreshWithRetry();
+        const refreshed = await silentTokenRefreshWithRetry();
+        if (!refreshed) {
+            // silent refresh 실패해도 즉시 로그아웃하지 않음
+            // → 네트워크 일시적 문제일 수 있으므로 다음 기회에 재시도
+            console.warn("토큰 갱신 실패 - 다음 활성화 시 재시도합니다.");
+        }
+        return refreshed;
     }
     return false;
 }
@@ -173,32 +222,41 @@ export function initGoogleDrive(callback) {
                     return;
                 }
                 // 토큰 만료 → silent refresh 시도 (팝업 없이 자동 갱신)
-                // initTokenClient 완료 후 실행되도록 지연
-                setTimeout(async () => {
-                    if (tokenClient) {
-                        const refreshed = await silentTokenRefreshWithRetry();
-                        if (refreshed) {
-                            startKeepAlive();
-                            await checkAuthAndSync(callback);
-                            if (window.onAuthSuccess) window.onAuthSuccess();
-                        } else {
-                            // silent refresh 실패 → 로그인 상태 제거 후 UI 업데이트
-                            localStorage.removeItem('faith_token');
-                            localStorage.removeItem('faith_token_exp');
-                            localStorage.removeItem('is_faith_logged_in');
-                            state.isLoading = false;
-                            renderEntries();
-                            if (callback) callback(false);
-                            // 로그인 모달 표시 (히스토리 push 없이)
-                            const loginModal = document.getElementById('login-modal');
-                            if (loginModal) loginModal.classList.remove('hidden');
-                        }
+                // tokenClient 초기화를 기다림 (최대 5초)
+                const waitForTokenClient = () => new Promise((resolve) => {
+                    if (tokenClient) { resolve(true); return; }
+                    let waited = 0;
+                    const interval = setInterval(() => {
+                        waited += 100;
+                        if (tokenClient) { clearInterval(interval); resolve(true); }
+                        else if (waited >= 5000) { clearInterval(interval); resolve(false); }
+                    }, 100);
+                });
+
+                const clientReady = await waitForTokenClient();
+                if (clientReady) {
+                    const refreshed = await silentTokenRefreshWithRetry();
+                    if (refreshed) {
+                        startKeepAlive();
+                        await checkAuthAndSync(callback);
+                        if (window.onAuthSuccess) window.onAuthSuccess();
                     } else {
+                        // silent refresh 실패 → 토큰만 제거하고 로그인 UI 표시
+                        // (faith_user_email은 유지하여 재로그인 시 login_hint로 활용)
+                        localStorage.removeItem('faith_token');
+                        localStorage.removeItem('faith_token_exp');
+                        localStorage.removeItem('is_faith_logged_in');
                         state.isLoading = false;
                         renderEntries();
                         if (callback) callback(false);
+                        const loginModal = document.getElementById('login-modal');
+                        if (loginModal) loginModal.classList.remove('hidden');
                     }
-                }, 500);
+                } else {
+                    state.isLoading = false;
+                    renderEntries();
+                    if (callback) callback(false);
+                }
                 return;
             }
             state.isLoading = false;
@@ -240,7 +298,13 @@ export function handleAuthClick() {
     if (tokenClient) {
         // 유저 로그인 응답이 mainTokenCallback으로 처리되도록 보장
         tokenClient.callback = mainTokenCallback;
-        tokenClient.requestAccessToken({ prompt: 'select_account' });
+        const savedEmail = getSavedUserEmail();
+        if (savedEmail) {
+            // 이전에 로그인한 적 있으면 login_hint로 계정 선택 생략
+            tokenClient.requestAccessToken({ prompt: '', login_hint: savedEmail });
+        } else {
+            tokenClient.requestAccessToken({ prompt: 'select_account' });
+        }
     }
 }
 
@@ -253,6 +317,7 @@ export function handleSignoutClick(callback) {
     localStorage.removeItem('faith_token');
     localStorage.removeItem('faith_token_exp');
     localStorage.removeItem('is_faith_logged_in');
+    localStorage.removeItem('faith_user_email');
     localStorage.removeItem('faithLogDB');
     localStorage.removeItem('faithCatData');
     state.currentUser = null;
@@ -270,6 +335,10 @@ async function checkAuthAndSync(callback) {
     try {
         const userInfo = await gapi.client.drive.about.get({ fields: 'user' });
         state.currentUser = userInfo.result.user;
+        // 사용자 이메일 저장 → 재로그인 시 login_hint로 활용
+        if (userInfo.result.user && userInfo.result.user.emailAddress) {
+            saveUserEmail(userInfo.result.user.emailAddress);
+        }
     } catch (err) {
         console.error("사용자 정보 조회 실패:", err);
         // 토큰이 유효하지 않은 경우 (401) → 토큰 갱신 시도 후 재확인
@@ -280,8 +349,11 @@ async function checkAuthAndSync(callback) {
                     try {
                         const retryInfo = await gapi.client.drive.about.get({ fields: 'user' });
                         state.currentUser = retryInfo.result.user;
+                        if (retryInfo.result.user && retryInfo.result.user.emailAddress) {
+                            saveUserEmail(retryInfo.result.user.emailAddress);
+                        }
                     } catch (retryErr) {
-                        // 갱신 후에도 실패 → 로그아웃
+                        // 갱신 후에도 실패 → 토큰만 제거 (로그인 힌트는 유지)
                         localStorage.removeItem('faith_token');
                         localStorage.removeItem('faith_token_exp');
                         localStorage.removeItem('is_faith_logged_in');
@@ -289,7 +361,7 @@ async function checkAuthAndSync(callback) {
                         return;
                     }
                 } else {
-                    // 갱신 실패 → 로그아웃
+                    // 갱신 실패 → 토큰만 제거
                     localStorage.removeItem('faith_token');
                     localStorage.removeItem('faith_token_exp');
                     localStorage.removeItem('is_faith_logged_in');
@@ -326,7 +398,10 @@ export async function saveToDrive() {
     if (isSyncing) { pendingSync = true; return; }
 
     const isValid = await ensureValidToken(true);
-    if (!isValid) return;
+    if (!isValid) {
+        console.warn("saveToDrive: 토큰이 유효하지 않아 동기화를 건너뜁니다.");
+        return;
+    }
 
     isSyncing = true;
     toggleSpinners(true);
