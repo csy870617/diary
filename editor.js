@@ -1133,13 +1133,17 @@ export function formatDoc(cmd, value = null) {
 export function changeGlobalFontSize(newSize) {
     const selection = window.getSelection();
     const size = parseInt(newSize);
-    if (isNaN(size)) return;
-    
+    if (isNaN(size) || size < 1) return;
+
     state.currentFontSize = size;
     saveBeforeChange('fontSize');
 
+    // 글자 크기 입력칸 업데이트
+    const sizeInput = document.getElementById('font-size-input');
+    if (sizeInput) sizeInput.value = size;
+
     if (selection.rangeCount > 0 && selection.toString().length > 0) {
-        document.execCommand('fontSize', false, '7'); 
+        document.execCommand('fontSize', false, '7');
         const fontTags = document.querySelectorAll('font[size="7"]');
         fontTags.forEach(t => {
             const span = document.createElement('span');
@@ -1151,7 +1155,7 @@ export function changeGlobalFontSize(newSize) {
         const body = document.getElementById('editor-body');
         if(body) body.style.fontSize = size + 'px';
     }
-    triggerAutoSave(); 
+    triggerAutoSave();
 }
 
 export function changeGlobalFontFamily(newFont) {
@@ -1193,6 +1197,50 @@ export function applyFontStyle(f, s) {
     if(subtitle) { 
         subtitle.style.fontFamily = f; 
     }
+}
+
+/**
+ * MS Word 스타일 글자 크기 단계별 증가
+ */
+const FONT_SIZE_PRESETS = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72];
+
+export function increaseFontSize() {
+    const current = detectSelectionFontSize() || state.currentFontSize;
+    let next = FONT_SIZE_PRESETS.find(s => s > current);
+    if (!next) next = Math.min(current + 2, 200);
+    const sizeInput = document.getElementById('font-size-input');
+    if (sizeInput) sizeInput.value = next;
+    changeGlobalFontSize(next);
+}
+
+export function decreaseFontSize() {
+    const current = detectSelectionFontSize() || state.currentFontSize;
+    let next = [...FONT_SIZE_PRESETS].reverse().find(s => s < current);
+    if (!next) next = Math.max(current - 1, 1);
+    const sizeInput = document.getElementById('font-size-input');
+    if (sizeInput) sizeInput.value = next;
+    changeGlobalFontSize(next);
+}
+
+/**
+ * 현재 선택 영역 또는 커서 위치의 글자 크기를 감지합니다.
+ */
+export function detectSelectionFontSize() {
+    const selection = window.getSelection();
+    if (!selection.rangeCount) return state.currentFontSize;
+
+    let node = selection.anchorNode;
+    if (!node) return state.currentFontSize;
+    if (node.nodeType === 3) node = node.parentElement;
+    if (!node) return state.currentFontSize;
+
+    // editor-body 안에 있는지 확인
+    const editorBody = document.getElementById('editor-body');
+    if (!editorBody || !editorBody.contains(node)) return state.currentFontSize;
+
+    const computed = window.getComputedStyle(node);
+    const px = parseFloat(computed.fontSize);
+    return Math.round(px) || state.currentFontSize;
 }
 
 /* --- 리사이징 및 기타 유틸리티 --- */

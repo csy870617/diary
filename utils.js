@@ -303,7 +303,8 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
     
     /**
      * 선택 영역의 HTML을 가져오되, 부분 선택된 링크도 완전히 포함하고
-     * 모든 서식(색상, 굵기, 기울임 등)을 보존합니다.
+     * 모든 서식(색상, 굵기, 기울임, 글꼴, 크기 등)을 보존합니다.
+     * 상속된 스타일도 인라인으로 포함하여 붙여넣기 시 서식이 유지됩니다.
      */
     function getSelectionHtmlWithFormatting() {
         const selection = window.getSelection();
@@ -317,6 +318,9 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
         // 부분 선택된 링크 복원
         let startNode = range.startContainer;
         let startAnchor = startNode.nodeType === 3 ? startNode.parentElement?.closest('a') : startNode.closest?.('a');
+
+        // 선택 영역의 각 텍스트 노드에 상속된 스타일을 인라인으로 적용
+        embedInheritedStyles(div, range);
 
         let html = div.innerHTML;
 
@@ -355,6 +359,82 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
         }
 
         return { html, text: selection.toString() };
+    }
+
+    /**
+     * 복사된 fragment의 텍스트/요소 노드에 원본 문서에서의 상속된 스타일을 인라인으로 적용합니다.
+     * 이를 통해 붙여넣기 시 글꼴, 크기, 색상 등의 서식이 보존됩니다.
+     */
+    function embedInheritedStyles(fragmentDiv, range) {
+        const stylesToCapture = ['font-size', 'font-family', 'color', 'font-weight', 'font-style', 'text-decoration', 'background-color'];
+
+        // 원본 선택 영역의 시작 노드에서 기본 computed style 가져오기
+        let sourceNode = range.startContainer;
+        if (sourceNode.nodeType === 3) sourceNode = sourceNode.parentElement;
+        if (!sourceNode) return;
+
+        // fragment 내의 직접 텍스트 노드와 인라인 스타일이 없는 요소들에 스타일 적용
+        function processNode(fragNode, origParent) {
+            if (fragNode.nodeType === Node.TEXT_NODE) {
+                // 텍스트 노드의 부모가 이미 인라인 스타일을 가지고 있으면 건너뛰기
+                const parent = fragNode.parentElement;
+                if (parent && parent !== fragmentDiv && parent.style && parent.style.fontSize) return;
+
+                // 텍스트 노드를 span으로 감싸서 스타일 적용
+                if (fragNode.textContent.trim() === '') return;
+                const computed = origParent ? window.getComputedStyle(origParent) : null;
+                if (!computed) return;
+
+                const span = document.createElement('span');
+                const stylesParts = [];
+                for (const prop of stylesToCapture) {
+                    const val = computed.getPropertyValue(prop);
+                    if (val && prop === 'font-size') {
+                        stylesParts.push(`font-size: ${val}`);
+                    } else if (val && prop === 'font-family') {
+                        stylesParts.push(`font-family: ${val}`);
+                    } else if (val && prop === 'color') {
+                        stylesParts.push(`color: ${val}`);
+                    } else if (val && prop === 'font-weight' && val !== 'normal' && val !== '400') {
+                        stylesParts.push(`font-weight: ${val}`);
+                    } else if (val && prop === 'font-style' && val !== 'normal') {
+                        stylesParts.push(`font-style: ${val}`);
+                    } else if (val && prop === 'text-decoration' && !val.startsWith('none')) {
+                        stylesParts.push(`text-decoration: ${val}`);
+                    } else if (val && prop === 'background-color' && val !== 'rgba(0, 0, 0, 0)' && val !== 'transparent') {
+                        stylesParts.push(`background-color: ${val}`);
+                    }
+                }
+                if (stylesParts.length > 0) {
+                    span.setAttribute('style', stylesParts.join('; '));
+                    fragNode.parentNode.insertBefore(span, fragNode);
+                    span.appendChild(fragNode);
+                }
+            } else if (fragNode.nodeType === Node.ELEMENT_NODE) {
+                const tag = fragNode.tagName.toLowerCase();
+                // 블록 요소나 이미 인라인 font-size를 가진 요소는 건너뛰기
+                if (['br', 'img', 'hr', 'table'].includes(tag)) return;
+
+                // 인라인 스타일이 없는 요소에 computed style 적용
+                if (!fragNode.style.fontSize && origParent) {
+                    const computed = window.getComputedStyle(origParent);
+                    const fontSize = computed.getPropertyValue('font-size');
+                    const fontFamily = computed.getPropertyValue('font-family');
+                    if (fontSize) fragNode.style.fontSize = fontSize;
+                    if (fontFamily) fragNode.style.fontFamily = fontFamily;
+                    const color = computed.getPropertyValue('color');
+                    if (color) fragNode.style.color = color;
+                }
+
+                // 자식 노드 재귀 처리
+                const children = Array.from(fragNode.childNodes);
+                children.forEach(child => processNode(child, origParent));
+            }
+        }
+
+        // fragment의 최상위 자식들에 대해 처리
+        const topChildren = Array.from(fragmentDiv.childNodes);
+        topChildren.forEach(child => processNode(child, sourceNode));
     }
     
     /**

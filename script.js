@@ -1,7 +1,7 @@
 import { state, loadCategoriesFromLocal, saveCategoriesToLocal } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
 import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameCategoryAction, deleteCategoryAction, addNewCategory } from './ui.js';
-import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection } from './editor.js';
+import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, ensureTokenOnResume, startKeepAlive } from './drive.js';
 
@@ -215,18 +215,86 @@ function setupUIListeners() {
     document.getElementById('search-input')?.addEventListener('input', (e) => renderEntries(e.target.value));
     document.getElementById('refresh-btn')?.addEventListener('click', () => syncFromDrive());
 
+    // --- MS Word 스타일 글자 크기 컨트롤 ---
+    const FONT_SIZE_PRESETS = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72];
     const fontSizeInput = document.getElementById('font-size-input');
-    if (fontSizeInput) {
-        fontSizeInput.addEventListener('input', (e) => {
-            changeGlobalFontSize(e.target.value);
-            triggerAutoSave();
+    const fontSizeDropdown = document.getElementById('font-size-dropdown');
+    const fontSizeCombo = document.getElementById('font-size-combo');
+
+    // 드롭다운 옵션 생성
+    if (fontSizeDropdown) {
+        FONT_SIZE_PRESETS.forEach(size => {
+            const opt = document.createElement('div');
+            opt.className = 'font-size-option';
+            opt.textContent = size;
+            opt.dataset.size = size;
+            opt.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                fontSizeInput.value = size;
+                changeGlobalFontSize(size);
+                triggerAutoSave();
+                fontSizeDropdown.classList.remove('show');
+            });
+            fontSizeDropdown.appendChild(opt);
         });
     }
+
+    if (fontSizeInput) {
+        // 클릭 시 드롭다운 열기
+        fontSizeInput.addEventListener('focus', () => {
+            if (fontSizeDropdown) {
+                fontSizeDropdown.classList.add('show');
+                // 현재 값에 맞는 옵션 활성화
+                const val = parseInt(fontSizeInput.value);
+                fontSizeDropdown.querySelectorAll('.font-size-option').forEach(opt => {
+                    opt.classList.toggle('active', parseInt(opt.dataset.size) === val);
+                });
+            }
+        });
+        fontSizeInput.addEventListener('blur', () => {
+            setTimeout(() => fontSizeDropdown?.classList.remove('show'), 150);
+        });
+        // Enter 키로 직접 입력
+        fontSizeInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const size = parseInt(fontSizeInput.value);
+                if (size >= 1 && size <= 200) {
+                    changeGlobalFontSize(size);
+                    triggerAutoSave();
+                }
+                fontSizeInput.blur();
+                fontSizeDropdown?.classList.remove('show');
+            }
+        });
+    }
+
+    // 글자 크기 증가/감소 버튼
+    document.getElementById('font-size-increase')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        increaseFontSize();
+        triggerAutoSave();
+    });
+    document.getElementById('font-size-decrease')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        decreaseFontSize();
+        triggerAutoSave();
+    });
+
+    // 커서/선택 변경 시 글자 크기 감지하여 입력칸 업데이트
+    document.addEventListener('selectionchange', () => {
+        const writeModal = document.getElementById('write-modal');
+        if (!writeModal || writeModal.classList.contains('hidden')) return;
+        const detected = detectSelectionFontSize();
+        if (detected && fontSizeInput) {
+            fontSizeInput.value = detected;
+        }
+    });
 
     const toolbarScrollArea = document.getElementById('toolbar-scroll-area');
     if (toolbarScrollArea) { toolbarScrollArea.addEventListener('wheel', (e) => { if (e.deltaY !== 0) { e.preventDefault(); toolbarScrollArea.scrollLeft += e.deltaY; } }); }
 
-    document.getElementById('font-selector')?.addEventListener('change', (e) => { applyFontStyle(e.target.value, state.currentFontSize); triggerAutoSave(); });
+    document.getElementById('font-selector')?.addEventListener('change', (e) => { changeGlobalFontFamily(e.target.value); triggerAutoSave(); });
 
     document.querySelectorAll('.tool-btn[data-cmd]').forEach(btn => {
         btn.addEventListener('click', (e) => { e.preventDefault(); const cmd = btn.dataset.cmd; if (cmd) formatDoc(cmd); });
