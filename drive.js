@@ -1,5 +1,5 @@
 import { GOOGLE_CONFIG, APP_FOLDER_NAME, DB_FILE_NAME } from './config.js';
-import { state, saveCategoriesToLocal } from './state.js';
+import { state, saveCategoriesToLocal, isReadOnlyView } from './state.js';
 import { renderEntries, renderTabs } from './ui.js';
 import { refreshEditorContent } from './editor.js';
 
@@ -129,7 +129,10 @@ function saveTokenInfo(resp) {
     // 만료 20분 전에 자동 갱신 예약 (여유를 두어 갱신 실패 시 재시도 시간 확보)
     if (refreshTimer) clearTimeout(refreshTimer);
     const refreshLeadTime = Math.max(expiresIn - 1200, 60); // 최소 60초 후
-    refreshTimer = setTimeout(() => ensureValidToken(true), refreshLeadTime * 1000);
+    refreshTimer = setTimeout(() => {
+        if (isReadOnlyView()) return; // 읽기 전용/책 모드에서는 토큰 갱신 안 함
+        ensureValidToken(true);
+    }, refreshLeadTime * 1000);
 }
 
 /**
@@ -152,6 +155,7 @@ function getSavedUserEmail() {
 export function startKeepAlive() {
     if (keepAliveTimer) clearInterval(keepAliveTimer);
     keepAliveTimer = setInterval(async () => {
+        if (isReadOnlyView()) return; // 읽기 전용/책 모드에서는 토큰 갱신 안 함
         if (localStorage.getItem('is_faith_logged_in') !== 'true') return;
         const storedExp = localStorage.getItem('faith_token_exp');
         const now = Date.now();
