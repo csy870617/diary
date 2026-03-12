@@ -38,6 +38,10 @@ export function saveCategoriesToLocal() {
     localStorage.setItem('faithCatData', JSON.stringify(data));
 }
 
+export function isReadOnlyView() {
+    return state.currentViewMode === 'readOnly' || state.currentViewMode === 'book';
+}
+
 export function loadCategoriesFromLocal() {
     const localData = localStorage.getItem('faithCatData');
     if (localData) {

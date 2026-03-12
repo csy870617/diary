@@ -1,4 +1,4 @@
-import { state, loadCategoriesFromLocal, saveCategoriesToLocal } from './state.js';
+import { state, loadCategoriesFromLocal, saveCategoriesToLocal, isReadOnlyView } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
 import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameCategoryAction, deleteCategoryAction, addNewCategory } from './ui.js';
 import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize } from './editor.js';
@@ -41,6 +41,7 @@ function init() {
             renderEntries();
             if (!window.syncInterval) {
                 window.syncInterval = setInterval(async () => {
+                    if (isReadOnlyView()) return; // 읽기 전용/책 모드에서는 자동 동기화 안 함
                     if (!document.hidden && localStorage.getItem('is_faith_logged_in') === 'true') {
                         const valid = await ensureTokenOnResume();
                         if (valid) syncFromDrive();
@@ -78,6 +79,7 @@ function init() {
 
     // 탭 복귀 시 토큰 확인 및 동기화 (ensureTokenOnResume 내부에서 디바운스 처리)
     const handleResume = async () => {
+        if (isReadOnlyView()) return; // 읽기 전용/책 모드에서는 자동 동기화 안 함
         if (localStorage.getItem('is_faith_logged_in') === 'true') {
             const valid = await ensureTokenOnResume();
             if (valid) syncFromDrive();
@@ -93,6 +95,7 @@ function init() {
     let lastActivityRefresh = 0;
     const activityRefreshInterval = 3 * 60 * 1000; // 최소 3분 간격으로 체크
     const handleUserActivity = async () => {
+        if (isReadOnlyView()) return; // 읽기 전용/책 모드에서는 토큰 갱신 안 함
         const now = Date.now();
         if (now - lastActivityRefresh < activityRefreshInterval) return;
         if (localStorage.getItem('is_faith_logged_in') !== 'true') return;
