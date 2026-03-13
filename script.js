@@ -49,9 +49,13 @@ function init() {
                 }, 20000);
             }
         } else {
-            // 비로그인 상태면 로그인 모달 표시 (자동 팝업은 모바일에서 리다이렉트 루프 유발)
-            const loginModal = document.getElementById('login-modal');
-            if (loginModal) loginModal.classList.remove('hidden');
+            // 비로그인 상태: 이전에 로그인한 적 있으면 모달 없이 동기화 버튼만 표시
+            // (일시적 토큰 갱신 실패일 수 있으므로 풀스크린 모달로 방해하지 않음)
+            // 처음 사용자(이메일 없음)만 로그인 모달 표시
+            if (!localStorage.getItem('faith_user_email')) {
+                const loginModal = document.getElementById('login-modal');
+                if (loginModal) loginModal.classList.remove('hidden');
+            }
         }
     });
 
@@ -114,9 +118,9 @@ function init() {
     setupListeners();
     renderStickers();
 
-    // 로그인 안 된 상태면 로그인 모달을 표시 (팝업 차단 시 수동 로그인 폴백용)
-    // openModal 대신 직접 hidden 제거 (히스토리 push 없이 표시하여 모바일 루프 방지)
-    if (localStorage.getItem('is_faith_logged_in') !== 'true') {
+    // 로그인 안 된 상태 + 처음 사용자(이메일 없음)만 로그인 모달 표시
+    // 이전에 로그인한 적 있는 사용자는 일시적 토큰 만료일 수 있으므로 모달 없이 진행
+    if (localStorage.getItem('is_faith_logged_in') !== 'true' && !localStorage.getItem('faith_user_email')) {
         const loginModal = document.getElementById('login-modal');
         if (loginModal) loginModal.classList.remove('hidden');
     }
