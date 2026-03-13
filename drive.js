@@ -114,7 +114,11 @@ function silentTokenRefresh() {
             saveTokenInfo(resp);
             resolve(true);
         };
-        tokenClient.requestAccessToken({ prompt: '' });
+        const savedEmail = getSavedUserEmail();
+        tokenClient.requestAccessToken({
+            prompt: '',
+            ...(savedEmail && { login_hint: savedEmail })
+        });
     });
 }
 
@@ -257,16 +261,14 @@ export function initGoogleDrive(callback) {
                         await checkAuthAndSync(callback);
                         if (window.onAuthSuccess) window.onAuthSuccess();
                     } else {
-                        // silent refresh 실패 → 토큰만 제거하고 로그인 UI 표시
-                        // (faith_user_email은 유지하여 재로그인 시 login_hint로 활용)
+                        // silent refresh 실패 → 만료된 토큰만 제거
+                        // is_faith_logged_in은 유지하여 다음 탭 활성화 시 재시도 가능
+                        // (풀스크린 로그인 모달을 바로 띄우지 않고 로컬 데이터로 앱 사용 가능)
                         localStorage.removeItem('faith_token');
                         localStorage.removeItem('faith_token_exp');
-                        localStorage.removeItem('is_faith_logged_in');
                         state.isLoading = false;
                         renderEntries();
                         if (callback) callback(false);
-                        const loginModal = document.getElementById('login-modal');
-                        if (loginModal) loginModal.classList.remove('hidden');
                     }
                 } else {
                     state.isLoading = false;
@@ -372,25 +374,22 @@ async function checkAuthAndSync(callback) {
                             saveUserEmail(retryInfo.result.user.emailAddress);
                         }
                     } catch (retryErr) {
-                        // 갱신 후에도 실패 → 토큰만 제거 (로그인 힌트는 유지)
+                        // 갱신 후에도 실패 → 토큰만 제거 (is_faith_logged_in 유지하여 재시도 가능)
                         localStorage.removeItem('faith_token');
                         localStorage.removeItem('faith_token_exp');
-                        localStorage.removeItem('is_faith_logged_in');
                         if(callback) callback(false);
                         return;
                     }
                 } else {
-                    // 갱신 실패 → 토큰만 제거
+                    // 갱신 실패 → 토큰만 제거 (로그인 상태는 유지)
                     localStorage.removeItem('faith_token');
                     localStorage.removeItem('faith_token_exp');
-                    localStorage.removeItem('is_faith_logged_in');
                     if(callback) callback(false);
                     return;
                 }
             } else {
                 localStorage.removeItem('faith_token');
                 localStorage.removeItem('faith_token_exp');
-                localStorage.removeItem('is_faith_logged_in');
                 if(callback) callback(false);
                 return;
             }
