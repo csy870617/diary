@@ -526,6 +526,11 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
         
         // Ctrl+X / Cmd+X: 잘라내기
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
+            // 읽기 전용 모드에서는 잘라내기 차단 (복사만 허용)
+            if (editorElement.contentEditable === 'false' || editorElement.getAttribute('contenteditable') === 'false') {
+                e.preventDefault();
+                return;
+            }
             if (selectedCells.length > 1) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -650,6 +655,12 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
 
     // ========== 일반 잘라내기 이벤트 ==========
     editorElement.addEventListener('cut', (e) => {
+        // 읽기 전용 모드에서는 잘라내기 차단
+        if (editorElement.contentEditable === 'false' || editorElement.getAttribute('contenteditable') === 'false') {
+            e.preventDefault();
+            return;
+        }
+
         const selectedCells = document.querySelectorAll('td.selected-cell');
         if (selectedCells.length > 1) return;
 
