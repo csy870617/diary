@@ -277,12 +277,12 @@ function setupUIListeners() {
     }
 
     // 글자 크기 증가/감소 버튼
-    document.getElementById('font-size-increase')?.addEventListener('click', (e) => {
+    document.getElementById('font-size-increase')?.addEventListener('mousedown', (e) => {
         e.preventDefault();
         increaseFontSize();
         triggerAutoSave();
     });
-    document.getElementById('font-size-decrease')?.addEventListener('click', (e) => {
+    document.getElementById('font-size-decrease')?.addEventListener('mousedown', (e) => {
         e.preventDefault();
         decreaseFontSize();
         triggerAutoSave();

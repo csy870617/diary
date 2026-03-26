@@ -1145,12 +1145,22 @@ export function changeGlobalFontSize(newSize) {
     if (selection.rangeCount > 0 && selection.toString().length > 0) {
         document.execCommand('fontSize', false, '7');
         const fontTags = document.querySelectorAll('font[size="7"]');
+        const newSpans = [];
         fontTags.forEach(t => {
             const span = document.createElement('span');
             span.style.fontSize = size + 'px';
             span.innerHTML = t.innerHTML;
             t.parentNode.replaceChild(span, t);
+            newSpans.push(span);
         });
+        // 선택 영역 복원
+        if (newSpans.length > 0) {
+            const newRange = document.createRange();
+            newRange.setStartBefore(newSpans[0]);
+            newRange.setEndAfter(newSpans[newSpans.length - 1]);
+            selection.removeAllRanges();
+            selection.addRange(newRange);
+        }
     } else {
         const body = document.getElementById('editor-body');
         if(body) body.style.fontSize = size + 'px';
