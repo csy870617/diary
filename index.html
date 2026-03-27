@@ -53,12 +53,21 @@
                     </select>
                 </div>
                 <div class="divider-vertical"></div>
+                <button class="icon-nav-btn" id="select-mode-btn" title="선택 모드">
+                    <i class="ph ph-check-square"></i>
+                </button>
                 <button class="icon-nav-btn trash" id="trash-btn" title="휴지통">
                     <i class="ph ph-trash"></i>
                 </button>
             </div>
         </div>
         <main id="entry-list" class="entry-list"></main>
+        <div id="bulk-action-bar" class="bulk-action-bar hidden">
+            <button id="bulk-select-all-btn" class="bulk-bar-btn"><i class="ph ph-check-square"></i> 전체선택</button>
+            <span id="bulk-selected-count" class="bulk-selected-count">0개 선택</span>
+            <button id="bulk-move-btn" class="bulk-bar-btn primary" disabled><i class="ph ph-folder-open"></i> 주제 이동</button>
+            <button id="bulk-cancel-btn" class="bulk-bar-btn"><i class="ph ph-x"></i> 취소</button>
+        </div>
         <div class="floating-pen" id="write-btn">
             <i class="ph ph-pencil-simple"></i>
         </div>
@@ -229,7 +238,7 @@
     </div>
     <div id="move-modal" class="modal-overlay hidden">
         <div class="simple-modal" style="width: 280px;">
-            <h3>주제 이동</h3>
+            <h3 id="move-modal-title">주제 이동</h3>
             <div id="move-category-list" class="category-select-list"></div>
             <button id="close-move-btn" class="cancel-btn" style="width:100%;">취소</button>
         </div>

@@ -26,7 +26,9 @@ export const state = {
     touchStartX: 0,
     touchEndX: 0,
     wheelDebounceTimer: null,
-    autoSaveTimer: null
+    autoSaveTimer: null,
+    isSelectMode: false,
+    selectedEntries: []
 };
 
 export function saveCategoriesToLocal() {

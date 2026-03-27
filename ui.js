@@ -1,5 +1,5 @@
 import { state, saveCategoriesToLocal } from './state.js';
-import { updateEntryField, emptyTrash, saveEntry, restoreEntry, permanentDelete } from './data.js';
+import { updateEntryField, bulkUpdateEntryField, emptyTrash, saveEntry, restoreEntry, permanentDelete } from './data.js';
 import { openEditor, toggleViewMode, applyFontStyle, turnPage, formatDoc, changeGlobalFontSize, insertSticker, insertImage } from './editor.js';
 import { saveToDrive, syncFromDrive } from './drive.js'; 
 
@@ -48,24 +48,33 @@ export function renderEntries(keyword = '') {
     filtered.forEach(entry => {
         const div = document.createElement('article');
         div.className = 'entry-card';
-        const dateStr = state.currentSortBy === 'modified' 
-            ? `수정: ${new Date(entry.modifiedAt || entry.timestamp).toLocaleDateString()}` 
+        if (state.isSelectMode && state.selectedEntries.includes(entry.id)) {
+            div.classList.add('selected');
+        }
+        const dateStr = state.currentSortBy === 'modified'
+            ? `수정: ${new Date(entry.modifiedAt || entry.timestamp).toLocaleDateString()}`
             : entry.date;
-        div.innerHTML = `<h3 class="card-title">${entry.title}</h3>${entry.subtitle ? `<p class="card-subtitle">${entry.subtitle}</p>` : ''}<div class="card-meta"><span>${dateStr}</span></div>`;
-        
-        // [개선] await를 제거하여 즉시 실행되게 함
-        div.onclick = () => {
-            // 일단 로컬 데이터로 즉시 열기
-            openEditor(true, entry);
-            toggleViewMode('readOnly');
 
-            // 백그라운드에서 동기화 시작 (기다리지 않음)
-            if (window.gapi && gapi.client && gapi.client.getToken()) {
-                syncFromDrive();
-            }
-        };
-        
-        attachContextMenu(div, entry.id);
+        const checkboxHtml = state.isSelectMode
+            ? `<div class="entry-checkbox ${state.selectedEntries.includes(entry.id) ? 'checked' : ''}"><i class="ph ph-check"></i></div>`
+            : '';
+        div.innerHTML = `${checkboxHtml}<div class="entry-card-content"><h3 class="card-title">${entry.title}</h3>${entry.subtitle ? `<p class="card-subtitle">${entry.subtitle}</p>` : ''}<div class="card-meta"><span>${dateStr}</span></div></div>`;
+
+        if (state.isSelectMode) {
+            div.onclick = () => toggleEntrySelection(entry.id);
+        } else {
+            div.onclick = () => {
+                openEditor(true, entry);
+                toggleViewMode('readOnly');
+                if (window.gapi && gapi.client && gapi.client.getToken()) {
+                    syncFromDrive();
+                }
+            };
+        }
+
+        if (!state.isSelectMode) {
+            attachContextMenu(div, entry.id);
+        }
         entryList.appendChild(div);
     });
 }
@@ -89,10 +98,11 @@ export function renderTabs() {
         btn.className = `tab-btn ${state.currentCategory === cat.id ? 'active' : ''}`;
         btn.dataset.id = cat.id; 
         btn.innerHTML = `<span>${cat.name}</span>`;
-        btn.onclick = () => { 
-            state.currentCategory = cat.id; 
-            renderTabs(); 
-            renderEntries(); 
+        btn.onclick = () => {
+            state.currentCategory = cat.id;
+            if (state.isSelectMode) exitSelectMode();
+            renderTabs();
+            renderEntries();
         };
         attachCatContextMenu(btn, cat.id);
         tabContainer.appendChild(btn);
@@ -242,18 +252,89 @@ export function openMoveModal() {
     getEl('context-menu')?.classList.add('hidden');
     const moveModal = getEl('move-modal');
     const moveCategoryList = getEl('move-category-list');
+    const moveTitle = getEl('move-modal-title');
     openModal(moveModal);
     moveCategoryList.innerHTML = '';
+
+    const isBulk = state.isSelectMode && state.selectedEntries.length > 0;
+    if (moveTitle) {
+        moveTitle.textContent = isBulk ? `주제 이동 (${state.selectedEntries.length}개 선택)` : '주제 이동';
+    }
+
     state.allCategories.forEach(cat => {
         const div = document.createElement('div');
         div.className = `cat-select-item ${state.currentCategory === cat.id ? 'current' : ''}`;
         div.innerText = cat.name;
         if (state.currentCategory !== cat.id) {
             div.onclick = async () => {
-                await updateEntryField(state.contextTargetId, { category: cat.id });
+                if (isBulk) {
+                    await bulkUpdateEntryField([...state.selectedEntries], { category: cat.id });
+                    exitSelectMode();
+                } else {
+                    await updateEntryField(state.contextTargetId, { category: cat.id });
+                }
                 closeAllModals(true);
             };
         }
         moveCategoryList.appendChild(div);
     });
+}
+
+function toggleEntrySelection(id) {
+    const idx = state.selectedEntries.indexOf(id);
+    if (idx === -1) {
+        state.selectedEntries.push(id);
+    } else {
+        state.selectedEntries.splice(idx, 1);
+    }
+    renderEntries();
+    updateBulkBar();
+}
+
+export function toggleSelectMode() {
+    state.isSelectMode = !state.isSelectMode;
+    state.selectedEntries = [];
+    const selectBtn = getEl('select-mode-btn');
+    if (selectBtn) {
+        selectBtn.classList.toggle('active', state.isSelectMode);
+    }
+    const bulkBar = getEl('bulk-action-bar');
+    if (bulkBar) bulkBar.classList.toggle('hidden', !state.isSelectMode);
+    const writeBtn = getEl('write-btn');
+    if (writeBtn) writeBtn.classList.toggle('hidden', state.isSelectMode);
+    updateBulkBar();
+    renderEntries();
+}
+
+export function exitSelectMode() {
+    state.isSelectMode = false;
+    state.selectedEntries = [];
+    const selectBtn = getEl('select-mode-btn');
+    if (selectBtn) selectBtn.classList.remove('active');
+    const bulkBar = getEl('bulk-action-bar');
+    if (bulkBar) bulkBar.classList.add('hidden');
+    const writeBtn = getEl('write-btn');
+    if (writeBtn) writeBtn.classList.remove('hidden');
+    renderEntries();
+}
+
+export function selectAllEntries() {
+    const filtered = state.entries.filter(entry =>
+        !entry.isPurged && !entry.isDeleted && entry.category === state.currentCategory
+    );
+    if (state.selectedEntries.length === filtered.length) {
+        state.selectedEntries = [];
+    } else {
+        state.selectedEntries = filtered.map(e => e.id);
+    }
+    renderEntries();
+    updateBulkBar();
+}
+
+function updateBulkBar() {
+    const count = state.selectedEntries.length;
+    const countEl = getEl('bulk-selected-count');
+    if (countEl) countEl.textContent = `${count}개 선택`;
+    const moveBtn = getEl('bulk-move-btn');
+    if (moveBtn) moveBtn.disabled = count === 0;
 }
