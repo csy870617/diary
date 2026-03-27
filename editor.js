@@ -1153,11 +1153,13 @@ export function changeGlobalFontSize(newSize) {
             t.parentNode.replaceChild(span, t);
             newSpans.push(span);
         });
-        // 선택 영역 복원
+        // 선택 영역 복원 (span 내부를 선택해야 detectSelectionFontSize가 올바른 크기를 감지)
         if (newSpans.length > 0) {
             const newRange = document.createRange();
-            newRange.setStartBefore(newSpans[0]);
-            newRange.setEndAfter(newSpans[newSpans.length - 1]);
+            const firstSpan = newSpans[0];
+            const lastSpan = newSpans[newSpans.length - 1];
+            newRange.setStart(firstSpan, 0);
+            newRange.setEnd(lastSpan, lastSpan.childNodes.length);
             selection.removeAllRanges();
             selection.addRange(newRange);
         }
