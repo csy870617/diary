@@ -784,17 +784,7 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
             return;
         }
 
-        // 외부에서 복사한 HTML이 있으면 서식(색상, 굵기 등) 보존하며 붙여넣기
-        if (html) {
-            const sanitized = sanitizeExternalHtml(html);
-            if (sanitized) {
-                document.execCommand('insertHTML', false, sanitized);
-                if (callbacks.onAfterPaste) callbacks.onAfterPaste();
-                return;
-            }
-        }
-
-        // HTML이 없으면 순수 텍스트로 붙여넣기 (URL만 자동 링크)
+        // 외부에서 복사한 내용은 서식을 제거하고 기본 서식으로 붙여넣기
         if (text) {
             let cleanText = text
                 .replace(/&/g, '&amp;')
