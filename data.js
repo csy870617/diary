@@ -160,6 +160,25 @@ export async function checkOldTrash() {
     }
 }
 
+export async function bulkUpdateEntryField(ids, fields) {
+    const now = new Date().toISOString();
+    let changed = false;
+    ids.forEach(id => {
+        const entry = state.entries.find(e => e.id === id);
+        if (entry) {
+            Object.assign(entry, fields);
+            entry.modifiedAt = now;
+            changed = true;
+        }
+    });
+    if (changed) {
+        safeLocalSave();
+        renderEntries();
+        renderTrash();
+        await saveToDrive();
+    }
+}
+
 export async function duplicateEntry(id) {
     const original = state.entries.find(e => e.id === id);
     if (!original) return;

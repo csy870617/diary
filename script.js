@@ -1,6 +1,6 @@
 import { state, loadCategoriesFromLocal, saveCategoriesToLocal, isReadOnlyView } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
-import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameCategoryAction, deleteCategoryAction, addNewCategory } from './ui.js';
+import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameCategoryAction, deleteCategoryAction, addNewCategory, toggleSelectMode, exitSelectMode, selectAllEntries } from './ui.js';
 import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, ensureTokenOnResume, startKeepAlive } from './drive.js';
@@ -477,6 +477,10 @@ function setupUIListeners() {
         if (sliderContainer) sliderContainer.classList.toggle('hidden');
     });
     document.getElementById('book-page-slider')?.addEventListener('input', (e) => { jumpToPage(parseInt(e.target.value)); });
+    document.getElementById('select-mode-btn')?.addEventListener('click', toggleSelectMode);
+    document.getElementById('bulk-select-all-btn')?.addEventListener('click', selectAllEntries);
+    document.getElementById('bulk-move-btn')?.addEventListener('click', openMoveModal);
+    document.getElementById('bulk-cancel-btn')?.addEventListener('click', exitSelectMode);
     document.getElementById('ctx-move')?.addEventListener('click', openMoveModal);
     document.getElementById('ctx-copy')?.addEventListener('click', () => { duplicateEntry(state.contextTargetId); document.getElementById('context-menu').classList.add('hidden'); });
     document.getElementById('ctx-delete')?.addEventListener('click', () => { moveToTrash(state.contextTargetId); document.getElementById('context-menu').classList.add('hidden'); });

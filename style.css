@@ -259,10 +259,30 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .card-title { font-size: 19px; font-weight: 600; margin-bottom: 6px; }
 .card-subtitle { font-size: 13px; color: var(--gray-500); font-weight: 300; margin-bottom: 10px; }
 .card-meta { font-family: var(--text-sans); font-size: 12px; color: var(--gray-500); }
+
+/* 선택 모드 */
+.entry-card.selected { background: #EFF6FF; }
+.entry-card { display: flex; align-items: flex-start; gap: 12px; }
+.entry-card-content { flex: 1; min-width: 0; }
+.entry-checkbox { width: 22px; height: 22px; min-width: 22px; border: 2px solid var(--gray-300); border-radius: 5px; display: flex; align-items: center; justify-content: center; margin-top: 2px; color: transparent; transition: all 0.15s; font-size: 14px; }
+.entry-checkbox.checked { background: var(--gray-900); border-color: var(--gray-900); color: white; }
+#select-mode-btn.active { color: #2563EB; background: #EFF6FF; }
+
+/* 일괄 작업 바 */
+.bulk-action-bar { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 560px; background: white; border-top: 1px solid var(--gray-200); padding: 12px 20px; display: flex; align-items: center; justify-content: center; gap: 12px; z-index: 101; box-shadow: 0 -2px 10px rgba(0,0,0,0.08); font-family: var(--text-sans); }
+.bulk-bar-btn { background: none; border: 1px solid var(--gray-200); border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 5px; color: var(--gray-700); transition: background 0.15s; font-family: var(--text-sans); }
+.bulk-bar-btn:hover { background: var(--gray-100); }
+.bulk-bar-btn.primary { background: var(--gray-900); color: white; border-color: var(--gray-900); }
+.bulk-bar-btn.primary:hover { opacity: 0.9; }
+.bulk-bar-btn.primary:disabled { background: var(--gray-300); border-color: var(--gray-300); cursor: not-allowed; }
+.bulk-selected-count { font-size: 13px; color: var(--gray-500); font-weight: 500; }
+
 .hidden { display: none !important; }
 
 /* 모바일 반응형 스타일 */
 @media screen and (max-width: 650px) {
+    .bulk-action-bar { max-width: 100%; padding: 10px 16px; gap: 8px; }
+    .bulk-bar-btn { padding: 7px 10px; font-size: 12px; }
     .layout { padding: 0 16px 100px; width: 100%; }
     .brunch-header { padding: 0 4px; margin-top: 50px; margin-bottom: 20px; flex-direction: row; align-items: flex-end; }
     .header-left { flex-shrink: 0; }
