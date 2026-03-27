@@ -17,6 +17,21 @@ let silentRefreshAbortFn = null; // silent refresh 중단용
 let isRefreshing = false; // 토큰 갱신 중복 방지 뮤텍스
 let refreshPromise = null; // 진행 중인 갱신 Promise 공유용
 let lastResumeCheck = 0; // resume 이벤트 디바운스용
+let syncWarningTimer = null; // 동기화 경고 디바운스용
+
+function showSyncWarning(message) {
+    // 짧은 시간 내 중복 경고 방지
+    if (syncWarningTimer) return;
+    syncWarningTimer = setTimeout(() => { syncWarningTimer = null; }, 30000);
+    const existing = document.getElementById('sync-warning-toast');
+    if (existing) existing.remove();
+    const toast = document.createElement('div');
+    toast.id = 'sync-warning-toast';
+    toast.textContent = message;
+    toast.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#ef4444;color:#fff;padding:12px 20px;border-radius:8px;z-index:9999;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.3);max-width:90vw;text-align:center;';
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 5000);
+}
 
 /**
  * 토큰 유효성 검사 및 자동 갱신 로직
@@ -329,7 +344,16 @@ export function handleAuthClick() {
     }
 }
 
-export function handleSignoutClick(callback) {
+export async function handleSignoutClick(callback) {
+    // 로그아웃 전 마지막 동기화 시도
+    try {
+        const token = gapi.client.getToken();
+        if (token) {
+            await saveToDrive();
+        }
+    } catch(e) {
+        console.warn("로그아웃 전 동기화 실패:", e);
+    }
     const token = gapi.client.getToken();
     if (token !== null) {
         google.accounts.oauth2.revoke(token.access_token);
@@ -418,6 +442,7 @@ export async function saveToDrive() {
     const isValid = await ensureValidToken(true);
     if (!isValid) {
         console.warn("saveToDrive: 토큰이 유효하지 않아 동기화를 건너뜁니다.");
+        showSyncWarning("클라우드 동기화 실패: 로그인이 필요합니다.");
         return;
     }
 
@@ -449,7 +474,14 @@ export async function saveToDrive() {
             state.categoryOrder = mergedCats.order;
             state.categoryUpdatedAt = mergedCats.updatedAt;
 
-            localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+            try {
+                localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+            } catch(e) {
+                console.error("동기화 후 로컬 저장 실패:", e);
+                if (e.name === 'QuotaExceededError') {
+                    showSyncWarning("저장 공간이 부족합니다. 휴지통을 비워주세요.");
+                }
+            }
             saveCategoriesToLocal();
             renderTabs();
             renderEntries();
@@ -463,6 +495,7 @@ export async function saveToDrive() {
 
     } catch (err) {
         console.error("구글 드라이브 저장 실패:", err);
+        showSyncWarning("클라우드 동기화에 실패했습니다. 데이터는 기기에 저장되어 있습니다.");
     } finally {
         if (syncTimeoutTimer) clearTimeout(syncTimeoutTimer);
         isSyncing = false;
