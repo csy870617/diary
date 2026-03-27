@@ -481,6 +481,7 @@ function setupUIListeners() {
     document.getElementById('bulk-select-all-btn')?.addEventListener('click', selectAllEntries);
     document.getElementById('bulk-move-btn')?.addEventListener('click', openMoveModal);
     document.getElementById('bulk-cancel-btn')?.addEventListener('click', exitSelectMode);
+    document.getElementById('close-move-btn')?.addEventListener('click', () => closeAllModals(true));
     document.getElementById('ctx-move')?.addEventListener('click', openMoveModal);
     document.getElementById('ctx-copy')?.addEventListener('click', () => { duplicateEntry(state.contextTargetId); document.getElementById('context-menu').classList.add('hidden'); });
     document.getElementById('ctx-delete')?.addEventListener('click', () => { moveToTrash(state.contextTargetId); document.getElementById('context-menu').classList.add('hidden'); });

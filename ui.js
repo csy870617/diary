@@ -261,7 +261,11 @@ export function openMoveModal() {
         moveTitle.textContent = isBulk ? `주제 이동 (${state.selectedEntries.length}개 선택)` : '주제 이동';
     }
 
-    state.allCategories.forEach(cat => {
+    const sortedCats = [];
+    state.categoryOrder.forEach(id => { const found = state.allCategories.find(c => c.id === id); if(found) sortedCats.push(found); });
+    state.allCategories.forEach(c => { if(!state.categoryOrder.includes(c.id)) sortedCats.push(c); });
+
+    sortedCats.forEach(cat => {
         const div = document.createElement('div');
         div.className = `cat-select-item ${state.currentCategory === cat.id ? 'current' : ''}`;
         div.innerText = cat.name;
