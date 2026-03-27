@@ -2,9 +2,29 @@ import { state } from './state.js';
 import { renderEntries, renderTrash } from './ui.js';
 import { saveToDrive } from './drive.js';
 
+function safeLocalSave() {
+    try {
+        localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+        return true;
+    } catch(e) {
+        console.error("로컬 저장 실패:", e);
+        if (e.name === 'QuotaExceededError') {
+            alert("저장 공간이 부족합니다. 휴지통을 비우거나 오래된 항목을 삭제해주세요.");
+        }
+        return false;
+    }
+}
+
 export function loadDataFromLocal() {
     const localData = localStorage.getItem('faithLogDB');
-    if(localData) state.entries = JSON.parse(localData);
+    if(localData) {
+        try {
+            state.entries = JSON.parse(localData);
+        } catch(e) {
+            console.error("로컬 데이터 파싱 실패:", e);
+            state.entries = [];
+        }
+    }
 }
 
 export async function saveEntry() {
@@ -52,13 +72,13 @@ export async function saveEntry() {
         };
     }
     
-    localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+    safeLocalSave();
     renderEntries();
 }
 
 export async function saveData() {
-    localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-    saveToDrive(); 
+    safeLocalSave();
+    await saveToDrive();
 }
 
 export async function updateEntryField(id, fields) {
@@ -66,7 +86,7 @@ export async function updateEntryField(id, fields) {
     if(entry) {
         Object.assign(entry, fields);
         entry.modifiedAt = new Date().toISOString();
-        localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+        safeLocalSave();
         renderEntries();
         renderTrash();
         await saveToDrive();
@@ -79,9 +99,9 @@ export async function moveToTrash(id) {
         if(entry) {
             entry.isDeleted = true;
             entry.modifiedAt = new Date().toISOString();
-            localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+            safeLocalSave();
             renderEntries();
-            saveToDrive();
+            await saveToDrive();
         }
     }
 }
@@ -91,10 +111,10 @@ export async function restoreEntry(id) {
     if(entry) {
         entry.isDeleted = false;
         entry.modifiedAt = new Date().toISOString();
-        localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+        safeLocalSave();
         renderTrash();
         renderEntries();
-        saveToDrive();
+        await saveToDrive();
     }
 }
 
@@ -104,9 +124,9 @@ export async function permanentDelete(id) {
         if(index !== -1) {
             state.entries[index].isPurged = true;
             state.entries[index].modifiedAt = new Date().toISOString();
-            localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+            safeLocalSave();
             renderTrash();
-            saveToDrive();
+            await saveToDrive();
         }
     }
 }
@@ -117,13 +137,13 @@ export async function emptyTrash() {
     if(confirm(`휴지통의 ${trashItems.length}개 항목을 모두 영구 삭제하시겠습니까?`)) {
         const now = new Date().toISOString();
         trashItems.forEach(e => { e.isPurged = true; e.modifiedAt = now; });
-        localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+        safeLocalSave();
         renderTrash();
         await saveToDrive();
     }
 }
 
-export function checkOldTrash() {
+export async function checkOldTrash() {
     const now = new Date();
     let changed = false;
     state.entries.forEach(e => {
@@ -135,8 +155,8 @@ export function checkOldTrash() {
         }
     });
     if(changed) {
-        localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-        saveToDrive();
+        safeLocalSave();
+        await saveToDrive();
     }
 }
 
@@ -150,7 +170,7 @@ export async function duplicateEntry(id) {
         timestamp: nowISO, modifiedAt: nowISO, isDeleted: false, isPurged: false
     };
     state.entries.unshift(newEntry);
-    localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+    safeLocalSave();
     renderEntries();
-    saveToDrive();
+    await saveToDrive();
 }

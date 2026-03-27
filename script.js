@@ -115,6 +115,15 @@ function init() {
         document.addEventListener(evt, handleUserActivity, { passive: true });
     });
 
+    // 브라우저 닫기/새로고침 시 미저장 데이터 경고
+    window.addEventListener('beforeunload', (e) => {
+        const writeModal = document.getElementById('write-modal');
+        if (writeModal && !writeModal.classList.contains('hidden')) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
+
     setupListeners();
     renderStickers();
 
@@ -447,8 +456,8 @@ function setupUIListeners() {
     }
 
     document.getElementById('write-btn')?.addEventListener('click', () => openEditor(false));
-    document.getElementById('close-write-btn')?.addEventListener('click', () => { 
-        saveEntry(); closeAllModals(true); if (navigator.onLine && window.gapi?.client?.getToken()) saveToDrive(); 
+    document.getElementById('close-write-btn')?.addEventListener('click', async () => {
+        await saveEntry(); closeAllModals(true); if (navigator.onLine && window.gapi?.client?.getToken()) await saveToDrive();
         if (window.location.search.includes('share')) {
             window.history.replaceState({}, document.title, window.location.pathname);
             const backBtnText = document.getElementById('back-btn-text');
