@@ -7,6 +7,16 @@
     <title>신앙일지 | Faith Log</title>
     <link rel="stylesheet" href="style.css?v=3.6">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
+    <script>
+        // 페이지 로드 전 다크모드 적용 (깜빡임 방지)
+        (function() {
+            var saved = localStorage.getItem('faith_theme');
+            var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            if (saved === 'dark' || (!saved && prefersDark)) {
+                document.documentElement.setAttribute('data-theme', 'dark');
+            }
+        })();
+    </script>
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -26,6 +36,9 @@
                     <input type="search" id="search-input" name="search_unique_query" autocomplete="off" readonly onfocus="this.removeAttribute('readonly');" placeholder="검색어를 입력하세요">
                 </div>
                 <div class="auth-area">
+                    <button id="theme-toggle-btn" class="theme-toggle-btn" title="다크모드 전환">
+                        <i class="ph ph-moon"></i>
+                    </button>
                     <div class="login-msg-wrapper" id="login-msg-area">
                         <span class="login-msg-main">여러 대의 기기에서 사용 시<br>구글 동기화 후 이용해 주세요.</span>
                     </div>
@@ -108,7 +121,7 @@
                     <div class="font-size-controls" style="display: flex; align-items: center; gap: 2px; margin-left: 5px;">
                         <button class="tool-btn font-size-step-btn" id="font-size-decrease" title="글자 크기 줄이기"><i class="ph ph-minus"></i></button>
                         <div class="font-size-combo" id="font-size-combo">
-                            <input type="text" id="font-size-input" value="16" style="width: 42px; padding: 4px 2px; border: 1px solid #ddd; border-radius: 4px; text-align: center; font-size: 13px;">
+                            <input type="text" id="font-size-input" value="16" style="width: 42px; padding: 4px 2px; border: 1px solid var(--gray-200); border-radius: 4px; text-align: center; font-size: 13px;">
                             <div class="font-size-dropdown" id="font-size-dropdown"></div>
                         </div>
                         <button class="tool-btn font-size-step-btn" id="font-size-increase" title="글자 크기 키우기"><i class="ph ph-plus"></i></button>
@@ -221,7 +234,7 @@
                     <h2>Faith Log</h2>
                     <p>구글 계정으로 동기화 시작</p>
                 </div>
-                <p style="font-size:14px; color:#666; margin-bottom:30px; line-height:1.6;">'FaithLog' 폴더에 데이터가 저장됩니다.<br>로그인 상태는 자동으로 유지됩니다.</p>
+                <p style="font-size:14px; color:var(--gray-500); margin-bottom:30px; line-height:1.6;">'FaithLog' 폴더에 데이터가 저장됩니다.<br>로그인 상태는 자동으로 유지됩니다.</p>
                 <button id="google-login-btn" class="btn-login-submit" style="background:#4285F4; display:flex; align-items:center; justify-content:center; gap:10px;">
                     <i class="ph ph-google-logo" style="font-size:20px; color:white;"></i> 구글로 계속하기
                 </button>
