@@ -20,13 +20,44 @@ const stickers = [
     '📝','✏️','🖍️','📌','📎','📅','⏳','💡','🔔','🎁','🎀','💌','🏠','🚪'
 ];
 
+function initTheme() {
+    const saved = localStorage.getItem('faith_theme');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const isDark = saved ? saved === 'dark' : prefersDark;
+    if (isDark) document.documentElement.setAttribute('data-theme', 'dark');
+    else document.documentElement.removeAttribute('data-theme');
+    updateThemeIcon(isDark);
+}
+
+function toggleTheme() {
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if (isDark) {
+        document.documentElement.removeAttribute('data-theme');
+        localStorage.setItem('faith_theme', 'light');
+    } else {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        localStorage.setItem('faith_theme', 'dark');
+    }
+    updateThemeIcon(!isDark);
+}
+
+function updateThemeIcon(isDark) {
+    const btn = document.getElementById('theme-toggle-btn');
+    if (!btn) return;
+    const icon = btn.querySelector('i');
+    if (icon) icon.className = isDark ? 'ph ph-sun' : 'ph ph-moon';
+    btn.title = isDark ? '라이트모드 전환' : '다크모드 전환';
+}
+
 function init() {
     if (!history.state) history.replaceState({ modal: 'main' }, null, '');
-    
+
+    initTheme();
+
     const urlParams = new URLSearchParams(window.location.search);
     const sharedData = urlParams.get('share');
 
-    loadCategoriesFromLocal(); 
+    loadCategoriesFromLocal();
     loadDataFromLocal();
     checkOldTrash();
     renderTabs();
@@ -220,6 +251,7 @@ function setupUIListeners() {
 
     scrollTopBtn?.addEventListener('click', () => { editorContainer.scrollTo({ top: 0, behavior: 'smooth' }); });
 
+    document.getElementById('theme-toggle-btn')?.addEventListener('click', toggleTheme);
     document.getElementById('sort-criteria')?.addEventListener('change', (e) => { state.currentSortBy = e.target.value; renderEntries(); });
     document.getElementById('sort-order-btn')?.addEventListener('click', () => { 
         state.currentSortOrder = state.currentSortOrder === 'desc' ? 'asc' : 'desc'; 
@@ -449,7 +481,9 @@ function setupUIListeners() {
     if (removeColorBtn) {
         removeColorBtn.onmousedown = (e) => {
             e.preventDefault();
-            const resetValue = (state.activeColorMode === 'hiliteColor') ? 'transparent' : '#111827';
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            const defaultTextColor = isDark ? '#e8ecf1' : '#111827';
+            const resetValue = (state.activeColorMode === 'hiliteColor') ? 'transparent' : defaultTextColor;
             formatDoc(state.activeColorMode, resetValue);
             document.getElementById('color-palette-popup')?.classList.add('hidden');
         };

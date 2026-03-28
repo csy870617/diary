@@ -18,7 +18,7 @@ export function renderEntries(keyword = '') {
     entryList.innerHTML = '';
     
     if(state.isLoading) {
-        entryList.innerHTML = `<div style="text-align:center; margin-top:100px; color:#aaa; font-family:'Pretendard';">로딩 중...</div>`;
+        entryList.innerHTML = `<div style="text-align:center; margin-top:100px; color:var(--gray-400); font-family:'Pretendard';">로딩 중...</div>`;
         return;
     }
 
@@ -43,7 +43,7 @@ export function renderEntries(keyword = '') {
         }
     });
 
-    if (filtered.length === 0) { entryList.innerHTML = `<div style="text-align:center; margin-top:100px; color:#aaa; font-family:'Pretendard';">기록이 없습니다.</div>`; return; }
+    if (filtered.length === 0) { entryList.innerHTML = `<div style="text-align:center; margin-top:100px; color:var(--gray-400); font-family:'Pretendard';">기록이 없습니다.</div>`; return; }
     
     filtered.forEach(entry => {
         const div = document.createElement('article');
@@ -118,10 +118,10 @@ export function renderTabs() {
 export function renderTrash() {
     const trashList = getEl('trash-list');
     if (!trashList) return;
-    trashList.innerHTML = `<div style="padding:10px 0; text-align:center; font-size:12px; color:#9CA3AF; font-family:'Pretendard'; margin-bottom:10px;">휴지통에 보관된 글은 30일 후 자동 삭제됩니다.</div>`;
+    trashList.innerHTML = `<div style="padding:10px 0; text-align:center; font-size:12px; color:var(--gray-400); font-family:'Pretendard'; margin-bottom:10px;">휴지통에 보관된 글은 30일 후 자동 삭제됩니다.</div>`;
     const deleted = state.entries.filter(e => e.isDeleted && !e.isPurged); 
     if(deleted.length === 0) { 
-        trashList.innerHTML += `<div style="text-align:center; margin-top:50px; color:#aaa; font-family:'Pretendard';">비어있음</div>`; 
+        trashList.innerHTML += `<div style="text-align:center; margin-top:50px; color:var(--gray-400); font-family:'Pretendard';">비어있음</div>`; 
         return; 
     } 
     deleted.forEach(entry => { 
