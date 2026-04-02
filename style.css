@@ -244,6 +244,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 #write-modal.mode-book .editor-title, #write-modal.mode-book .editor-subtitle { padding: 0 40px; box-sizing: border-box; }
 #write-modal.mode-book .meta-info-row, #write-modal.mode-book .divider { margin-left: 40px; margin-right: 40px; }
 #write-modal.mode-book .editor-title, #write-modal.mode-book .editor-subtitle, #write-modal.mode-book .meta-info-row, #write-modal.mode-book .divider { break-inside: avoid; }
+#write-modal.mode-book .editor-body img { max-height: calc(100vh - 180px); width: auto; max-width: 100%; object-fit: contain; break-inside: avoid; display: block; margin: 10px auto; }
 #write-modal.mode-book .meta-info-row { margin-top: 12px; } 
 .book-nav { display: none !important; }
 .page-indicator { position: fixed; bottom: 40px; right: 30px; left: auto; transform: none; font-family: var(--text-sans); font-size: 13px; color: var(--gray-400); z-index: 2050; background: transparent; padding: 4px 10px; pointer-events: auto !important; cursor: pointer; }

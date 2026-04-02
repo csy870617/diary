@@ -434,6 +434,19 @@ function updateBookLayout() {
     container.style.columnGap = '0px';
     container.style.height = `${window.innerHeight - 120}px`;
     container.style.overflow = 'hidden';
+    const maxH = window.innerHeight - 180;
+    const body = document.getElementById('editor-body');
+    if (body) {
+        body.querySelectorAll('img').forEach(img => {
+            if (!img.dataset.bookOrigWidth) {
+                img.dataset.bookOrigWidth = img.style.width || '';
+                img.dataset.bookOrigHeight = img.style.height || '';
+            }
+            img.style.maxHeight = maxH + 'px';
+            img.style.width = 'auto';
+            img.style.height = 'auto';
+        });
+    }
 }
 
 export function updateBookNav() { 
@@ -1083,6 +1096,7 @@ export function toggleViewMode(mode) {
     if(btnReadOnly) btnReadOnly.classList.toggle('active', mode === 'readOnly');
     if(btnBookMode) btnBookMode.classList.toggle('active', mode === 'book');
     if(container) { container.style.height = ''; container.style.overflow = ''; container.style.columnWidth = ''; container.style.columnGap = ''; container.scrollLeft = 0; }
+    if (wasBookMode) { const body = document.getElementById('editor-body'); if (body) body.querySelectorAll('img').forEach(img => { img.style.maxHeight = ''; img.style.width = img.dataset.bookOrigWidth || ''; img.style.height = img.dataset.bookOrigHeight || ''; delete img.dataset.bookOrigWidth; delete img.dataset.bookOrigHeight; }); }
     writeModal.classList.remove('mode-read-only', 'mode-book');
     document.querySelectorAll('.book-nav, #page-indicator, #book-slider-container, #btn-scroll-top').forEach(el => el.classList.add('hidden'));
     hideSelection(); 
