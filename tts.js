@@ -49,10 +49,12 @@ export function toggleTTSPanel() {
     const isHidden = panel.classList.contains('hidden');
     if (isHidden) {
         panel.classList.remove('hidden');
+        document.getElementById('write-modal')?.classList.add('tts-open');
         loadVoices();
         refreshRangeDisplay();
     } else {
         panel.classList.add('hidden');
+        document.getElementById('write-modal')?.classList.remove('tts-open');
         stopTTS();
         closeTTSSettings();
     }
@@ -80,9 +82,16 @@ export function loadVoices() {
         ttsVoices = speechSynthesis.getVoices();
         sel.innerHTML = '';
 
-        const ko = ttsVoices.filter(v => v.lang.startsWith('ko'));
-        const en = ttsVoices.filter(v => v.lang.startsWith('en'));
-        const etc = ttsVoices.filter(v => !v.lang.startsWith('ko') && !v.lang.startsWith('en'));
+        // 로컬(기기 내장) 음성 우선 정렬
+        const sortLocal = (voices) => {
+            const local = voices.filter(v => v.localService !== false);
+            const online = voices.filter(v => v.localService === false);
+            return [...local, ...online];
+        };
+
+        const ko = sortLocal(ttsVoices.filter(v => v.lang.startsWith('ko')));
+        const en = sortLocal(ttsVoices.filter(v => v.lang.startsWith('en')));
+        const etc = sortLocal(ttsVoices.filter(v => !v.lang.startsWith('ko') && !v.lang.startsWith('en')));
 
         const addGroup = (voices, label) => {
             if (!voices.length) return;
@@ -91,12 +100,10 @@ export function loadVoices() {
             voices.forEach(v => {
                 const o = document.createElement('option');
                 o.value = v.name;
-                // 음성 이름 깔끔하게 표시
                 let displayName = v.name.replace(/Microsoft |Google |Apple /i, '');
-                // 언어 태그 간소화
-                const langShort = v.lang.split('-')[0].toUpperCase();
-                o.textContent = `${displayName}`;
-                if (v.localService === false) o.textContent += ' (온라인)';
+                o.textContent = displayName;
+                // 로컬 음성은 기기 아이콘, 온라인은 표시
+                if (v.localService === false) o.textContent += ' ☁️';
                 g.appendChild(o);
             });
             sel.appendChild(g);
@@ -106,6 +113,7 @@ export function loadVoices() {
         addGroup(en, '🇺🇸 English');
         addGroup(etc, '🌐 기타');
 
+        // 저장된 음성 복원, 없으면 한국어 로컬 음성 우선 선택
         const saved = localStorage.getItem('faith_tts_voice');
         if (saved && ttsVoices.find(v => v.name === saved)) {
             sel.value = saved;
