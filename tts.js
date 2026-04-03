@@ -1,20 +1,48 @@
 /**
- * TTS (Text-to-Speech) 모듈
- * Web Speech API 기반
+ * TTS (Text-to-Speech) 모듈 v2
+ * Web Speech API 기반 - 미니 플레이어 UI
  */
 
-let ttsUtterance = null;
 let ttsVoices = [];
 let isTTSSpeaking = false;
 let isTTSPaused = false;
-let ttsStartMarker = null;  // 시작 지점 텍스트 오프셋
-let ttsEndMarker = null;    // 끝 지점 텍스트 오프셋
-let ttsFullText = '';        // 에디터 전체 텍스트
-let ttsSelectedText = '';    // 선택된 구간 텍스트
+let ttsChunks = [];
+let ttsChunkIndex = 0;
+let ttsStartOffset = null;
+let ttsEndOffset = null;
 
-/**
- * TTS 패널 열기/닫기
- */
+// ─── 텍스트 추출 (Range 기반으로 일관성 유지) ───
+
+function getFullText() {
+    const editor = document.getElementById('editor-body');
+    if (!editor) return '';
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    return range.toString();
+}
+
+function getSelectionInfo() {
+    const editor = document.getElementById('editor-body');
+    const sel = window.getSelection();
+    if (!sel.rangeCount || !editor) return null;
+    const range = sel.getRangeAt(0);
+    if (!editor.contains(range.startContainer) || range.collapsed) return null;
+
+    const pre = document.createRange();
+    pre.selectNodeContents(editor);
+    pre.setEnd(range.startContainer, range.startOffset);
+    const startOff = pre.toString().length;
+
+    const preEnd = document.createRange();
+    preEnd.selectNodeContents(editor);
+    preEnd.setEnd(range.endContainer, range.endOffset);
+    const endOff = preEnd.toString().length;
+
+    return { start: startOff, end: endOff, text: sel.toString() };
+}
+
+// ─── 패널 토글 ───
+
 export function toggleTTSPanel() {
     const panel = document.getElementById('tts-panel');
     if (!panel) return;
@@ -22,375 +50,331 @@ export function toggleTTSPanel() {
     if (isHidden) {
         panel.classList.remove('hidden');
         loadVoices();
-        updateTTSRange();
+        refreshRangeDisplay();
     } else {
         panel.classList.add('hidden');
         stopTTS();
+        closeTTSSettings();
     }
 }
 
-/**
- * 음성 목록 로드
- */
+export function toggleTTSSettings() {
+    const settings = document.getElementById('tts-settings');
+    if (!settings) return;
+    settings.classList.toggle('hidden');
+    refreshRangeDisplay();
+}
+
+function closeTTSSettings() {
+    const settings = document.getElementById('tts-settings');
+    if (settings) settings.classList.add('hidden');
+}
+
+// ─── 음성 로드 ───
+
 export function loadVoices() {
-    const voiceSelect = document.getElementById('tts-voice-select');
-    if (!voiceSelect) return;
+    const sel = document.getElementById('tts-voice-select');
+    if (!sel) return;
 
-    const populateVoices = () => {
+    const populate = () => {
         ttsVoices = speechSynthesis.getVoices();
-        voiceSelect.innerHTML = '';
+        sel.innerHTML = '';
 
-        // 한국어 음성 우선, 그 다음 영어, 나머지
-        const koVoices = ttsVoices.filter(v => v.lang.startsWith('ko'));
-        const enVoices = ttsVoices.filter(v => v.lang.startsWith('en'));
-        const otherVoices = ttsVoices.filter(v => !v.lang.startsWith('ko') && !v.lang.startsWith('en'));
+        const ko = ttsVoices.filter(v => v.lang.startsWith('ko'));
+        const en = ttsVoices.filter(v => v.lang.startsWith('en'));
+        const etc = ttsVoices.filter(v => !v.lang.startsWith('ko') && !v.lang.startsWith('en'));
 
         const addGroup = (voices, label) => {
-            if (voices.length === 0) return;
-            const group = document.createElement('optgroup');
-            group.label = label;
-            voices.forEach(voice => {
-                const opt = document.createElement('option');
-                opt.value = voice.name;
-                opt.textContent = `${voice.name} (${voice.lang})`;
-                if (voice.default) opt.textContent += ' *';
-                group.appendChild(opt);
+            if (!voices.length) return;
+            const g = document.createElement('optgroup');
+            g.label = label;
+            voices.forEach(v => {
+                const o = document.createElement('option');
+                o.value = v.name;
+                // 음성 이름 깔끔하게 표시
+                let displayName = v.name.replace(/Microsoft |Google |Apple /i, '');
+                // 언어 태그 간소화
+                const langShort = v.lang.split('-')[0].toUpperCase();
+                o.textContent = `${displayName}`;
+                if (v.localService === false) o.textContent += ' (온라인)';
+                g.appendChild(o);
             });
-            voiceSelect.appendChild(group);
+            sel.appendChild(g);
         };
 
-        addGroup(koVoices, '한국어');
-        addGroup(enVoices, 'English');
-        addGroup(otherVoices, '기타');
+        addGroup(ko, '🇰🇷 한국어');
+        addGroup(en, '🇺🇸 English');
+        addGroup(etc, '🌐 기타');
 
-        // 저장된 음성 복원
-        const savedVoice = localStorage.getItem('faith_tts_voice');
-        if (savedVoice && ttsVoices.find(v => v.name === savedVoice)) {
-            voiceSelect.value = savedVoice;
-        } else if (koVoices.length > 0) {
-            voiceSelect.value = koVoices[0].name;
+        const saved = localStorage.getItem('faith_tts_voice');
+        if (saved && ttsVoices.find(v => v.name === saved)) {
+            sel.value = saved;
+        } else if (ko.length) {
+            sel.value = ko[0].name;
         }
     };
 
-    populateVoices();
-    if (ttsVoices.length === 0) {
-        speechSynthesis.onvoiceschanged = populateVoices;
+    populate();
+    if (!ttsVoices.length) speechSynthesis.onvoiceschanged = populate;
+}
+
+// ─── 구간 선택 ───
+
+export function setTTSStart() {
+    const info = getSelectionInfo();
+    if (info) {
+        ttsStartOffset = info.start;
+        if (ttsEndOffset !== null && ttsEndOffset <= ttsStartOffset) ttsEndOffset = null;
+        showToast('시작 지점이 설정되었습니다.');
+    } else {
+        ttsStartOffset = null;
+        showToast('시작 지점이 초기화되었습니다 (처음부터).');
     }
+    refreshRangeDisplay();
 }
 
-/**
- * 에디터 본문에서 텍스트 추출 (HTML 태그 제거)
- */
-function getEditorText() {
-    const editorBody = document.getElementById('editor-body');
-    if (!editorBody) return '';
-    // 블록 요소 뒤에 줄바꿈 추가
-    const clone = editorBody.cloneNode(true);
-    clone.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
-    clone.querySelectorAll('p, div, h1, h2, h3, h4, h5, h6, li, tr').forEach(el => {
-        el.prepend(document.createTextNode('\n'));
-    });
-    return (clone.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
+export function setTTSEnd() {
+    const info = getSelectionInfo();
+    if (info) {
+        ttsEndOffset = info.end;
+        if (ttsStartOffset !== null && ttsStartOffset >= ttsEndOffset) ttsStartOffset = null;
+        showToast('끝 지점이 설정되었습니다.');
+    } else {
+        ttsEndOffset = null;
+        showToast('끝 지점이 초기화되었습니다 (끝까지).');
+    }
+    refreshRangeDisplay();
 }
 
-/**
- * 현재 에디터에서 선택된 텍스트의 전체 텍스트 내 위치 계산
- */
-function getSelectionOffsetInEditor() {
-    const editorBody = document.getElementById('editor-body');
-    const selection = window.getSelection();
-    if (!selection.rangeCount || !editorBody) return null;
-
-    const range = selection.getRangeAt(0);
-    if (!editorBody.contains(range.startContainer)) return null;
-
-    // 선택 텍스트
-    const selectedText = selection.toString().trim();
-    if (!selectedText) return null;
-
-    // 전체 텍스트에서 위치 찾기
-    const fullText = getEditorText();
-
-    // TreeWalker로 정확한 오프셋 계산
-    const preRange = document.createRange();
-    preRange.setStart(editorBody, 0);
-    preRange.setEnd(range.startContainer, range.startOffset);
-    const preText = preRange.toString();
-
-    const endPreRange = document.createRange();
-    endPreRange.setStart(editorBody, 0);
-    endPreRange.setEnd(range.endContainer, range.endOffset);
-    const endText = endPreRange.toString();
-
-    return {
-        start: preText.length,
-        end: endText.length,
-        text: selectedText
-    };
+export function resetTTSRange() {
+    ttsStartOffset = null;
+    ttsEndOffset = null;
+    refreshRangeDisplay();
+    showToast('구간이 초기화되었습니다.');
 }
 
-/**
- * TTS 구간 업데이트 (시작/끝 마커 기준)
- */
-export function updateTTSRange() {
-    ttsFullText = getEditorText();
+function showToast(msg) {
+    let toast = document.getElementById('tts-toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'tts-toast';
+        toast.className = 'tts-toast';
+        document.body.appendChild(toast);
+    }
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(toast._timer);
+    toast._timer = setTimeout(() => toast.classList.remove('show'), 1800);
+}
+
+function refreshRangeDisplay() {
+    const full = getFullText();
     const startInfo = document.getElementById('tts-start-info');
     const endInfo = document.getElementById('tts-end-info');
-    const rangePreview = document.getElementById('tts-range-preview');
+    const barLabel = document.getElementById('tts-bar-range-label');
 
-    if (ttsStartMarker !== null && ttsStartMarker <= ttsFullText.length) {
-        const preview = ttsFullText.substring(ttsStartMarker, ttsStartMarker + 30).replace(/\n/g, ' ');
-        if (startInfo) startInfo.textContent = `"${preview}..."`;
-        if (startInfo) startInfo.classList.add('set');
+    if (ttsStartOffset !== null && ttsStartOffset < full.length) {
+        const t = full.substring(ttsStartOffset, ttsStartOffset + 20).replace(/\n/g, ' ').trim();
+        if (startInfo) { startInfo.textContent = `"${t}…"`; startInfo.classList.add('set'); }
     } else {
-        ttsStartMarker = null;
+        ttsStartOffset = null;
         if (startInfo) { startInfo.textContent = '처음부터'; startInfo.classList.remove('set'); }
     }
 
-    if (ttsEndMarker !== null && ttsEndMarker <= ttsFullText.length) {
-        const start = Math.max(0, ttsEndMarker - 30);
-        const preview = ttsFullText.substring(start, ttsEndMarker).replace(/\n/g, ' ');
-        if (endInfo) { endInfo.textContent = `"...${preview}"`; endInfo.classList.add('set'); }
+    if (ttsEndOffset !== null && ttsEndOffset <= full.length) {
+        const s = Math.max(0, ttsEndOffset - 20);
+        const t = full.substring(s, ttsEndOffset).replace(/\n/g, ' ').trim();
+        if (endInfo) { endInfo.textContent = `"…${t}"`; endInfo.classList.add('set'); }
     } else {
-        ttsEndMarker = null;
+        ttsEndOffset = null;
         if (endInfo) { endInfo.textContent = '끝까지'; endInfo.classList.remove('set'); }
     }
 
-    // 재생할 텍스트 결정
-    const start = ttsStartMarker || 0;
-    const end = ttsEndMarker || ttsFullText.length;
-    ttsSelectedText = ttsFullText.substring(start, end).trim();
-
-    if (rangePreview) {
-        if (ttsSelectedText.length > 0) {
-            const maxLen = 100;
-            const preview = ttsSelectedText.length > maxLen
-                ? ttsSelectedText.substring(0, maxLen) + '...'
-                : ttsSelectedText;
-            rangePreview.textContent = preview;
-            rangePreview.classList.remove('empty');
+    // 바 라벨
+    if (barLabel) {
+        if (ttsStartOffset !== null || ttsEndOffset !== null) {
+            barLabel.textContent = '구간';
+            barLabel.classList.add('active');
         } else {
-            rangePreview.textContent = '재생할 텍스트가 없습니다.';
-            rangePreview.classList.add('empty');
+            barLabel.textContent = '전체';
+            barLabel.classList.remove('active');
         }
     }
 }
 
-/**
- * 시작 지점 설정
- */
-export function setTTSStart() {
-    const offset = getSelectionOffsetInEditor();
-    if (offset) {
-        ttsStartMarker = offset.start;
-        // 끝 지점이 시작보다 앞이면 리셋
-        if (ttsEndMarker !== null && ttsEndMarker <= ttsStartMarker) {
-            ttsEndMarker = null;
-        }
-    } else {
-        ttsStartMarker = null;
-    }
-    updateTTSRange();
+// ─── 재생 ───
+
+function getTextToSpeak() {
+    const full = getFullText();
+    const s = ttsStartOffset || 0;
+    const e = ttsEndOffset || full.length;
+    return full.substring(s, e).trim();
 }
 
-/**
- * 끝 지점 설정
- */
-export function setTTSEnd() {
-    const offset = getSelectionOffsetInEditor();
-    if (offset) {
-        ttsEndMarker = offset.end;
-        // 시작 지점이 끝보다 뒤이면 리셋
-        if (ttsStartMarker !== null && ttsStartMarker >= ttsEndMarker) {
-            ttsStartMarker = null;
-        }
-    } else {
-        ttsEndMarker = null;
-    }
-    updateTTSRange();
-}
-
-/**
- * 구간 초기화
- */
-export function resetTTSRange() {
-    ttsStartMarker = null;
-    ttsEndMarker = null;
-    updateTTSRange();
-}
-
-/**
- * TTS 재생
- */
 export function playTTS() {
     if (!('speechSynthesis' in window)) {
         alert('이 브라우저는 TTS를 지원하지 않습니다.');
         return;
     }
 
+    // 일시정지 → 재개
     if (isTTSPaused) {
         speechSynthesis.resume();
         isTTSPaused = false;
         isTTSSpeaking = true;
-        updateTTSButtons();
+        syncUI();
         return;
     }
 
-    // 새로 시작
     stopTTS();
-    updateTTSRange();
+    const text = getTextToSpeak();
+    if (!text) { alert('읽을 내용이 없습니다.'); return; }
 
-    const text = ttsSelectedText || ttsFullText;
-    if (!text.trim()) {
-        alert('읽을 내용이 없습니다.');
-        return;
-    }
-
-    // 긴 텍스트를 청크로 나누어 재생 (브라우저 제한 우회)
-    const chunks = splitTextIntoChunks(text, 200);
-    speakChunks(chunks, 0);
+    ttsChunks = splitChunks(text, 180);
+    ttsChunkIndex = 0;
+    speakNext();
 }
 
-/**
- * 텍스트를 문장 단위로 청크 분할
- */
-function splitTextIntoChunks(text, maxLen) {
+function splitChunks(text, max) {
     const chunks = [];
-    const sentences = text.split(/(?<=[.!?。\n])\s*/);
-    let current = '';
-
-    for (const sentence of sentences) {
-        if ((current + sentence).length > maxLen && current.length > 0) {
-            chunks.push(current.trim());
-            current = sentence;
+    // 한국어 문장 부호 포함
+    const parts = text.split(/(?<=[.!?。\n·])\s*/);
+    let cur = '';
+    for (const p of parts) {
+        if (!p.trim()) continue;
+        if ((cur + ' ' + p).length > max && cur) {
+            chunks.push(cur.trim());
+            cur = p;
         } else {
-            current += (current ? ' ' : '') + sentence;
+            cur += (cur ? ' ' : '') + p;
         }
     }
-    if (current.trim()) chunks.push(current.trim());
-    return chunks.length > 0 ? chunks : [text];
+    if (cur.trim()) chunks.push(cur.trim());
+    return chunks.length ? chunks : [text];
 }
 
-/**
- * 청크 순차 재생
- */
-function speakChunks(chunks, index) {
-    if (index >= chunks.length) {
+function speakNext() {
+    if (ttsChunkIndex >= ttsChunks.length) {
         isTTSSpeaking = false;
         isTTSPaused = false;
-        updateTTSButtons();
+        ttsChunkIndex = 0;
+        setProgress(100);
+        syncUI();
         return;
     }
 
-    const voiceSelect = document.getElementById('tts-voice-select');
-    const speedSlider = document.getElementById('tts-speed-slider');
+    const utt = new SpeechSynthesisUtterance(ttsChunks[ttsChunkIndex]);
 
-    ttsUtterance = new SpeechSynthesisUtterance(chunks[index]);
-
-    // 음성 설정
-    const selectedVoiceName = voiceSelect?.value;
-    if (selectedVoiceName) {
-        const voice = ttsVoices.find(v => v.name === selectedVoiceName);
-        if (voice) ttsUtterance.voice = voice;
-        localStorage.setItem('faith_tts_voice', selectedVoiceName);
+    // 음성
+    const voiceName = document.getElementById('tts-voice-select')?.value;
+    if (voiceName) {
+        const v = ttsVoices.find(x => x.name === voiceName);
+        if (v) utt.voice = v;
+        localStorage.setItem('faith_tts_voice', voiceName);
     }
 
-    // 속도 설정
-    const speed = speedSlider ? parseFloat(speedSlider.value) : 1.0;
-    ttsUtterance.rate = speed;
-    localStorage.setItem('faith_tts_speed', speed.toString());
+    // 속도 & 피치
+    const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1');
+    const pitch = parseFloat(document.getElementById('tts-pitch-slider')?.value || '1');
+    utt.rate = speed;
+    utt.pitch = pitch;
+    localStorage.setItem('faith_tts_speed', String(speed));
+    localStorage.setItem('faith_tts_pitch', String(pitch));
 
-    // 진행률 업데이트
-    const progressBar = document.getElementById('tts-progress-bar');
-    const progressText = document.getElementById('tts-progress-text');
-
-    ttsUtterance.onstart = () => {
-        isTTSSpeaking = true;
-        isTTSPaused = false;
-        updateTTSButtons();
+    utt.onstart = () => { isTTSSpeaking = true; isTTSPaused = false; syncUI(); };
+    utt.onend = () => {
+        ttsChunkIndex++;
+        setProgress(Math.round((ttsChunkIndex / ttsChunks.length) * 100));
+        speakNext();
+    };
+    utt.onerror = (e) => {
+        if (e.error !== 'canceled') console.error('TTS error:', e.error);
+        isTTSSpeaking = false; isTTSPaused = false; syncUI();
     };
 
-    ttsUtterance.onend = () => {
-        const progress = Math.round(((index + 1) / chunks.length) * 100);
-        if (progressBar) progressBar.style.width = `${progress}%`;
-        if (progressText) progressText.textContent = `${progress}%`;
-        speakChunks(chunks, index + 1);
-    };
-
-    ttsUtterance.onerror = (e) => {
-        if (e.error !== 'canceled') {
-            console.error('TTS 오류:', e.error);
-        }
-        isTTSSpeaking = false;
-        isTTSPaused = false;
-        updateTTSButtons();
-    };
-
-    const progress = Math.round((index / chunks.length) * 100);
-    if (progressBar) progressBar.style.width = `${progress}%`;
-    if (progressText) progressText.textContent = `${progress}%`;
-
-    speechSynthesis.speak(ttsUtterance);
+    setProgress(Math.round((ttsChunkIndex / ttsChunks.length) * 100));
+    speechSynthesis.speak(utt);
 }
 
-/**
- * TTS 일시정지
- */
 export function pauseTTS() {
     if (isTTSSpeaking && !isTTSPaused) {
         speechSynthesis.pause();
         isTTSPaused = true;
-        updateTTSButtons();
+        syncUI();
     }
 }
 
-/**
- * TTS 정지
- */
 export function stopTTS() {
     speechSynthesis.cancel();
     isTTSSpeaking = false;
     isTTSPaused = false;
-    ttsUtterance = null;
-    updateTTSButtons();
-    const progressBar = document.getElementById('tts-progress-bar');
-    const progressText = document.getElementById('tts-progress-text');
-    if (progressBar) progressBar.style.width = '0%';
-    if (progressText) progressText.textContent = '0%';
+    ttsChunks = [];
+    ttsChunkIndex = 0;
+    setProgress(0);
+    syncUI();
 }
 
-/**
- * 버튼 상태 업데이트
- */
-function updateTTSButtons() {
+// ─── 선택 텍스트만 바로 듣기 ───
+
+export function playSelection() {
+    const info = getSelectionInfo();
+    if (!info || !info.text.trim()) {
+        alert('먼저 본문에서 텍스트를 선택해주세요.');
+        return;
+    }
+    stopTTS();
+    ttsChunks = splitChunks(info.text, 180);
+    ttsChunkIndex = 0;
+    speakNext();
+}
+
+// ─── UI 동기화 ───
+
+function setProgress(pct) {
+    const bar = document.getElementById('tts-progress-bar');
+    const txt = document.getElementById('tts-progress-text');
+    if (bar) bar.style.width = pct + '%';
+    if (txt) txt.textContent = pct + '%';
+}
+
+function syncUI() {
     const playBtn = document.getElementById('tts-play-btn');
     const pauseBtn = document.getElementById('tts-pause-btn');
     const stopBtn = document.getElementById('tts-stop-btn');
 
-    if (playBtn) playBtn.classList.toggle('hidden', isTTSSpeaking && !isTTSPaused);
-    if (pauseBtn) pauseBtn.classList.toggle('hidden', !isTTSSpeaking || isTTSPaused);
+    const playing = isTTSSpeaking && !isTTSPaused;
+    if (playBtn) playBtn.classList.toggle('hidden', playing);
+    if (pauseBtn) pauseBtn.classList.toggle('hidden', !playing);
     if (stopBtn) stopBtn.disabled = !isTTSSpeaking && !isTTSPaused;
+
+    // 헤더 버튼 활성
+    const headerBtn = document.getElementById('btn-tts');
+    if (headerBtn) headerBtn.classList.toggle('tts-active', isTTSSpeaking);
 }
 
-/**
- * 속도 표시 업데이트
- */
 export function updateSpeedDisplay() {
-    const slider = document.getElementById('tts-speed-slider');
-    const display = document.getElementById('tts-speed-value');
-    if (slider && display) {
-        display.textContent = `${parseFloat(slider.value).toFixed(1)}x`;
+    const s = document.getElementById('tts-speed-slider');
+    const d = document.getElementById('tts-speed-value');
+    if (s && d) d.textContent = parseFloat(s.value).toFixed(1) + 'x';
+}
+
+export function updatePitchDisplay() {
+    const s = document.getElementById('tts-pitch-slider');
+    const d = document.getElementById('tts-pitch-value');
+    if (s && d) {
+        const v = parseFloat(s.value);
+        let label = v < 0.9 ? '낮음' : v > 1.1 ? '높음' : '보통';
+        d.textContent = label;
     }
 }
 
-/**
- * 초기화 - 저장된 설정 복원
- */
 export function initTTS() {
-    const savedSpeed = localStorage.getItem('faith_tts_speed');
-    const slider = document.getElementById('tts-speed-slider');
-    if (savedSpeed && slider) {
-        slider.value = savedSpeed;
-        updateSpeedDisplay();
-    }
+    const speed = localStorage.getItem('faith_tts_speed');
+    const pitch = localStorage.getItem('faith_tts_pitch');
+    const ss = document.getElementById('tts-speed-slider');
+    const ps = document.getElementById('tts-pitch-slider');
+    if (speed && ss) { ss.value = speed; updateSpeedDisplay(); }
+    if (pitch && ps) { ps.value = pitch; updatePitchDisplay(); }
 }
+
+export { refreshRangeDisplay as updateTTSRange };
