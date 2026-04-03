@@ -100,6 +100,9 @@
                 <button id="btn-share" class="icon-action-btn" title="공유하기">
                     <i class="ph ph-share-network"></i>
                 </button>
+                <button id="btn-tts" class="icon-action-btn" title="TTS 듣기">
+                    <i class="ph ph-speaker-high"></i>
+                </button>
                 <button id="btn-download" class="icon-action-btn" title="PDF 저장">
                     <i class="ph ph-download-simple"></i>
                 </button>
@@ -172,6 +175,58 @@
         <div id="page-indicator" class="page-indicator hidden"></div>
         <button id="btn-scroll-top" class="btn-scroll-top hidden" title="맨 위로"><i class="ph ph-arrow-up"></i></button>
         <div id="sticker-palette" class="sticker-palette hidden"><div id="sticker-grid" class="sticker-grid"></div></div>
+        <div id="tts-panel" class="tts-panel hidden">
+            <div class="tts-panel-header">
+                <span class="tts-panel-title"><i class="ph ph-speaker-high"></i> TTS 듣기</span>
+                <button id="tts-close-btn" class="tts-close-btn"><i class="ph ph-x"></i></button>
+            </div>
+            <div class="tts-panel-body">
+                <div class="tts-control-group">
+                    <label class="tts-label">음성</label>
+                    <select id="tts-voice-select" class="tts-select"></select>
+                </div>
+                <div class="tts-control-group">
+                    <label class="tts-label">속도</label>
+                    <div class="tts-speed-row">
+                        <span class="tts-speed-label">0.5x</span>
+                        <input type="range" id="tts-speed-slider" class="tts-slider" min="0.5" max="2.0" step="0.1" value="1.0">
+                        <span class="tts-speed-label">2x</span>
+                        <span id="tts-speed-value" class="tts-speed-value">1.0x</span>
+                    </div>
+                </div>
+                <div class="tts-control-group">
+                    <label class="tts-label">구간 선택</label>
+                    <p class="tts-hint">본문에서 텍스트를 드래그한 후 버튼을 눌러주세요.</p>
+                    <div class="tts-range-btns">
+                        <button id="tts-set-start" class="tts-range-btn"><i class="ph ph-flag-pennant"></i> 시작 지점</button>
+                        <button id="tts-set-end" class="tts-range-btn"><i class="ph ph-flag-checkered"></i> 끝 지점</button>
+                        <button id="tts-reset-range" class="tts-range-btn reset"><i class="ph ph-arrow-counter-clockwise"></i> 초기화</button>
+                    </div>
+                    <div class="tts-range-info">
+                        <div class="tts-range-info-row">
+                            <span class="tts-range-label">시작:</span>
+                            <span id="tts-start-info" class="tts-range-value">처음부터</span>
+                        </div>
+                        <div class="tts-range-info-row">
+                            <span class="tts-range-label">끝:</span>
+                            <span id="tts-end-info" class="tts-range-value">끝까지</span>
+                        </div>
+                    </div>
+                    <div id="tts-range-preview" class="tts-range-preview empty">재생할 텍스트가 없습니다.</div>
+                </div>
+                <div class="tts-progress">
+                    <div class="tts-progress-track">
+                        <div id="tts-progress-bar" class="tts-progress-bar"></div>
+                    </div>
+                    <span id="tts-progress-text" class="tts-progress-text">0%</span>
+                </div>
+                <div class="tts-playback-controls">
+                    <button id="tts-play-btn" class="tts-play-btn" title="재생"><i class="ph ph-play-circle"></i></button>
+                    <button id="tts-pause-btn" class="tts-play-btn hidden" title="일시정지"><i class="ph ph-pause-circle"></i></button>
+                    <button id="tts-stop-btn" class="tts-play-btn" title="정지" disabled><i class="ph ph-stop-circle"></i></button>
+                </div>
+            </div>
+        </div>
         <div id="color-palette-popup" class="color-palette-popup hidden">
             <div class="palette-header"><button class="color-remove-btn" id="btn-remove-color"><i class="ph ph-prohibit"></i> 색상 없음</button></div>
             <div class="color-grid">
