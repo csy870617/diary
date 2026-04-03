@@ -412,7 +412,16 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
 [data-theme="dark"] .entry-checkbox.checked { background: var(--accent); border-color: var(--accent); }
 
 /* =========================================
-   TTS 패널
+   에디터 스크롤바 (읽기/편집 모드)
+   ========================================= */
+#editor-container::-webkit-scrollbar { display: block; width: 5px; }
+#editor-container::-webkit-scrollbar-track { background: transparent; }
+#editor-container::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 3px; }
+#editor-container::-webkit-scrollbar-thumb:hover { background: var(--gray-400); }
+#editor-container { scrollbar-width: thin; scrollbar-color: var(--gray-300) transparent; }
+
+/* =========================================
+   TTS 미니 플레이어
    ========================================= */
 .tts-panel {
     position: fixed;
@@ -420,195 +429,53 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
     left: 50%;
     transform: translateX(-50%);
     width: 100%;
-    max-width: 500px;
-    background: var(--surface-color);
-    border-top-left-radius: 20px;
-    border-top-right-radius: 20px;
-    box-shadow: 0 -4px 24px var(--shadow-color);
+    max-width: 520px;
     z-index: 1200;
-    transition: transform 0.3s ease;
-    max-height: 80vh;
-    overflow-y: auto;
+    font-family: var(--text-sans);
 }
 .tts-panel.hidden { display: none; }
-.tts-panel-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 16px 20px 12px;
-    border-bottom: 1px solid var(--gray-200);
-}
-.tts-panel-title {
-    font-family: var(--text-sans);
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--gray-900);
+
+/* 하단 바 */
+.tts-bar {
     display: flex;
     align-items: center;
     gap: 6px;
+    padding: 8px 12px;
+    background: var(--surface-color);
+    border-top: 1px solid var(--gray-200);
+    box-shadow: 0 -2px 12px var(--shadow-light);
+    padding-bottom: calc(8px + var(--safe-bottom));
 }
-.tts-panel-title i { color: var(--accent); font-size: 18px; }
-.tts-close-btn {
+.tts-ctrl {
     background: none;
     border: none;
-    font-size: 20px;
-    color: var(--gray-500);
+    font-size: 22px;
+    color: var(--accent);
     cursor: pointer;
     padding: 4px;
     border-radius: 6px;
-    transition: background 0.15s;
-}
-.tts-close-btn:hover { background: var(--gray-100); }
-.tts-panel-body { padding: 16px 20px 24px; }
-.tts-control-group {
-    margin-bottom: 18px;
-}
-.tts-label {
-    font-family: var(--text-sans);
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--gray-500);
-    display: block;
-    margin-bottom: 8px;
-}
-.tts-select {
-    width: 100%;
-    padding: 10px 12px;
-    border: 1px solid var(--gray-200);
-    border-radius: 10px;
-    font-family: var(--text-sans);
-    font-size: 13px;
-    color: var(--gray-900);
-    background: var(--bg-color);
-    appearance: none;
-    -webkit-appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236B7280' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 12px center;
-    cursor: pointer;
-}
-.tts-select:focus { border-color: var(--accent); outline: none; }
-.tts-speed-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-.tts-speed-label {
-    font-family: var(--text-sans);
-    font-size: 11px;
-    color: var(--gray-400);
     flex-shrink: 0;
-    min-width: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.12s;
 }
-.tts-slider {
+.tts-ctrl:hover { background: var(--gray-100); }
+.tts-ctrl:disabled { color: var(--gray-300); cursor: default; }
+.tts-ctrl.hidden { display: none; }
+.tts-ctrl.close { color: var(--gray-400); font-size: 18px; }
+.tts-ctrl.close:hover { color: var(--danger); }
+
+.tts-bar-progress {
     flex: 1;
-    -webkit-appearance: none;
-    appearance: none;
-    height: 6px;
-    background: var(--gray-200);
-    border-radius: 3px;
-    outline: none;
-}
-.tts-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 20px;
-    height: 20px;
-    background: var(--accent);
-    border-radius: 50%;
-    cursor: pointer;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.2);
-}
-.tts-slider::-moz-range-thumb {
-    width: 20px;
-    height: 20px;
-    background: var(--accent);
-    border-radius: 50%;
-    cursor: pointer;
-    border: none;
-}
-.tts-speed-value {
-    font-family: var(--text-sans);
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--accent);
-    min-width: 38px;
-    text-align: center;
-}
-.tts-hint {
-    font-family: var(--text-sans);
-    font-size: 12px;
-    color: var(--gray-400);
-    margin-bottom: 10px;
-    line-height: 1.5;
-}
-.tts-range-btns {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    margin-bottom: 12px;
-}
-.tts-range-btn {
-    font-family: var(--text-sans);
-    font-size: 12px;
-    padding: 7px 12px;
-    border: 1px solid var(--gray-200);
-    border-radius: 8px;
-    background: var(--bg-color);
-    color: var(--gray-900);
-    cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 4px;
-    transition: all 0.15s;
-}
-.tts-range-btn:hover { border-color: var(--accent); color: var(--accent); }
-.tts-range-btn:active { background: var(--active-bg); }
-.tts-range-btn.reset { color: var(--gray-500); }
-.tts-range-btn.reset:hover { color: var(--danger); border-color: var(--danger); }
-.tts-range-info {
-    background: var(--gray-100);
-    border-radius: 10px;
-    padding: 10px 14px;
-    margin-bottom: 10px;
-}
-.tts-range-info-row {
-    display: flex;
-    align-items: baseline;
     gap: 8px;
-    font-family: var(--text-sans);
-    font-size: 12px;
-    line-height: 1.8;
-}
-.tts-range-label { color: var(--gray-400); flex-shrink: 0; font-weight: 600; }
-.tts-range-value {
-    color: var(--gray-500);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.tts-range-value.set { color: var(--accent); font-weight: 500; }
-.tts-range-preview {
-    font-family: var(--text-sans);
-    font-size: 12px;
-    color: var(--gray-500);
-    background: var(--gray-100);
-    border-radius: 8px;
-    padding: 10px 12px;
-    line-height: 1.6;
-    max-height: 60px;
-    overflow-y: auto;
-}
-.tts-range-preview.empty { color: var(--gray-400); font-style: italic; }
-.tts-progress {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 16px;
+    min-width: 0;
 }
 .tts-progress-track {
     flex: 1;
-    height: 4px;
+    height: 3px;
     background: var(--gray-200);
     border-radius: 2px;
     overflow: hidden;
@@ -620,34 +487,173 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
     border-radius: 2px;
     transition: width 0.3s ease;
 }
-.tts-progress-text {
+.tts-pct {
+    font-size: 11px;
+    color: var(--gray-400);
+    min-width: 28px;
+    text-align: right;
+    flex-shrink: 0;
+}
+.tts-scope-label {
+    font-size: 10px;
+    color: var(--gray-400);
+    background: var(--gray-100);
+    padding: 2px 7px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    letter-spacing: 0.3px;
+}
+.tts-scope-label.active { color: var(--accent); background: var(--active-bg); font-weight: 600; }
+
+/* 설정 드로어 (바 위로 펼침) */
+.tts-settings {
+    background: var(--surface-color);
+    border-top: 1px solid var(--gray-200);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -4px 20px var(--shadow-light);
+    overflow: hidden;
+    animation: ttsSlideUp 0.2s ease;
+}
+.tts-settings.hidden { display: none; }
+@keyframes ttsSlideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+.tts-settings-inner { padding: 16px 16px 12px; }
+
+.tts-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+.tts-lbl {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--gray-500);
+    min-width: 42px;
+    flex-shrink: 0;
+}
+.tts-select {
+    flex: 1;
+    padding: 7px 28px 7px 10px;
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
     font-family: var(--text-sans);
     font-size: 12px;
-    color: var(--gray-400);
-    min-width: 30px;
-    text-align: right;
-}
-.tts-playback-controls {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 16px;
-}
-.tts-play-btn {
-    background: none;
-    border: none;
-    font-size: 44px;
-    color: var(--accent);
+    color: var(--gray-900);
+    background: var(--bg-color);
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%236B7280' d='M5 7L1 3h8z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
     cursor: pointer;
-    padding: 0;
-    line-height: 1;
-    transition: transform 0.1s, color 0.15s;
+    min-width: 0;
 }
-.tts-play-btn:hover { transform: scale(1.1); }
-.tts-play-btn:active { transform: scale(0.95); }
-.tts-play-btn:disabled { color: var(--gray-300); cursor: default; transform: none; }
-.tts-play-btn.hidden { display: none; }
+.tts-select:focus { border-color: var(--accent); outline: none; }
 
-/* TTS 버튼 활성 상태 */
-#btn-tts.active { color: var(--accent); }
-#btn-tts.active i { color: var(--accent); }
+.tts-slider-row {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.tts-slider {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    background: var(--gray-200);
+    border-radius: 2px;
+    outline: none;
+}
+.tts-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px; height: 16px;
+    background: var(--accent);
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+.tts-slider::-moz-range-thumb {
+    width: 16px; height: 16px;
+    background: var(--accent);
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+}
+.tts-val {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    min-width: 32px;
+    text-align: center;
+    flex-shrink: 0;
+}
+.tts-divider { height: 1px; background: var(--gray-200); margin: 6px 0 10px; }
+.tts-hint {
+    font-size: 11px;
+    color: var(--gray-400);
+    flex: 1;
+}
+.tts-range-btns {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+.tts-rbtn {
+    font-family: var(--text-sans);
+    font-size: 11px;
+    padding: 5px 10px;
+    border: 1px solid var(--gray-200);
+    border-radius: 6px;
+    background: var(--bg-color);
+    color: var(--gray-900);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    transition: all 0.12s;
+    white-space: nowrap;
+}
+.tts-rbtn:hover { border-color: var(--accent); color: var(--accent); }
+.tts-rbtn:active { background: var(--active-bg); }
+.tts-rbtn.sel { color: var(--active-text); border-color: var(--active-text); }
+.tts-rbtn.sel:hover { background: var(--active-bg); }
+.tts-rbtn.rst { color: var(--gray-400); padding: 5px 8px; }
+.tts-rbtn.rst:hover { color: var(--danger); border-color: var(--danger); }
+
+.tts-range-info {
+    display: flex;
+    gap: 14px;
+    font-size: 11px;
+    color: var(--gray-500);
+    padding: 0 2px;
+}
+.tts-ri { display: flex; gap: 4px; align-items: baseline; overflow: hidden; }
+.tts-ri b { color: var(--gray-400); font-weight: 600; flex-shrink: 0; }
+.tts-ri span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tts-ri span.set { color: var(--accent); font-weight: 500; }
+
+/* 토스트 알림 */
+.tts-toast {
+    position: fixed;
+    bottom: 70px;
+    left: 50%;
+    transform: translateX(-50%) translateY(10px);
+    background: var(--gray-900);
+    color: var(--bg-color);
+    font-family: var(--text-sans);
+    font-size: 12px;
+    padding: 8px 16px;
+    border-radius: 8px;
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.25s ease;
+    z-index: 1300;
+    white-space: nowrap;
+}
+.tts-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* TTS 헤더 버튼 활성 (재생 중) */
+#btn-tts.tts-active i { color: var(--accent); animation: ttsPulse 1.5s ease-in-out infinite; }
+@keyframes ttsPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }

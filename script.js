@@ -4,7 +4,7 @@ import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, o
 import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, ensureTokenOnResume, startKeepAlive } from './drive.js';
-import { toggleTTSPanel, playTTS, pauseTTS, stopTTS, setTTSStart, setTTSEnd, resetTTSRange, updateSpeedDisplay, initTTS, updateTTSRange } from './tts.js';
+import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, setTTSStart, setTTSEnd, resetTTSRange, playSelection, updateSpeedDisplay, updatePitchDisplay, initTTS, updateTTSRange } from './tts.js';
 
 window.addNewCategory = addNewCategory;
 window.restoreEntry = restoreEntry;
@@ -204,7 +204,7 @@ function setupListeners() {
     }
 
     window.addEventListener('popstate', async () => {
-        stopTTS(); document.getElementById('tts-panel')?.classList.add('hidden'); document.getElementById('btn-tts')?.classList.remove('active');
+        stopTTS(); document.getElementById('tts-panel')?.classList.add('hidden');
         const writeModal = document.getElementById('write-modal');
         if (writeModal && !writeModal.classList.contains('hidden')) await saveEntry();
         closeAllModals(false); 
@@ -408,21 +408,18 @@ function setupUIListeners() {
     });
 
     // --- TTS 기능 ---
-    document.getElementById('btn-tts')?.addEventListener('click', () => {
-        toggleTTSPanel();
-        document.getElementById('btn-tts')?.classList.toggle('active', !document.getElementById('tts-panel')?.classList.contains('hidden'));
-    });
-    document.getElementById('tts-close-btn')?.addEventListener('click', () => {
-        toggleTTSPanel();
-        document.getElementById('btn-tts')?.classList.remove('active');
-    });
+    document.getElementById('btn-tts')?.addEventListener('click', toggleTTSPanel);
+    document.getElementById('tts-close-btn')?.addEventListener('click', toggleTTSPanel);
+    document.getElementById('tts-settings-btn')?.addEventListener('click', toggleTTSSettings);
     document.getElementById('tts-play-btn')?.addEventListener('click', playTTS);
     document.getElementById('tts-pause-btn')?.addEventListener('click', pauseTTS);
     document.getElementById('tts-stop-btn')?.addEventListener('click', stopTTS);
     document.getElementById('tts-set-start')?.addEventListener('click', setTTSStart);
     document.getElementById('tts-set-end')?.addEventListener('click', setTTSEnd);
     document.getElementById('tts-reset-range')?.addEventListener('click', resetTTSRange);
+    document.getElementById('tts-play-selection')?.addEventListener('click', playSelection);
     document.getElementById('tts-speed-slider')?.addEventListener('input', updateSpeedDisplay);
+    document.getElementById('tts-pitch-slider')?.addEventListener('input', updatePitchDisplay);
     initTTS();
 
     document.getElementById('toolbar-link-btn')?.addEventListener('click', () => { createHyperlink(); });
@@ -511,7 +508,7 @@ function setupUIListeners() {
 
     document.getElementById('write-btn')?.addEventListener('click', () => openEditor(false));
     document.getElementById('close-write-btn')?.addEventListener('click', async () => {
-        stopTTS(); document.getElementById('tts-panel')?.classList.add('hidden'); document.getElementById('btn-tts')?.classList.remove('active');
+        stopTTS(); document.getElementById('tts-panel')?.classList.add('hidden');
         await saveEntry(); closeAllModals(true); if (navigator.onLine && window.gapi?.client?.getToken()) await saveToDrive();
         if (window.location.search.includes('share')) {
             window.history.replaceState({}, document.title, window.location.pathname);
