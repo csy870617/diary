@@ -247,8 +247,15 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 #write-modal.mode-book .editor-body img { max-height: calc(100vh - 180px); width: auto; max-width: 100%; object-fit: contain; break-inside: avoid; display: block; margin: 10px auto; }
 #write-modal.mode-book .meta-info-row { margin-top: 12px; } 
 .book-nav { display: none !important; }
-.page-indicator { position: fixed; bottom: 40px; right: 30px; left: auto; transform: none; font-family: var(--text-sans); font-size: 13px; color: var(--gray-400); z-index: 2050; background: transparent; padding: 4px 10px; pointer-events: auto !important; cursor: pointer; }
-.book-slider-container { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); width: 80%; max-width: 500px; background: var(--surface-color); backdrop-filter: blur(5px); padding: 12px 20px; border-radius: 30px; box-shadow: 0 4px 20px var(--shadow-light); z-index: 2100; display: flex; align-items: center; border: 1px solid var(--gray-100); opacity: 0.95; }
+.page-indicator { position: fixed; bottom: 40px; right: 30px; left: auto; transform: none; font-family: var(--text-sans); font-size: 13px; color: var(--gray-400); z-index: 2050; background: transparent; padding: 4px 10px; pointer-events: auto !important; cursor: pointer; transition: bottom 0.2s ease; }
+.book-slider-container { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); width: 80%; max-width: 500px; background: var(--surface-color); backdrop-filter: blur(5px); padding: 12px 20px; border-radius: 30px; box-shadow: 0 4px 20px var(--shadow-light); z-index: 2100; display: flex; align-items: center; border: 1px solid var(--gray-100); opacity: 0.95; transition: bottom 0.2s ease; }
+
+/* TTS 바 열림 시 하단 여백 확보 */
+#write-modal.tts-open .editor-body { padding-bottom: 60px; }
+#write-modal.tts-open.mode-book .editor-container { height: calc(100vh - 168px) !important; }
+#write-modal.tts-open.mode-book .editor-body { padding-bottom: 200px; }
+#write-modal.tts-open .page-indicator { bottom: 88px; }
+#write-modal.tts-open .book-slider-container { bottom: 128px; }
 .book-slider-container.hidden { display: none !important; }
 #book-page-slider { width: 100%; height: 6px; -webkit-appearance: none; appearance: none; background: var(--gray-200); border-radius: 3px; outline: none; cursor: pointer; }
 #book-page-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; background: var(--gray-900); border-radius: 50%; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }

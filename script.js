@@ -204,7 +204,7 @@ function setupListeners() {
     }
 
     window.addEventListener('popstate', async () => {
-        stopTTS(); document.getElementById('tts-panel')?.classList.add('hidden');
+        stopTTS(); document.getElementById('tts-panel')?.classList.add('hidden'); document.getElementById('write-modal')?.classList.remove('tts-open');
         const writeModal = document.getElementById('write-modal');
         if (writeModal && !writeModal.classList.contains('hidden')) await saveEntry();
         closeAllModals(false); 
@@ -508,7 +508,7 @@ function setupUIListeners() {
 
     document.getElementById('write-btn')?.addEventListener('click', () => openEditor(false));
     document.getElementById('close-write-btn')?.addEventListener('click', async () => {
-        stopTTS(); document.getElementById('tts-panel')?.classList.add('hidden');
+        stopTTS(); document.getElementById('tts-panel')?.classList.add('hidden'); document.getElementById('write-modal')?.classList.remove('tts-open');
         await saveEntry(); closeAllModals(true); if (navigator.onLine && window.gapi?.client?.getToken()) await saveToDrive();
         if (window.location.search.includes('share')) {
             window.history.replaceState({}, document.title, window.location.pathname);
