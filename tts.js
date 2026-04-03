@@ -10,6 +10,7 @@ let ttsChunks = [];
 let ttsChunkIndex = 0;
 let ttsStartOffset = null;
 let ttsEndOffset = null;
+let ttsGapTimer = null;
 
 // ─── 텍스트 추출 (Range 기반으로 일관성 유지) ───
 
@@ -245,19 +246,28 @@ export function playTTS() {
 
 function splitChunks(text, max) {
     const chunks = [];
-    // 한국어 문장 부호 포함
-    const parts = text.split(/(?<=[.!?。\n·])\s*/);
-    let cur = '';
-    for (const p of parts) {
-        if (!p.trim()) continue;
-        if ((cur + ' ' + p).length > max && cur) {
-            chunks.push(cur.trim());
-            cur = p;
+    // 문장 부호 기준으로 분리 (한국어·영어 포함)
+    const sentences = text.split(/(?<=[.!?。\n])\s*/);
+    for (const s of sentences) {
+        const trimmed = s.trim();
+        if (!trimmed) continue;
+        // 문장이 max를 넘으면 쉼표/중간 구두점에서 한번 더 나눔
+        if (trimmed.length > max) {
+            const sub = trimmed.split(/(?<=[,;:·])\s*/);
+            let cur = '';
+            for (const part of sub) {
+                if ((cur + ' ' + part).length > max && cur) {
+                    chunks.push(cur.trim());
+                    cur = part;
+                } else {
+                    cur += (cur ? ' ' : '') + part;
+                }
+            }
+            if (cur.trim()) chunks.push(cur.trim());
         } else {
-            cur += (cur ? ' ' : '') + p;
+            chunks.push(trimmed);
         }
     }
-    if (cur.trim()) chunks.push(cur.trim());
     return chunks.length ? chunks : [text];
 }
 
@@ -293,7 +303,12 @@ function speakNext() {
     utt.onend = () => {
         ttsChunkIndex++;
         setProgress(Math.round((ttsChunkIndex / ttsChunks.length) * 100));
-        speakNext();
+        const gap = parseFloat(document.getElementById('tts-gap-slider')?.value || '0') * 1000;
+        if (gap > 0 && ttsChunkIndex < ttsChunks.length) {
+            ttsGapTimer = setTimeout(() => speakNext(), gap);
+        } else {
+            speakNext();
+        }
     };
     utt.onerror = (e) => {
         if (e.error !== 'canceled') console.error('TTS error:', e.error);
@@ -314,6 +329,8 @@ export function pauseTTS() {
 
 export function stopTTS() {
     speechSynthesis.cancel();
+    clearTimeout(ttsGapTimer);
+    ttsGapTimer = null;
     isTTSSpeaking = false;
     isTTSPaused = false;
     ttsChunks = [];
@@ -376,13 +393,26 @@ export function updatePitchDisplay() {
     }
 }
 
+export function updateGapDisplay() {
+    const s = document.getElementById('tts-gap-slider');
+    const d = document.getElementById('tts-gap-value');
+    if (s && d) {
+        const v = parseFloat(s.value);
+        d.textContent = v === 0 ? '없음' : v.toFixed(1) + '초';
+        localStorage.setItem('faith_tts_gap', String(v));
+    }
+}
+
 export function initTTS() {
     const speed = localStorage.getItem('faith_tts_speed');
     const pitch = localStorage.getItem('faith_tts_pitch');
+    const gap = localStorage.getItem('faith_tts_gap');
     const ss = document.getElementById('tts-speed-slider');
     const ps = document.getElementById('tts-pitch-slider');
+    const gs = document.getElementById('tts-gap-slider');
     if (speed && ss) { ss.value = speed; updateSpeedDisplay(); }
     if (pitch && ps) { ps.value = pitch; updatePitchDisplay(); }
+    if (gap && gs) { gs.value = gap; updateGapDisplay(); }
 }
 
 export { refreshRangeDisplay as updateTTSRange };
