@@ -501,6 +501,13 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
     text-align: right;
     flex-shrink: 0;
 }
+.tts-time {
+    font-size: 11px;
+    color: var(--gray-400);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
 .tts-scope-label {
     font-size: 10px;
     color: var(--gray-400);
