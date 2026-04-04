@@ -168,7 +168,11 @@ export function loadVoices() {
 
         // 한국어 및 미국 영어(en-US)만 유지
         const normLang = (l) => (l || '').toLowerCase().replace('_', '-');
-        const ko = sortLocal(ttsVoices.filter(v => normLang(v.lang).startsWith('ko')));
+        const ko = sortLocal(
+            ttsVoices
+                .filter(v => normLang(v.lang).startsWith('ko'))
+                .filter(v => !/india/i.test(v.name))
+        );
         const enUs = sortLocal(ttsVoices.filter(v => normLang(v.lang) === 'en-us'));
 
         const addGroup = (voices, label) => {
@@ -348,11 +352,31 @@ export function refreshTTSTotalTime() {
 
 // ─── 재생 ───
 
+/** 괄호 () 및 전각 괄호 （） 안의 내용은 TTS에서 제외 */
+function stripParentheses(text) {
+    if (!text) return '';
+    let prev;
+    let cur = text;
+    // 중첩 괄호까지 처리하기 위해 변화가 없을 때까지 반복
+    do {
+        prev = cur;
+        cur = cur.replace(/\([^()]*\)/g, '').replace(/（[^（）]*）/g, '');
+    } while (cur !== prev);
+    return cur;
+}
+
+/** 문장부호·이모지·기호 등을 제거하고 글자(문자/숫자)와 공백만 남김 */
+function cleanForSpeech(text) {
+    if (!text) return '';
+    // 유니코드 글자(\p{L}), 숫자(\p{N}), 공백만 유지
+    return text.replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/[ \t]+/g, ' ').trim();
+}
+
 function getTextToSpeak() {
     const full = getFullText();
     const s = ttsStartOffset || 0;
     const e = ttsEndOffset || full.length;
-    return full.substring(s, e).trim();
+    return stripParentheses(full.substring(s, e)).trim();
 }
 
 export function playTTS() {
@@ -427,13 +451,26 @@ function speakNext() {
         return;
     }
 
-    const utt = new SpeechSynthesisUtterance(ttsChunks[ttsChunkIndex]);
+    // 현재 청크에서 문장부호·이모지 등을 제거하고 글자만 남김
+    const spoken = cleanForSpeech(ttsChunks[ttsChunkIndex]);
+    if (!spoken) {
+        // 읽을 내용이 없으면 다음 청크로 스킵
+        ttsChunkIndex++;
+        setProgress(Math.round((ttsChunkIndex / ttsChunks.length) * 100));
+        speakNext();
+        return;
+    }
 
-    // 음성
+    const utt = new SpeechSynthesisUtterance(spoken);
+
+    // 음성: 선택된 음성 하나로 고정 (lang까지 맞춰 다른 음성이 섞이지 않도록)
     const voiceName = document.getElementById('tts-voice-select')?.value;
     if (voiceName) {
         const v = ttsVoices.find(x => x.name === voiceName);
-        if (v) utt.voice = v;
+        if (v) {
+            utt.voice = v;
+            utt.lang = v.lang;
+        }
         localStorage.setItem('faith_tts_voice', voiceName);
     }
 
@@ -507,11 +544,13 @@ export function playSelection() {
         return;
     }
     stopTTS();
-    ttsChunks = splitChunks(info.text, 180);
+    const selText = stripParentheses(info.text).trim();
+    if (!selText) { alert('읽을 내용이 없습니다.'); return; }
+    ttsChunks = splitChunks(selText, 180);
     ttsChunkIndex = 0;
     const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
     const gap = parseFloat(document.getElementById('tts-gap-slider')?.value || '0') || 0;
-    ttsTotalSec = info.text.length / CHARS_PER_SEC / speed + Math.max(0, ttsChunks.length - 1) * gap;
+    ttsTotalSec = selText.length / CHARS_PER_SEC / speed + Math.max(0, ttsChunks.length - 1) * gap;
     ttsElapsedBeforePause = 0;
     ttsPlayStartMs = Date.now();
     updateTimeDisplay();
