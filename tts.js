@@ -21,6 +21,9 @@ let ttsTimerInterval = null;
 // 1x 속도에서 TTS가 읽는 평균 문자 수/초 (경험적 추정)
 const CHARS_PER_SEC = 13;
 
+// 마침표 1개를 초과하는 각 마침표마다 추가되는 쉼(초). "..." = 기본 간격 + 1.0초
+const DOT_EXTRA_PAUSE_SEC = 0.5;
+
 // ─── 텍스트 추출 (Range 기반으로 일관성 유지) ───
 
 function getFullText() {
@@ -313,8 +316,11 @@ function estimateTotalTime() {
     const gap = parseFloat(document.getElementById('tts-gap-slider')?.value || '0') || 0;
     const chunks = splitChunks(text, 180);
     const speakTime = text.length / CHARS_PER_SEC / speed;
-    const gapTime = Math.max(0, chunks.length - 1) * gap;
-    return speakTime + gapTime;
+    const baseGapTime = Math.max(0, chunks.length - 1) * gap;
+    const dotGapTime = chunks
+        .slice(0, -1)
+        .reduce((sum, c) => sum + extraPauseForDots(c.dots), 0);
+    return speakTime + baseGapTime + dotGapTime;
 }
 
 function getElapsedSec() {
@@ -412,29 +418,39 @@ export function playTTS() {
 
 function splitChunks(text, max) {
     const chunks = [];
-    // 문장 부호 기준으로 분리 (한국어·영어 포함)
-    const sentences = text.split(/(?<=[.!?。\n])\s*/);
+    // 문장 단위로 분리: "내용 + 종결부호(.!?。 연속 허용) 또는 줄바꿈"
+    // 연속 마침표(예: "...")는 하나의 청크 끝에 그대로 유지되어 쉼 길이 계산에 사용된다.
+    const sentences = text.match(/[^.!?。\n]*(?:[.!?。]+|\n+|$)/g) || [];
     for (const s of sentences) {
         const trimmed = s.trim();
         if (!trimmed) continue;
+        // 말미 마침표 개수 추출 (쉼 길이 계산용)
+        const dotMatch = trimmed.match(/\.+$/);
+        const dots = dotMatch ? dotMatch[0].length : 0;
+
         // 문장이 max를 넘으면 쉼표/중간 구두점에서 한번 더 나눔
         if (trimmed.length > max) {
             const sub = trimmed.split(/(?<=[,;:·])\s*/);
             let cur = '';
             for (const part of sub) {
                 if ((cur + ' ' + part).length > max && cur) {
-                    chunks.push(cur.trim());
+                    chunks.push({ text: cur.trim(), dots: 0 });
                     cur = part;
                 } else {
                     cur += (cur ? ' ' : '') + part;
                 }
             }
-            if (cur.trim()) chunks.push(cur.trim());
+            if (cur.trim()) chunks.push({ text: cur.trim(), dots });
         } else {
-            chunks.push(trimmed);
+            chunks.push({ text: trimmed, dots });
         }
     }
-    return chunks.length ? chunks : [text];
+    return chunks.length ? chunks : [{ text, dots: 0 }];
+}
+
+/** 청크의 마침표 개수에 따른 추가 쉼(초) — 1개는 일반 문장 종결이므로 추가 없음 */
+function extraPauseForDots(dots) {
+    return Math.max(0, (dots || 0) - 1) * DOT_EXTRA_PAUSE_SEC;
 }
 
 function speakNext() {
@@ -452,7 +468,8 @@ function speakNext() {
     }
 
     // 현재 청크에서 문장부호·이모지 등을 제거하고 글자만 남김
-    const spoken = cleanForSpeech(ttsChunks[ttsChunkIndex]);
+    const currentChunk = ttsChunks[ttsChunkIndex];
+    const spoken = cleanForSpeech(currentChunk.text);
     if (!spoken) {
         // 읽을 내용이 없으면 다음 청크로 스킵
         ttsChunkIndex++;
@@ -486,9 +503,11 @@ function speakNext() {
     utt.onend = () => {
         ttsChunkIndex++;
         setProgress(Math.round((ttsChunkIndex / ttsChunks.length) * 100));
-        const gap = parseFloat(document.getElementById('tts-gap-slider')?.value || '0') * 1000;
-        if (gap > 0 && ttsChunkIndex < ttsChunks.length) {
-            ttsGapTimer = setTimeout(() => speakNext(), gap);
+        const baseGap = parseFloat(document.getElementById('tts-gap-slider')?.value || '0') * 1000;
+        const dotGap = extraPauseForDots(currentChunk.dots) * 1000;
+        const totalGap = baseGap + dotGap;
+        if (totalGap > 0 && ttsChunkIndex < ttsChunks.length) {
+            ttsGapTimer = setTimeout(() => speakNext(), totalGap);
         } else {
             speakNext();
         }
@@ -550,7 +569,12 @@ export function playSelection() {
     ttsChunkIndex = 0;
     const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
     const gap = parseFloat(document.getElementById('tts-gap-slider')?.value || '0') || 0;
-    ttsTotalSec = selText.length / CHARS_PER_SEC / speed + Math.max(0, ttsChunks.length - 1) * gap;
+    const dotGapTime = ttsChunks
+        .slice(0, -1)
+        .reduce((sum, c) => sum + extraPauseForDots(c.dots), 0);
+    ttsTotalSec = selText.length / CHARS_PER_SEC / speed
+        + Math.max(0, ttsChunks.length - 1) * gap
+        + dotGapTime;
     ttsElapsedBeforePause = 0;
     ttsPlayStartMs = Date.now();
     updateTimeDisplay();
