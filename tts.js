@@ -17,9 +17,35 @@ let ttsGapTimer = null;
 function getFullText() {
     const editor = document.getElementById('editor-body');
     if (!editor) return '';
-    const range = document.createRange();
-    range.selectNodeContents(editor);
-    return range.toString();
+    return extractTextWithBreaks(editor);
+}
+
+/** DOM을 순회하며 블록 요소·<br> 경계에 \n을 삽입해 텍스트 추출 */
+function extractTextWithBreaks(root) {
+    const blocks = new Set([
+        'DIV','P','BR','LI','TR','H1','H2','H3','H4','H5','H6',
+        'BLOCKQUOTE','PRE','HR','UL','OL','TABLE','SECTION','ARTICLE'
+    ]);
+    let text = '';
+    for (const node of root.childNodes) {
+        if (node.nodeType === Node.TEXT_NODE) {
+            text += node.textContent;
+        } else if (node.nodeType === Node.ELEMENT_NODE) {
+            const tag = node.tagName;
+            if (tag === 'BR') {
+                text += '\n';
+            } else if (blocks.has(tag)) {
+                const inner = extractTextWithBreaks(node);
+                if (inner) {
+                    if (text && !text.endsWith('\n')) text += '\n';
+                    text += inner;
+                }
+            } else {
+                text += extractTextWithBreaks(node);
+            }
+        }
+    }
+    return text;
 }
 
 function getSelectionInfo() {
@@ -29,17 +55,57 @@ function getSelectionInfo() {
     const range = sel.getRangeAt(0);
     if (!editor.contains(range.startContainer) || range.collapsed) return null;
 
-    const pre = document.createRange();
-    pre.selectNodeContents(editor);
-    pre.setEnd(range.startContainer, range.startOffset);
-    const startOff = pre.toString().length;
-
-    const preEnd = document.createRange();
-    preEnd.selectNodeContents(editor);
-    preEnd.setEnd(range.endContainer, range.endOffset);
-    const endOff = preEnd.toString().length;
+    const startOff = getExtractedOffsetAt(editor, range.startContainer, range.startOffset);
+    const endOff = getExtractedOffsetAt(editor, range.endContainer, range.endOffset);
 
     return { start: startOff, end: endOff, text: sel.toString() };
+}
+
+/** extractTextWithBreaks 기준으로 특정 DOM 위치까지의 문자 오프셋 계산 */
+function getExtractedOffsetAt(root, targetNode, targetOffset) {
+    const blocks = new Set([
+        'DIV','P','BR','LI','TR','H1','H2','H3','H4','H5','H6',
+        'BLOCKQUOTE','PRE','HR','UL','OL','TABLE','SECTION','ARTICLE'
+    ]);
+    let text = '';
+    let found = false;
+
+    function processChildren(parent) {
+        if (found) return;
+        for (let i = 0; i < parent.childNodes.length; i++) {
+            if (found) return;
+            if (parent === targetNode && i === targetOffset) { found = true; return; }
+            processNode(parent.childNodes[i]);
+        }
+        if (!found && parent === targetNode && targetOffset === parent.childNodes.length) {
+            found = true;
+        }
+    }
+
+    function processNode(node) {
+        if (found) return;
+        if (node.nodeType === Node.TEXT_NODE) {
+            if (node === targetNode) {
+                text += node.textContent.substring(0, targetOffset);
+                found = true;
+                return;
+            }
+            text += node.textContent;
+        } else if (node.nodeType === Node.ELEMENT_NODE) {
+            const tag = node.tagName;
+            if (tag === 'BR') {
+                text += '\n';
+            } else if (blocks.has(tag)) {
+                if (text && !text.endsWith('\n')) text += '\n';
+                processChildren(node);
+            } else {
+                processChildren(node);
+            }
+        }
+    }
+
+    processChildren(root);
+    return text.length;
 }
 
 // ─── 패널 토글 ───
