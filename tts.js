@@ -12,6 +12,15 @@ let ttsStartOffset = null;
 let ttsEndOffset = null;
 let ttsGapTimer = null;
 
+// 재생 시간 추적
+let ttsTotalSec = 0;           // 예상 총 재생 시간
+let ttsPlayStartMs = 0;        // 현재 재생 세션 시작 시각
+let ttsElapsedBeforePause = 0; // 일시정지 전까지 누적된 경과(ms)
+let ttsTimerInterval = null;
+
+// 1x 속도에서 TTS가 읽는 평균 문자 수/초 (경험적 추정)
+const CHARS_PER_SEC = 13;
+
 // ─── 텍스트 추출 (Range 기반으로 일관성 유지) ───
 
 function getFullText() {
@@ -119,6 +128,7 @@ export function toggleTTSPanel() {
         document.getElementById('write-modal')?.classList.add('tts-open');
         loadVoices();
         refreshRangeDisplay();
+        refreshTTSTotalTime();
     } else {
         panel.classList.add('hidden');
         document.getElementById('write-modal')?.classList.remove('tts-open');
@@ -156,9 +166,10 @@ export function loadVoices() {
             return [...local, ...online];
         };
 
-        const ko = sortLocal(ttsVoices.filter(v => v.lang.startsWith('ko')));
-        const en = sortLocal(ttsVoices.filter(v => v.lang.startsWith('en')));
-        const etc = sortLocal(ttsVoices.filter(v => !v.lang.startsWith('ko') && !v.lang.startsWith('en')));
+        // 한국어 및 미국 영어(en-US)만 유지
+        const normLang = (l) => (l || '').toLowerCase().replace('_', '-');
+        const ko = sortLocal(ttsVoices.filter(v => normLang(v.lang).startsWith('ko')));
+        const enUs = sortLocal(ttsVoices.filter(v => normLang(v.lang) === 'en-us'));
 
         const addGroup = (voices, label) => {
             if (!voices.length) return;
@@ -177,15 +188,17 @@ export function loadVoices() {
         };
 
         addGroup(ko, '🇰🇷 한국어');
-        addGroup(en, '🇺🇸 English');
-        addGroup(etc, '🌐 기타');
+        addGroup(enUs, '🇺🇸 English (US)');
 
         // 저장된 음성 복원, 없으면 한국어 로컬 음성 우선 선택
+        const allowed = [...ko, ...enUs];
         const saved = localStorage.getItem('faith_tts_voice');
-        if (saved && ttsVoices.find(v => v.name === saved)) {
+        if (saved && allowed.find(v => v.name === saved)) {
             sel.value = saved;
         } else if (ko.length) {
             sel.value = ko[0].name;
+        } else if (enUs.length) {
+            sel.value = enUs[0].name;
         }
     };
 
@@ -275,6 +288,62 @@ function refreshRangeDisplay() {
             barLabel.classList.remove('active');
         }
     }
+
+    if (!isTTSSpeaking) refreshTTSTotalTime();
+}
+
+// ─── 재생 시간 계산/표시 ───
+
+function formatTime(sec) {
+    if (!isFinite(sec) || sec < 0) sec = 0;
+    const total = Math.round(sec);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function estimateTotalTime() {
+    const text = getTextToSpeak();
+    if (!text) return 0;
+    const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
+    const gap = parseFloat(document.getElementById('tts-gap-slider')?.value || '0') || 0;
+    const chunks = splitChunks(text, 180);
+    const speakTime = text.length / CHARS_PER_SEC / speed;
+    const gapTime = Math.max(0, chunks.length - 1) * gap;
+    return speakTime + gapTime;
+}
+
+function getElapsedSec() {
+    let ms = ttsElapsedBeforePause;
+    if (isTTSSpeaking && !isTTSPaused && ttsPlayStartMs) {
+        ms += Date.now() - ttsPlayStartMs;
+    }
+    return ms / 1000;
+}
+
+function updateTimeDisplay() {
+    const el = document.getElementById('tts-time-text');
+    if (!el) return;
+    const total = ttsTotalSec || estimateTotalTime();
+    const elapsed = Math.min(getElapsedSec(), total);
+    el.textContent = `${formatTime(elapsed)} / ${formatTime(total)}`;
+}
+
+function startTimeTicker() {
+    stopTimeTicker();
+    ttsTimerInterval = setInterval(updateTimeDisplay, 500);
+}
+
+function stopTimeTicker() {
+    if (ttsTimerInterval) {
+        clearInterval(ttsTimerInterval);
+        ttsTimerInterval = null;
+    }
+}
+
+export function refreshTTSTotalTime() {
+    ttsTotalSec = estimateTotalTime();
+    updateTimeDisplay();
 }
 
 // ─── 재생 ───
@@ -297,6 +366,8 @@ export function playTTS() {
         speechSynthesis.resume();
         isTTSPaused = false;
         isTTSSpeaking = true;
+        ttsPlayStartMs = Date.now();
+        startTimeTicker();
         syncUI();
         return;
     }
@@ -307,6 +378,11 @@ export function playTTS() {
 
     ttsChunks = splitChunks(text, 180);
     ttsChunkIndex = 0;
+    ttsTotalSec = estimateTotalTime();
+    ttsElapsedBeforePause = 0;
+    ttsPlayStartMs = Date.now();
+    updateTimeDisplay();
+    startTimeTicker();
     speakNext();
 }
 
@@ -343,6 +419,10 @@ function speakNext() {
         isTTSPaused = false;
         ttsChunkIndex = 0;
         setProgress(100);
+        stopTimeTicker();
+        ttsElapsedBeforePause = (ttsTotalSec || 0) * 1000;
+        ttsPlayStartMs = 0;
+        updateTimeDisplay();
         syncUI();
         return;
     }
@@ -378,7 +458,9 @@ function speakNext() {
     };
     utt.onerror = (e) => {
         if (e.error !== 'canceled') console.error('TTS error:', e.error);
-        isTTSSpeaking = false; isTTSPaused = false; syncUI();
+        isTTSSpeaking = false; isTTSPaused = false;
+        stopTimeTicker();
+        syncUI();
     };
 
     setProgress(Math.round((ttsChunkIndex / ttsChunks.length) * 100));
@@ -389,6 +471,12 @@ export function pauseTTS() {
     if (isTTSSpeaking && !isTTSPaused) {
         speechSynthesis.pause();
         isTTSPaused = true;
+        if (ttsPlayStartMs) {
+            ttsElapsedBeforePause += Date.now() - ttsPlayStartMs;
+            ttsPlayStartMs = 0;
+        }
+        stopTimeTicker();
+        updateTimeDisplay();
         syncUI();
     }
 }
@@ -402,6 +490,11 @@ export function stopTTS() {
     ttsChunks = [];
     ttsChunkIndex = 0;
     setProgress(0);
+    stopTimeTicker();
+    ttsElapsedBeforePause = 0;
+    ttsPlayStartMs = 0;
+    ttsTotalSec = estimateTotalTime();
+    updateTimeDisplay();
     syncUI();
 }
 
@@ -416,6 +509,13 @@ export function playSelection() {
     stopTTS();
     ttsChunks = splitChunks(info.text, 180);
     ttsChunkIndex = 0;
+    const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
+    const gap = parseFloat(document.getElementById('tts-gap-slider')?.value || '0') || 0;
+    ttsTotalSec = info.text.length / CHARS_PER_SEC / speed + Math.max(0, ttsChunks.length - 1) * gap;
+    ttsElapsedBeforePause = 0;
+    ttsPlayStartMs = Date.now();
+    updateTimeDisplay();
+    startTimeTicker();
     speakNext();
 }
 
@@ -447,6 +547,7 @@ export function updateSpeedDisplay() {
     const s = document.getElementById('tts-speed-slider');
     const d = document.getElementById('tts-speed-value');
     if (s && d) d.textContent = parseFloat(s.value).toFixed(1) + 'x';
+    if (!isTTSSpeaking) refreshTTSTotalTime();
 }
 
 export function updatePitchDisplay() {
@@ -467,6 +568,7 @@ export function updateGapDisplay() {
         d.textContent = v === 0 ? '없음' : v.toFixed(1) + '초';
         localStorage.setItem('faith_tts_gap', String(v));
     }
+    if (!isTTSSpeaking) refreshTTSTotalTime();
 }
 
 export function initTTS() {
@@ -479,6 +581,7 @@ export function initTTS() {
     if (speed && ss) { ss.value = speed; updateSpeedDisplay(); }
     if (pitch && ps) { ps.value = pitch; updatePitchDisplay(); }
     if (gap && gs) { gs.value = gap; updateGapDisplay(); }
+    updateTimeDisplay();
 }
 
 export { refreshRangeDisplay as updateTTSRange };
