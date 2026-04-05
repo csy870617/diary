@@ -154,6 +154,9 @@ function closeTTSSettings() {
 
 // ─── 음성 로드 ───
 
+// 자연스러운(Neural/Natural) 음성을 식별하기 위한 키워드
+const NATURAL_VOICE_RE = /natural|neural|online|enhanced|premium|wavenet|studio|neural2/i;
+
 export function loadVoices() {
     const sel = document.getElementById('tts-voice-select');
     if (!sel) return;
@@ -162,21 +165,25 @@ export function loadVoices() {
         ttsVoices = speechSynthesis.getVoices();
         sel.innerHTML = '';
 
-        // 로컬(기기 내장) 음성 우선 정렬
-        const sortLocal = (voices) => {
-            const local = voices.filter(v => v.localService !== false);
-            const online = voices.filter(v => v.localService === false);
-            return [...local, ...online];
+        // 자연스러움 점수 기반 정렬: Neural/Natural → 온라인 → 로컬 순
+        const sortByNaturalness = (voices) => {
+            const score = (v) => {
+                let s = 0;
+                if (NATURAL_VOICE_RE.test(v.name)) s += 10;
+                if (v.localService === false) s += 1;
+                return s;
+            };
+            return [...voices].sort((a, b) => score(b) - score(a));
         };
 
         // 한국어 및 미국 영어(en-US)만 유지
         const normLang = (l) => (l || '').toLowerCase().replace('_', '-');
-        const ko = sortLocal(
+        const ko = sortByNaturalness(
             ttsVoices
                 .filter(v => normLang(v.lang).startsWith('ko'))
                 .filter(v => !/india/i.test(v.name))
         );
-        const enUs = sortLocal(ttsVoices.filter(v => normLang(v.lang) === 'en-us'));
+        const enUs = sortByNaturalness(ttsVoices.filter(v => normLang(v.lang) === 'en-us'));
 
         const addGroup = (voices, label) => {
             if (!voices.length) return;
@@ -186,8 +193,9 @@ export function loadVoices() {
                 const o = document.createElement('option');
                 o.value = v.name;
                 let displayName = v.name.replace(/Microsoft |Google |Apple /i, '');
+                // 자연스러운 음성은 ✨ 표시, 온라인 전용은 ☁️ 표시
+                if (NATURAL_VOICE_RE.test(v.name)) displayName = '✨ ' + displayName;
                 o.textContent = displayName;
-                // 로컬 음성은 기기 아이콘, 온라인은 표시
                 if (v.localService === false) o.textContent += ' ☁️';
                 g.appendChild(o);
             });
@@ -197,7 +205,7 @@ export function loadVoices() {
         addGroup(ko, '🇰🇷 한국어');
         addGroup(enUs, '🇺🇸 English (US)');
 
-        // 저장된 음성 복원, 없으면 한국어 로컬 음성 우선 선택
+        // 저장된 음성 복원, 없으면 가장 자연스러운 한국어 음성 우선 선택
         const allowed = [...ko, ...enUs];
         const saved = localStorage.getItem('faith_tts_voice');
         if (saved && allowed.find(v => v.name === saved)) {
@@ -371,11 +379,22 @@ function stripParentheses(text) {
     return cur;
 }
 
-/** 문장부호·이모지·기호 등을 제거하고 글자(문자/숫자)와 공백만 남김 */
+/**
+ * 이모지·기호·특수문자는 제거하지만 운율(prosody)에 쓰이는 기본 문장부호는 남긴다.
+ * 한국어 TTS 엔진은 쉼표·마침표 등을 소리내어 읽지 않고 "쉼/억양"에 사용하므로,
+ * 이걸 남겨야 훨씬 자연스럽게 들린다.
+ */
 function cleanForSpeech(text) {
     if (!text) return '';
-    // 유니코드 글자(\p{L}), 숫자(\p{N}), 공백만 유지
-    return text.replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/[ \t]+/g, ' ').trim();
+    // 허용: 글자(\p{L}), 숫자(\p{N}), 공백, 운율용 기본 문장부호
+    //  . , ! ? : ; … · ~ - — – 및 한중일 대응 부호(。、，．！？：；‥)
+    //  큰따옴표·작은따옴표·한국식 인용부호(「」『』)
+    const allowed = /[\p{L}\p{N}\s.,!?:;…·~\-—–。、，．！？：；‥"'「」『』]/u;
+    let out = '';
+    for (const ch of text) {
+        out += allowed.test(ch) ? ch : ' ';
+    }
+    return out.replace(/[ \t]+/g, ' ').trim();
 }
 
 function getTextToSpeak() {
