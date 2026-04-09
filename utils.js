@@ -521,9 +521,29 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
             } else {
                 // 일반 복사 - 셀 클립보드 초기화
                 globalCellClipboard = { cellData: null, rows: 0, cols: 0 };
+
+                // 선택된 이미지 복사 (에디터에 포커스가 없을 때 대비)
+                const selectedImg = callbacks.getSelectedElement?.();
+                if (selectedImg && selectedImg.tagName === 'IMG') {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    const imgHtml = selectedImg.outerHTML;
+                    const copyId = `__img_${Date.now()}`;
+                    internalClipboard = { html: imgHtml, text: copyId };
+
+                    if (navigator.clipboard && window.ClipboardItem) {
+                        const htmlBlob = new Blob([imgHtml], { type: 'text/html' });
+                        const textBlob = new Blob([copyId], { type: 'text/plain' });
+                        navigator.clipboard.write([
+                            new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': textBlob })
+                        ]).catch(() => {});
+                    }
+                    return;
+                }
             }
         }
-        
+
         // Ctrl+X / Cmd+X: 잘라내기
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
             // 읽기 전용 모드에서는 잘라내기 차단 (복사만 허용)
@@ -562,9 +582,34 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
             } else {
                 // 일반 잘라내기 - 셀 클립보드 초기화
                 globalCellClipboard = { cellData: null, rows: 0, cols: 0 };
+
+                // 선택된 이미지 잘라내기 (에디터에 포커스가 없을 때 대비)
+                const selectedImg = callbacks.getSelectedElement?.();
+                if (selectedImg && selectedImg.tagName === 'IMG') {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    const imgHtml = selectedImg.outerHTML;
+                    const copyId = `__img_${Date.now()}`;
+                    internalClipboard = { html: imgHtml, text: copyId };
+
+                    if (navigator.clipboard && window.ClipboardItem) {
+                        const htmlBlob = new Blob([imgHtml], { type: 'text/html' });
+                        const textBlob = new Blob([copyId], { type: 'text/plain' });
+                        navigator.clipboard.write([
+                            new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': textBlob })
+                        ]).catch(() => {});
+                    }
+
+                    if (callbacks.onBeforePaste) callbacks.onBeforePaste();
+                    selectedImg.remove();
+                    if (callbacks.clearSelectedElement) callbacks.clearSelectedElement();
+                    if (callbacks.onAfterPaste) callbacks.onAfterPaste();
+                    return;
+                }
             }
         }
-        
+
         // Ctrl+V / Cmd+V: 붙여넣기
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
             // 대상 셀 찾기: 선택된 셀 중 첫 번째 또는 현재 커서 위치의 셀
@@ -641,6 +686,18 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
         // 일반 텍스트 선택 복사 - 셀 클립보드 초기화
         globalCellClipboard = { cellData: null, rows: 0, cols: 0 };
 
+        // 선택된 이미지 복사
+        const selectedImg = callbacks.getSelectedElement?.();
+        if (selectedImg && selectedImg.tagName === 'IMG') {
+            const imgHtml = selectedImg.outerHTML;
+            const copyId = `__img_${Date.now()}`;
+            e.clipboardData.setData('text/html', imgHtml);
+            e.clipboardData.setData('text/plain', copyId);
+            internalClipboard = { html: imgHtml, text: copyId };
+            e.preventDefault();
+            return;
+        }
+
         const selection = window.getSelection();
         if (!selection.rangeCount || selection.isCollapsed) return;
 
@@ -666,6 +723,24 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
 
         // 일반 텍스트 잘라내기 - 셀 클립보드 초기화
         globalCellClipboard = { cellData: null, rows: 0, cols: 0 };
+
+        // 선택된 이미지 잘라내기
+        const selectedImg = callbacks.getSelectedElement?.();
+        if (selectedImg && selectedImg.tagName === 'IMG') {
+            const imgHtml = selectedImg.outerHTML;
+            const copyId = `__img_${Date.now()}`;
+            e.clipboardData.setData('text/html', imgHtml);
+            e.clipboardData.setData('text/plain', copyId);
+            internalClipboard = { html: imgHtml, text: copyId };
+
+            if (callbacks.onBeforePaste) callbacks.onBeforePaste();
+            selectedImg.remove();
+            if (callbacks.clearSelectedElement) callbacks.clearSelectedElement();
+            if (callbacks.onAfterPaste) callbacks.onAfterPaste();
+
+            e.preventDefault();
+            return;
+        }
 
         const selection = window.getSelection();
         if (!selection.rangeCount || selection.isCollapsed) return;

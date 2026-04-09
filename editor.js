@@ -686,7 +686,9 @@ function setupBasicHandling() {
     // 하이퍼링크 보존 기능 설정 (복사/잘라내기/붙여넣기)
     setupLinkPreservation(editorBody, {
         onBeforePaste: () => saveBeforeChange('paste'),
-        onAfterPaste: () => triggerAutoSave()
+        onAfterPaste: () => triggerAutoSave(),
+        getSelectedElement: () => currentSelectedElement,
+        clearSelectedElement: () => hideSelection()
     });
 
     editorBody.onmousemove = (e) => {
