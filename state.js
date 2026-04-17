@@ -11,6 +11,7 @@ export const state = {
     categoryUpdatedAt: new Date(0).toISOString(),
     currentSortBy: 'created',
     currentSortOrder: 'desc',
+    categorySorts: {},
     currentViewMode: 'default',
     isLoading: true,
     isEditMode: false,
@@ -42,6 +43,32 @@ export function saveCategoriesToLocal() {
 
 export function isReadOnlyView() {
     return state.currentViewMode === 'readOnly' || state.currentViewMode === 'book';
+}
+
+export function saveCategorySortsToLocal() {
+    localStorage.setItem('faithCategorySorts', JSON.stringify(state.categorySorts));
+}
+
+export function loadCategorySortsFromLocal() {
+    const raw = localStorage.getItem('faithCategorySorts');
+    if (!raw) return;
+    try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') state.categorySorts = parsed;
+    } catch (e) {
+        console.error("카테고리 정렬 설정 로드 실패", e);
+    }
+}
+
+export function getCategorySort(catId) {
+    const saved = state.categorySorts[catId];
+    if (saved && saved.sortBy && saved.sortOrder) return { sortBy: saved.sortBy, sortOrder: saved.sortOrder };
+    return { sortBy: 'created', sortOrder: 'desc' };
+}
+
+export function setCategorySort(catId, sortBy, sortOrder) {
+    state.categorySorts[catId] = { sortBy, sortOrder };
+    saveCategorySortsToLocal();
 }
 
 export function loadCategoriesFromLocal() {

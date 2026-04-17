@@ -1,4 +1,4 @@
-import { state, saveCategoriesToLocal } from './state.js';
+import { state, saveCategoriesToLocal, getCategorySort } from './state.js';
 import { updateEntryField, bulkUpdateEntryField, emptyTrash, saveEntry, restoreEntry, permanentDelete } from './data.js';
 import { openEditor, toggleViewMode, applyFontStyle, turnPage, formatDoc, changeGlobalFontSize, insertSticker, insertImage } from './editor.js';
 import { saveToDrive, syncFromDrive } from './drive.js'; 
@@ -10,6 +10,16 @@ function stripHtml(html) {
     const div = document.createElement('div');
     div.innerHTML = html;
     return div.textContent || '';
+}
+
+export function applyCategorySort() {
+    const sort = getCategorySort(state.currentCategory);
+    state.currentSortBy = sort.sortBy;
+    state.currentSortOrder = sort.sortOrder;
+    const select = getEl('sort-criteria');
+    if (select) select.value = sort.sortBy;
+    const icon = getEl('sort-icon');
+    if (icon) icon.className = sort.sortOrder === 'desc' ? 'ph ph-sort-descending' : 'ph ph-sort-ascending';
 }
 
 export function renderEntries(keyword = '') {
@@ -100,6 +110,7 @@ export function renderTabs() {
         btn.innerHTML = `<span>${cat.name}</span>`;
         btn.onclick = () => {
             state.currentCategory = cat.id;
+            applyCategorySort();
             if (state.isSelectMode) exitSelectMode();
             renderTabs();
             renderEntries();
@@ -242,9 +253,9 @@ export function deleteCategoryAction() {
         // 삭제된 카테고리에 속한 글을 첫 번째 카테고리로 이동
         state.entries.forEach(e => { if (e.category === state.contextCatId) e.category = newCatId; });
         localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-        if (state.currentCategory === state.contextCatId) state.currentCategory = newCatId;
+        if (state.currentCategory === state.contextCatId) { state.currentCategory = newCatId; applyCategorySort(); }
         state.categoryUpdatedAt = new Date().toISOString();
-        saveCategoriesToLocal(); renderTabs(); renderEntries(); saveToDrive(); 
+        saveCategoriesToLocal(); renderTabs(); renderEntries(); saveToDrive();
     }
 }
 

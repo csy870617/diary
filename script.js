@@ -1,6 +1,6 @@
-import { state, loadCategoriesFromLocal, saveCategoriesToLocal, isReadOnlyView } from './state.js';
+import { state, loadCategoriesFromLocal, saveCategoriesToLocal, isReadOnlyView, loadCategorySortsFromLocal, setCategorySort } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
-import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, toggleSelectMode, exitSelectMode, selectAllEntries } from './ui.js';
+import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort } from './ui.js';
 import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, ensureTokenOnResume, startKeepAlive } from './drive.js';
@@ -59,9 +59,11 @@ function init() {
     const sharedData = urlParams.get('share');
 
     loadCategoriesFromLocal();
+    loadCategorySortsFromLocal();
     loadDataFromLocal();
     checkOldTrash();
     renderTabs();
+    applyCategorySort();
     state.isLoading = false;
     renderEntries();
 
@@ -254,12 +256,17 @@ function setupUIListeners() {
     scrollTopBtn?.addEventListener('click', () => { editorContainer.scrollTo({ top: 0, behavior: 'smooth' }); });
 
     document.getElementById('theme-toggle-btn')?.addEventListener('click', toggleTheme);
-    document.getElementById('sort-criteria')?.addEventListener('change', (e) => { state.currentSortBy = e.target.value; renderEntries(); });
-    document.getElementById('sort-order-btn')?.addEventListener('click', () => { 
-        state.currentSortOrder = state.currentSortOrder === 'desc' ? 'asc' : 'desc'; 
+    document.getElementById('sort-criteria')?.addEventListener('change', (e) => {
+        state.currentSortBy = e.target.value;
+        setCategorySort(state.currentCategory, state.currentSortBy, state.currentSortOrder);
+        renderEntries();
+    });
+    document.getElementById('sort-order-btn')?.addEventListener('click', () => {
+        state.currentSortOrder = state.currentSortOrder === 'desc' ? 'asc' : 'desc';
         const icon = document.getElementById('sort-icon');
         if (icon) { icon.className = state.currentSortOrder === 'desc' ? 'ph ph-sort-descending' : 'ph ph-sort-ascending'; }
-        renderEntries(); 
+        setCategorySort(state.currentCategory, state.currentSortBy, state.currentSortOrder);
+        renderEntries();
     });
     
     document.getElementById('search-input')?.addEventListener('input', (e) => renderEntries(e.target.value));
