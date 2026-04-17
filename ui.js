@@ -240,14 +240,11 @@ export function renderFolders() {
     row.innerHTML = '';
 
     if (state.allFolders.length === 0) {
-        const addBtn = document.createElement('button');
-        addBtn.className = 'add-folder-btn';
-        addBtn.innerHTML = '<i class="ph ph-folder-plus"></i> 폴더 추가';
-        addBtn.title = '폴더 추가';
-        addBtn.onclick = addNewFolder;
-        row.appendChild(addBtn);
+        row.classList.add('hidden');
+        state.currentFolder = null;
         return;
     }
+    row.classList.remove('hidden');
 
     const allBtn = document.createElement('button');
     allBtn.className = `folder-tab ${state.currentFolder === null ? 'active' : ''}`;
@@ -284,13 +281,6 @@ export function renderFolders() {
         attachFolderContextMenu(btn, folder.id);
         row.appendChild(btn);
     });
-
-    const addBtn = document.createElement('button');
-    addBtn.className = 'add-folder-btn';
-    addBtn.innerHTML = '<i class="ph ph-folder-plus"></i>';
-    addBtn.title = '폴더 추가';
-    addBtn.onclick = addNewFolder;
-    row.appendChild(addBtn);
 }
 
 function attachFolderContextMenu(element, folderId) {
@@ -314,17 +304,6 @@ function showFolderContextMenu(x, y, folderId) {
     menu.style.left = `${x}px`;
     if (x + 160 > window.innerWidth) menu.style.left = `${window.innerWidth - 170}px`;
     menu.classList.remove('hidden');
-}
-
-export function addNewFolder() {
-    const name = prompt("새 폴더 이름");
-    if (name && name.trim()) {
-        const id = 'folder_' + Date.now();
-        state.allFolders.push({ id, name: name.trim() });
-        state.folderOrder.push(id);
-        state.categoryUpdatedAt = new Date().toISOString();
-        saveCategoriesToLocal(); renderFolders(); saveToDrive();
-    }
 }
 
 export function renameFolderAction() {
@@ -353,8 +332,7 @@ export function deleteFolderAction() {
     }
 }
 
-export function openFolderAssignModal() {
-    getEl('category-context-menu')?.classList.add('hidden');
+function renderFolderAssignList() {
     const modal = getEl('folder-assign-modal');
     const list = getEl('folder-assign-list');
     if (!modal || !list) return;
@@ -385,8 +363,34 @@ export function openFolderAssignModal() {
         };
         list.appendChild(div);
     });
+}
 
+export function openFolderAssignModal() {
+    getEl('category-context-menu')?.classList.add('hidden');
+    const modal = getEl('folder-assign-modal');
+    if (!modal) return;
+    renderFolderAssignList();
     openModal(modal);
+}
+
+export function createFolderFromAssignModal() {
+    const name = prompt("새 폴더 이름");
+    if (!name || !name.trim()) return;
+    const id = 'folder_' + Date.now();
+    state.allFolders.push({ id, name: name.trim() });
+    state.folderOrder.push(id);
+    state.categoryUpdatedAt = new Date().toISOString();
+
+    const cat = state.allCategories.find(c => c.id === state.contextCatId);
+    if (cat) cat.folderId = id;
+
+    saveCategoriesToLocal();
+    renderFolders();
+    renderTabs();
+    saveToDrive();
+
+    const modal = getEl('folder-assign-modal');
+    if (modal) modal.classList.add('hidden');
 }
 
 export function addNewCategory() {
