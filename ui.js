@@ -248,6 +248,16 @@ export function deleteCategoryAction() {
     }
 }
 
+export async function renameEntryAction() {
+    getEl('context-menu')?.classList.add('hidden');
+    const entry = state.entries.find(e => e.id === state.contextTargetId);
+    if (!entry) return;
+    const newTitle = prompt(`새로운 제목:`, entry.title || '');
+    if (newTitle !== null && newTitle.trim() !== "") {
+        await updateEntryField(state.contextTargetId, { title: newTitle.trim() });
+    }
+}
+
 export function openMoveModal() {
     getEl('context-menu')?.classList.add('hidden');
     const moveModal = getEl('move-modal');
