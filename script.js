@@ -1,6 +1,6 @@
 import { state, loadCategoriesFromLocal, saveCategoriesToLocal, isReadOnlyView, loadCategorySortsFromLocal, setCategorySort } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
-import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, addNewFolder, renameFolderAction, deleteFolderAction, openFolderAssignModal, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort } from './ui.js';
+import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, renameFolderAction, deleteFolderAction, openFolderAssignModal, createFolderFromAssignModal, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort } from './ui.js';
 import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, ensureTokenOnResume, startKeepAlive } from './drive.js';
@@ -213,14 +213,12 @@ function setupListeners() {
                 saveCategoriesToLocal(); await saveToDrive();
             }
         });
-        tabContainer.addEventListener('wheel', (evt) => { if (evt.deltaY !== 0) { evt.preventDefault(); tabContainer.scrollLeft += evt.deltaY; } });
     }
 
     const folderRow = document.getElementById('folder-row');
     if (typeof Sortable !== 'undefined' && folderRow) {
         new Sortable(folderRow, {
             animation: 150, delay: 200, delayOnTouchOnly: true, touchStartThreshold: 5,
-            filter: '.add-folder-btn',
             onEnd: async () => {
                 const newOrder = [];
                 folderRow.querySelectorAll('[data-folder-id]').forEach(btn => { if(btn.dataset.folderId) newOrder.push(btn.dataset.folderId); });
@@ -229,7 +227,11 @@ function setupListeners() {
                 saveCategoriesToLocal(); await saveToDrive();
             }
         });
-        folderRow.addEventListener('wheel', (evt) => { if (evt.deltaY !== 0) { evt.preventDefault(); folderRow.scrollLeft += evt.deltaY; } });
+    }
+
+    const navRow = document.querySelector('.nav-row');
+    if (navRow) {
+        navRow.addEventListener('wheel', (evt) => { if (evt.deltaY !== 0) { evt.preventDefault(); navRow.scrollLeft += evt.deltaY; } });
     }
 
     window.addEventListener('popstate', async () => {
@@ -579,6 +581,7 @@ function setupUIListeners() {
     document.getElementById('ctx-folder-rename')?.addEventListener('click', renameFolderAction);
     document.getElementById('ctx-folder-delete')?.addEventListener('click', deleteFolderAction);
     document.getElementById('close-folder-assign-btn')?.addEventListener('click', () => document.getElementById('folder-assign-modal')?.classList.add('hidden'));
+    document.getElementById('new-folder-inline-btn')?.addEventListener('click', createFolderFromAssignModal);
 }
 
 function openColorPalette() {
