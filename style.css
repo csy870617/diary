@@ -74,6 +74,13 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .icon-nav-btn.trash:hover { color: var(--danger); }
 .divider-vertical { width: 1px; height: 12px; background: var(--gray-200); margin: 0 4px; }
 .add-cat-btn { background: var(--gray-100); border: none; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--gray-500); cursor: pointer; font-size: 14px; margin-left: 5px; flex-shrink: 0; }
+.folder-row { display: flex; gap: 6px; padding: 6px 24px 0; overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none; }
+.folder-row:empty { display: none; }
+.folder-tab { background: none; border: 1px solid var(--gray-200); border-radius: 20px; padding: 3px 12px; font-size: 12px; font-family: var(--text-sans); color: var(--gray-500); cursor: pointer; display: flex; align-items: center; gap: 4px; white-space: nowrap; flex-shrink: 0; transition: all 0.15s; user-select: none; }
+.folder-tab:hover { border-color: var(--gray-400); color: var(--gray-900); }
+.folder-tab.active { background: var(--gray-900); border-color: var(--gray-900); color: var(--surface-color); font-weight: 600; }
+.add-folder-btn { background: none; border: 1px dashed var(--gray-200); border-radius: 20px; padding: 3px 10px; font-size: 14px; color: var(--gray-400); cursor: pointer; display: flex; align-items: center; flex-shrink: 0; transition: all 0.15s; }
+.add-folder-btn:hover { border-color: var(--gray-400); color: var(--gray-500); }
 
 /* 에디터 툴바 */
 .editor-toolbar { position: sticky; top: 0; left: 0; width: 100%; background: var(--surface-color); border-top: none; border-bottom: 1px solid var(--gray-200); z-index: 2002; transition: all 0.3s ease; }
@@ -321,6 +328,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     .search-container { flex: none; width: 32px; }
     .search-container:focus-within, .search-container:hover { width: 140px; }
     .nav-row { padding: 0 4px; overflow-x: auto; }
+    .folder-row { padding: 6px 4px 0; }
     .controls-row { padding: 0 4px 10px; }
     .floating-pen { right: 20px; bottom: 20px; width: 50px; height: 50px; font-size: 22px; }
     .editor-container { padding: 20px 20px 100px; }

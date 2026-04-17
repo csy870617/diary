@@ -1,6 +1,6 @@
 import { state, loadCategoriesFromLocal, saveCategoriesToLocal, isReadOnlyView, loadCategorySortsFromLocal, setCategorySort } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
-import { renderEntries, renderTabs, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort } from './ui.js';
+import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, addNewFolder, renameFolderAction, deleteFolderAction, openFolderAssignModal, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort } from './ui.js';
 import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, ensureTokenOnResume, startKeepAlive } from './drive.js';
@@ -62,6 +62,7 @@ function init() {
     loadCategorySortsFromLocal();
     loadDataFromLocal();
     checkOldTrash();
+    renderFolders();
     renderTabs();
     applyCategorySort();
     state.isLoading = false;
@@ -196,13 +197,39 @@ function setupListeners() {
         new Sortable(tabContainer, {
             animation: 150, delay: 200, delayOnTouchOnly: true, touchStartThreshold: 5,
             onEnd: async () => {
-                const newOrder = [];
-                tabContainer.querySelectorAll('.tab-btn').forEach(btn => { if(btn.dataset.id) newOrder.push(btn.dataset.id); });
-                state.categoryOrder = newOrder; state.categoryUpdatedAt = new Date().toISOString();
+                const visibleIds = [];
+                tabContainer.querySelectorAll('.tab-btn').forEach(btn => { if(btn.dataset.id) visibleIds.push(btn.dataset.id); });
+                if (state.currentFolder !== null) {
+                    const folderSet = new Set(visibleIds);
+                    const others = state.categoryOrder.filter(id => !folderSet.has(id));
+                    const insertIdx = state.categoryOrder.findIndex(id => folderSet.has(id));
+                    state.categoryOrder = insertIdx >= 0
+                        ? [...others.slice(0, insertIdx), ...visibleIds, ...others.slice(insertIdx)]
+                        : [...others, ...visibleIds];
+                } else {
+                    state.categoryOrder = visibleIds;
+                }
+                state.categoryUpdatedAt = new Date().toISOString();
                 saveCategoriesToLocal(); await saveToDrive();
             }
         });
         tabContainer.addEventListener('wheel', (evt) => { if (evt.deltaY !== 0) { evt.preventDefault(); tabContainer.scrollLeft += evt.deltaY; } });
+    }
+
+    const folderRow = document.getElementById('folder-row');
+    if (typeof Sortable !== 'undefined' && folderRow) {
+        new Sortable(folderRow, {
+            animation: 150, delay: 200, delayOnTouchOnly: true, touchStartThreshold: 5,
+            filter: '.add-folder-btn',
+            onEnd: async () => {
+                const newOrder = [];
+                folderRow.querySelectorAll('[data-folder-id]').forEach(btn => { if(btn.dataset.folderId) newOrder.push(btn.dataset.folderId); });
+                state.folderOrder = newOrder;
+                state.categoryUpdatedAt = new Date().toISOString();
+                saveCategoriesToLocal(); await saveToDrive();
+            }
+        });
+        folderRow.addEventListener('wheel', (evt) => { if (evt.deltaY !== 0) { evt.preventDefault(); folderRow.scrollLeft += evt.deltaY; } });
     }
 
     window.addEventListener('popstate', async () => {
@@ -234,7 +261,7 @@ function setupListeners() {
         const sliderContainer = document.getElementById('book-slider-container');
         if (sliderContainer && !sliderContainer.classList.contains('hidden') && !sliderContainer.contains(e.target) && !e.target.closest('#page-indicator')) sliderContainer.classList.add('hidden');
 
-        ['context-menu', 'category-context-menu', 'color-palette-popup', 'sticker-palette', 'table-modal'].forEach(id => {
+        ['context-menu', 'category-context-menu', 'folder-context-menu', 'color-palette-popup', 'sticker-palette', 'table-modal'].forEach(id => {
             const el = document.getElementById(id);
             if (el && !el.contains(e.target) && !e.target.closest('.tool-btn') && !e.target.closest('#font-size-input')) el.classList.add('hidden');
         });
@@ -547,7 +574,11 @@ function setupUIListeners() {
     document.getElementById('ctx-copy')?.addEventListener('click', () => { duplicateEntry(state.contextTargetId); document.getElementById('context-menu').classList.add('hidden'); });
     document.getElementById('ctx-delete')?.addEventListener('click', () => { moveToTrash(state.contextTargetId); document.getElementById('context-menu').classList.add('hidden'); });
     document.getElementById('ctx-cat-rename')?.addEventListener('click', renameCategoryAction);
+    document.getElementById('ctx-cat-assign-folder')?.addEventListener('click', openFolderAssignModal);
     document.getElementById('ctx-cat-delete')?.addEventListener('click', deleteCategoryAction);
+    document.getElementById('ctx-folder-rename')?.addEventListener('click', renameFolderAction);
+    document.getElementById('ctx-folder-delete')?.addEventListener('click', deleteFolderAction);
+    document.getElementById('close-folder-assign-btn')?.addEventListener('click', () => document.getElementById('folder-assign-modal')?.classList.add('hidden'));
 }
 
 function openColorPalette() {
