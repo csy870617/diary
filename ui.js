@@ -99,7 +99,7 @@ export function renderTabs() {
     state.allCategories.forEach(c => { if(!state.categoryOrder.includes(c.id)) { allSorted.push(c); state.categoryOrder.push(c.id); } });
 
     const sortedCats = state.currentFolder === null
-        ? allSorted
+        ? allSorted.filter(c => !c.folderId)
         : allSorted.filter(c => c.folderId === state.currentFolder);
 
     const currentExists = sortedCats.find(c => c.id === state.currentCategory);
@@ -109,7 +109,8 @@ export function renderTabs() {
     }
 
     if (sortedCats.length === 0) {
-        tabContainer.innerHTML = `<span style="font-size:13px; color:var(--gray-400); font-family:'Pretendard'; padding:8px 4px;">이 폴더에 주제가 없습니다.</span>`;
+        const emptyMsg = state.currentFolder === null ? '주제가 없습니다.' : '이 폴더에 주제가 없습니다.';
+        tabContainer.innerHTML = `<span style="font-size:13px; color:var(--gray-400); font-family:'Pretendard'; padding:8px 4px;">${emptyMsg}</span>`;
         const addBtn2 = document.createElement('button');
         addBtn2.className = 'add-cat-btn';
         addBtn2.innerHTML = '<i class="ph ph-plus"></i>';
@@ -239,33 +240,61 @@ export function renderFolders() {
     if (!row) return;
     row.innerHTML = '';
 
-    if (state.allFolders.length === 0) {
-        row.classList.add('hidden');
+    if (state.currentFolder !== null && !state.allFolders.find(f => f.id === state.currentFolder)) {
         state.currentFolder = null;
-        return;
     }
-    row.classList.remove('hidden');
-
-    const allBtn = document.createElement('button');
-    allBtn.className = `folder-tab ${state.currentFolder === null ? 'active' : ''}`;
-    allBtn.textContent = '전체';
-    allBtn.onclick = () => {
-        state.currentFolder = null;
-        renderFolders();
-        renderTabs();
-        renderEntries();
-    };
-    row.appendChild(allBtn);
 
     const sortedFolders = [];
     state.folderOrder.forEach(id => { const f = state.allFolders.find(f => f.id === id); if (f) sortedFolders.push(f); });
     state.allFolders.forEach(f => { if (!state.folderOrder.includes(f.id)) sortedFolders.push(f); });
 
-    sortedFolders.forEach(folder => {
+    const visibleFolders = sortedFolders.filter(f => (f.parentFolderId || null) === state.currentFolder);
+
+    if (state.currentFolder === null && state.allFolders.length === 0) {
+        row.classList.add('hidden');
+        return;
+    }
+    row.classList.remove('hidden');
+
+    if (state.currentFolder !== null) {
+        const currentFolderObj = state.allFolders.find(f => f.id === state.currentFolder);
+        const parentId = currentFolderObj && currentFolderObj.parentFolderId ? currentFolderObj.parentFolderId : null;
+        const parentName = parentId ? (state.allFolders.find(f => f.id === parentId)?.name || '뒤로') : '홈';
+
+        const backBtn = document.createElement('button');
+        backBtn.className = 'folder-tab folder-back-btn';
+        backBtn.innerHTML = `<i class="ph ph-caret-left"></i> ${parentName}`;
+        backBtn.onclick = () => {
+            state.currentFolder = parentId;
+            const validCats = state.allCategories.filter(c => (c.folderId || null) === parentId);
+            if (validCats.length > 0 && !validCats.find(c => c.id === state.currentCategory)) {
+                state.currentCategory = validCats[0].id;
+                applyCategorySort();
+            }
+            if (state.isSelectMode) exitSelectMode();
+            renderFolders();
+            renderTabs();
+            renderEntries();
+        };
+        row.appendChild(backBtn);
+
+        if (currentFolderObj) {
+            const currentBtn = document.createElement('button');
+            currentBtn.className = 'folder-tab folder-current active';
+            currentBtn.dataset.folderId = currentFolderObj.id;
+            currentBtn.innerHTML = `<i class="ph ph-folder-open"></i> ${currentFolderObj.name}`;
+            attachFolderContextMenu(currentBtn, currentFolderObj.id);
+            row.appendChild(currentBtn);
+        }
+    }
+
+    visibleFolders.forEach(folder => {
         const btn = document.createElement('button');
-        btn.className = `folder-tab ${state.currentFolder === folder.id ? 'active' : ''}`;
+        btn.className = 'folder-tab';
         btn.dataset.folderId = folder.id;
-        btn.innerHTML = `<i class="ph ph-folder-simple"></i> ${folder.name}`;
+        const hasChildren = state.allFolders.some(f => f.parentFolderId === folder.id);
+        const childIcon = hasChildren ? ' <i class="ph ph-caret-right" style="font-size:10px;opacity:0.6;"></i>' : '';
+        btn.innerHTML = `<i class="ph ph-folder-simple"></i> ${folder.name}${childIcon}`;
         btn.onclick = () => {
             state.currentFolder = folder.id;
             const catsInFolder = state.allCategories.filter(c => c.folderId === folder.id);
@@ -281,6 +310,44 @@ export function renderFolders() {
         attachFolderContextMenu(btn, folder.id);
         row.appendChild(btn);
     });
+
+    const addBtn = document.createElement('button');
+    addBtn.className = 'folder-tab folder-add-btn';
+    addBtn.title = state.currentFolder === null ? '새 폴더 만들기' : '새 하위 폴더 만들기';
+    addBtn.innerHTML = '<i class="ph ph-folder-plus"></i>';
+    addBtn.onclick = createFolderInCurrent;
+    row.appendChild(addBtn);
+}
+
+export function createFolderInCurrent() {
+    const isSub = state.currentFolder !== null;
+    const promptLabel = isSub ? '새 하위 폴더 이름:' : '새 폴더 이름:';
+    const name = prompt(promptLabel);
+    if (!name || !name.trim()) return;
+    const id = 'folder_' + Date.now();
+    const folderObj = { id, name: name.trim() };
+    if (isSub) folderObj.parentFolderId = state.currentFolder;
+    state.allFolders.push(folderObj);
+    state.folderOrder.push(id);
+    state.categoryUpdatedAt = new Date().toISOString();
+    saveCategoriesToLocal();
+    renderFolders();
+    saveToDrive();
+}
+
+export function addSubfolderAction() {
+    getEl('folder-context-menu')?.classList.add('hidden');
+    const parent = state.allFolders.find(f => f.id === state.contextFolderId);
+    if (!parent) return;
+    const name = prompt(`'${parent.name}' 안에 새 하위 폴더 이름:`);
+    if (!name || !name.trim()) return;
+    const id = 'folder_' + Date.now();
+    state.allFolders.push({ id, name: name.trim(), parentFolderId: parent.id });
+    state.folderOrder.push(id);
+    state.categoryUpdatedAt = new Date().toISOString();
+    saveCategoriesToLocal();
+    renderFolders();
+    saveToDrive();
 }
 
 function attachFolderContextMenu(element, folderId) {
@@ -322,11 +389,25 @@ export function deleteFolderAction() {
     getEl('folder-context-menu')?.classList.add('hidden');
     const folder = state.allFolders.find(f => f.id === state.contextFolderId);
     if (!folder) return;
-    if (confirm(`'${folder.name}' 폴더를 삭제하시겠습니까?\n(소속된 주제는 폴더 없음 상태가 됩니다)`)) {
-        state.allCategories.forEach(c => { if (c.folderId === state.contextFolderId) delete c.folderId; });
-        state.allFolders = state.allFolders.filter(f => f.id !== state.contextFolderId);
-        state.folderOrder = state.folderOrder.filter(id => id !== state.contextFolderId);
-        if (state.currentFolder === state.contextFolderId) state.currentFolder = null;
+
+    const collectDescendants = (id) => {
+        const direct = state.allFolders.filter(f => f.parentFolderId === id);
+        return direct.reduce((acc, f) => acc.concat([f.id], collectDescendants(f.id)), []);
+    };
+    const descendants = collectDescendants(folder.id);
+    const allToDelete = new Set([folder.id, ...descendants]);
+
+    const confirmMsg = descendants.length > 0
+        ? `'${folder.name}' 폴더와 그 안의 하위 폴더 ${descendants.length}개를 삭제하시겠습니까?\n(소속된 주제는 폴더 없음 상태가 됩니다)`
+        : `'${folder.name}' 폴더를 삭제하시겠습니까?\n(소속된 주제는 폴더 없음 상태가 됩니다)`;
+
+    if (confirm(confirmMsg)) {
+        state.allCategories.forEach(c => { if (c.folderId && allToDelete.has(c.folderId)) delete c.folderId; });
+        state.allFolders = state.allFolders.filter(f => !allToDelete.has(f.id));
+        state.folderOrder = state.folderOrder.filter(id => !allToDelete.has(id));
+        if (state.currentFolder && allToDelete.has(state.currentFolder)) {
+            state.currentFolder = folder.parentFolderId || null;
+        }
         state.categoryUpdatedAt = new Date().toISOString();
         saveCategoriesToLocal(); renderFolders(); renderTabs(); renderEntries(); saveToDrive();
     }
@@ -352,17 +433,22 @@ function renderFolderAssignList() {
     state.folderOrder.forEach(id => { const f = state.allFolders.find(f => f.id === id); if (f) sortedFolders.push(f); });
     state.allFolders.forEach(f => { if (!state.folderOrder.includes(f.id)) sortedFolders.push(f); });
 
-    sortedFolders.forEach(folder => {
-        const div = document.createElement('div');
-        div.className = 'cat-select-item';
-        div.innerHTML = `<i class="ph ph-folder-simple"></i> ${folder.name}`;
-        div.onclick = () => {
-            const cat = state.allCategories.find(c => c.id === state.contextCatId);
-            if (cat) { cat.folderId = folder.id; state.categoryUpdatedAt = new Date().toISOString(); saveCategoriesToLocal(); renderFolders(); renderTabs(); saveToDrive(); }
-            modal.classList.add('hidden');
-        };
-        list.appendChild(div);
-    });
+    const renderLevel = (parentId, depth) => {
+        sortedFolders.filter(f => (f.parentFolderId || null) === parentId).forEach(folder => {
+            const div = document.createElement('div');
+            div.className = 'cat-select-item';
+            if (depth > 0) div.style.paddingLeft = `${12 + depth * 18}px`;
+            div.innerHTML = `<i class="ph ph-folder-simple"></i> ${folder.name}`;
+            div.onclick = () => {
+                const cat = state.allCategories.find(c => c.id === state.contextCatId);
+                if (cat) { cat.folderId = folder.id; state.categoryUpdatedAt = new Date().toISOString(); saveCategoriesToLocal(); renderFolders(); renderTabs(); saveToDrive(); }
+                modal.classList.add('hidden');
+            };
+            list.appendChild(div);
+            renderLevel(folder.id, depth + 1);
+        });
+    };
+    renderLevel(null, 0);
 }
 
 export function openFolderAssignModal() {
