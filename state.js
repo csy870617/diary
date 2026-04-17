@@ -9,6 +9,9 @@ export const state = {
     categoryOrder: ['cat_sermon', 'cat_meditation', 'cat_prayer', 'cat_thanks'],
     currentCategory: 'cat_sermon',
     categoryUpdatedAt: new Date(0).toISOString(),
+    allFolders: [],
+    folderOrder: [],
+    currentFolder: null,
     currentSortBy: 'created',
     currentSortOrder: 'desc',
     categorySorts: {},
@@ -22,6 +25,7 @@ export const state = {
     currentUser: null,
     contextTargetId: null,
     contextCatId: null,
+    contextFolderId: null,
     longPressTimer: null,
     lastFocusedEdit: null,
     touchStartX: 0,
@@ -36,6 +40,8 @@ export function saveCategoriesToLocal() {
     const data = {
         categories: state.allCategories,
         order: state.categoryOrder,
+        folders: state.allFolders,
+        folderOrder: state.folderOrder,
         updatedAt: state.categoryUpdatedAt || new Date().toISOString()
     };
     localStorage.setItem('faithCatData', JSON.stringify(data));
@@ -79,6 +85,8 @@ export function loadCategoriesFromLocal() {
             if (parsed.categories && parsed.order) {
                 state.allCategories = parsed.categories;
                 state.categoryOrder = parsed.order;
+                state.allFolders = parsed.folders || [];
+                state.folderOrder = parsed.folderOrder || [];
                 state.categoryUpdatedAt = parsed.updatedAt || new Date(0).toISOString();
                 const exists = state.allCategories.find(c => c.id === state.currentCategory);
                 if (!exists && state.categoryOrder.length > 0) {

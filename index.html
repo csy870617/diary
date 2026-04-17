@@ -50,6 +50,7 @@
                 </div>
             </div>
         </header>
+        <div class="folder-row" id="folder-row"></div>
         <div class="nav-row">
             <div class="tabs" id="tab-container"></div>
         </div>
@@ -326,7 +327,19 @@
     </div>
     <div id="category-context-menu" class="context-menu hidden">
         <button class="ctx-item" id="ctx-cat-rename"><i class="ph ph-pencil-line"></i> 이름 변경</button>
+        <button class="ctx-item" id="ctx-cat-assign-folder"><i class="ph ph-folder-open"></i> 폴더 배정</button>
         <button class="ctx-item danger" id="ctx-cat-delete"><i class="ph ph-trash"></i> 주제 삭제</button>
+    </div>
+    <div id="folder-context-menu" class="context-menu hidden">
+        <button class="ctx-item" id="ctx-folder-rename"><i class="ph ph-pencil-line"></i> 폴더 이름 변경</button>
+        <button class="ctx-item danger" id="ctx-folder-delete"><i class="ph ph-trash"></i> 폴더 삭제</button>
+    </div>
+    <div id="folder-assign-modal" class="modal-overlay hidden">
+        <div class="simple-modal" style="width: 280px;">
+            <h3>폴더 배정</h3>
+            <div id="folder-assign-list" class="category-select-list"></div>
+            <button id="close-folder-assign-btn" class="cancel-btn" style="width:100%;">취소</button>
+        </div>
     </div>
     <div id="modal-overlay" class="modal-overlay hidden"></div>
     <script type="module" src="script.js?v=3.1"></script>

@@ -1,6 +1,6 @@
 import { GOOGLE_CONFIG, APP_FOLDER_NAME, DB_FILE_NAME } from './config.js';
 import { state, saveCategoriesToLocal, isReadOnlyView } from './state.js';
-import { renderEntries, renderTabs } from './ui.js';
+import { renderEntries, renderTabs, renderFolders } from './ui.js';
 import { refreshEditorContent } from './editor.js';
 
 let tokenClient;
@@ -472,6 +472,8 @@ export async function saveToDrive() {
             const mergedCats = mergeCategories(state, cloudData);
             state.allCategories = mergedCats.categories;
             state.categoryOrder = mergedCats.order;
+            state.allFolders = mergedCats.folders;
+            state.folderOrder = mergedCats.folderOrder;
             state.categoryUpdatedAt = mergedCats.updatedAt;
 
             try {
@@ -483,6 +485,7 @@ export async function saveToDrive() {
                 }
             }
             saveCategoriesToLocal();
+            renderFolders();
             renderTabs();
             renderEntries();
             refreshEditorContent();
@@ -515,6 +518,8 @@ async function uploadToDrive(folderId, fileId) {
         categories: state.allCategories,
         order: state.categoryOrder,
         categoryUpdatedAt: state.categoryUpdatedAt,
+        folders: state.allFolders,
+        folderOrder: state.folderOrder,
         lastSync: new Date().toISOString()
     };
     const fileContent = JSON.stringify(finalData);
@@ -556,9 +561,21 @@ function mergeCategories(localState, cloudData) {
     const localTime = new Date(localState.categoryUpdatedAt || 0).getTime();
     const cloudTime = new Date(cloudData.categoryUpdatedAt || 0).getTime();
     if (cloudTime > localTime && cloudData.categories && cloudData.categories.length > 0) {
-        return { categories: cloudData.categories, order: cloudData.order || [], updatedAt: cloudData.categoryUpdatedAt };
+        return {
+            categories: cloudData.categories,
+            order: cloudData.order || [],
+            folders: cloudData.folders || [],
+            folderOrder: cloudData.folderOrder || [],
+            updatedAt: cloudData.categoryUpdatedAt
+        };
     } else {
-        return { categories: localState.allCategories, order: localState.categoryOrder, updatedAt: localState.categoryUpdatedAt };
+        return {
+            categories: localState.allCategories,
+            order: localState.categoryOrder,
+            folders: localState.allFolders,
+            folderOrder: localState.folderOrder,
+            updatedAt: localState.categoryUpdatedAt
+        };
     }
 }
 
