@@ -239,7 +239,15 @@ export function renderFolders() {
     if (!row) return;
     row.innerHTML = '';
 
-    if (state.allFolders.length === 0) return;
+    if (state.allFolders.length === 0) {
+        const addBtn = document.createElement('button');
+        addBtn.className = 'add-folder-btn';
+        addBtn.innerHTML = '<i class="ph ph-folder-plus"></i> 폴더 추가';
+        addBtn.title = '폴더 추가';
+        addBtn.onclick = addNewFolder;
+        row.appendChild(addBtn);
+        return;
+    }
 
     const allBtn = document.createElement('button');
     allBtn.className = `folder-tab ${state.currentFolder === null ? 'active' : ''}`;
