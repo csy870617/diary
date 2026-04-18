@@ -95,8 +95,8 @@ export function renderTabs() {
     tabContainer.innerHTML = '';
     
     const allSorted = [];
-    state.categoryOrder.forEach(id => { const found = state.allCategories.find(c => c.id === id); if(found) allSorted.push(found); });
-    state.allCategories.forEach(c => { if(!state.categoryOrder.includes(c.id)) { allSorted.push(c); state.categoryOrder.push(c.id); } });
+    state.categoryOrder.forEach(id => { const found = state.allCategories.find(c => c.id === id); if(found && !found.isDeleted) allSorted.push(found); });
+    state.allCategories.forEach(c => { if(!c.isDeleted && !state.categoryOrder.includes(c.id)) { allSorted.push(c); state.categoryOrder.push(c.id); } });
 
     const sortedCats = state.currentFolder === null
         ? allSorted.filter(c => !c.folderId)
@@ -145,23 +145,59 @@ export function renderTabs() {
 export function renderTrash() {
     const trashList = getEl('trash-list');
     if (!trashList) return;
-    trashList.innerHTML = `<div style="padding:10px 0; text-align:center; font-size:12px; color:var(--gray-400); font-family:'Pretendard'; margin-bottom:10px;">휴지통에 보관된 글은 30일 후 자동 삭제됩니다.</div>`;
-    const deleted = state.entries.filter(e => e.isDeleted && !e.isPurged); 
-    if(deleted.length === 0) { 
-        trashList.innerHTML += `<div style="text-align:center; margin-top:50px; color:var(--gray-400); font-family:'Pretendard';">비어있음</div>`; 
-        return; 
-    } 
-    deleted.forEach(entry => { 
-        const div = document.createElement('div'); div.className = 'trash-item'; 
-        div.innerHTML = `<div class="trash-info"><h4>${entry.title}</h4><p>${entry.date}</p></div><div class="trash-btn-group"></div>`;
-        const btnGroup = div.querySelector('.trash-btn-group');
-        const btnRestore = document.createElement('button'); btnRestore.className = 'btn-restore'; btnRestore.innerText = '복구';
-        btnRestore.onclick = (e) => { e.stopPropagation(); restoreEntry(entry.id); };
-        const btnDelete = document.createElement('button'); btnDelete.className = 'btn-perm-delete'; btnDelete.innerText = '삭제';
-        btnDelete.onclick = (e) => { e.stopPropagation(); permanentDelete(entry.id); };
-        btnGroup.appendChild(btnRestore); btnGroup.appendChild(btnDelete);
-        trashList.appendChild(div); 
-    }); 
+    trashList.innerHTML = `<div style="padding:10px 0; text-align:center; font-size:12px; color:var(--gray-400); font-family:'Pretendard'; margin-bottom:10px;">휴지통에 보관된 항목은 30일 후 자동 삭제됩니다.</div>`;
+
+    const deletedFolders = state.allFolders.filter(f => f.isDeleted);
+    const deletedCats = state.allCategories.filter(c => c.isDeleted);
+    const deletedEntries = state.entries.filter(e => e.isDeleted && !e.isPurged);
+
+    if (deletedFolders.length === 0 && deletedCats.length === 0 && deletedEntries.length === 0) {
+        trashList.innerHTML += `<div style="text-align:center; margin-top:50px; color:var(--gray-400); font-family:'Pretendard';">비어있음</div>`;
+        return;
+    }
+
+    const makeButtons = (onRestore, onDelete) => {
+        const group = document.createElement('div');
+        group.className = 'trash-btn-group';
+        const r = document.createElement('button'); r.className = 'btn-restore'; r.innerText = '복구';
+        r.onclick = (e) => { e.stopPropagation(); onRestore(); };
+        const d = document.createElement('button'); d.className = 'btn-perm-delete'; d.innerText = '삭제';
+        d.onclick = (e) => { e.stopPropagation(); onDelete(); };
+        group.appendChild(r); group.appendChild(d);
+        return group;
+    };
+
+    const addSection = (title, items, buildItem) => {
+        if (items.length === 0) return;
+        const header = document.createElement('h4');
+        header.className = 'trash-section-title';
+        header.textContent = title;
+        trashList.appendChild(header);
+        items.forEach(it => trashList.appendChild(buildItem(it)));
+    };
+
+    addSection('폴더', deletedFolders, (folder) => {
+        const div = document.createElement('div'); div.className = 'trash-item';
+        const dateStr = folder.deletedAt ? new Date(folder.deletedAt).toLocaleDateString() : '';
+        div.innerHTML = `<div class="trash-info"><h4><i class="ph ph-folder-simple"></i> ${folder.name}</h4>${dateStr ? `<p>${dateStr} 삭제</p>` : ''}</div>`;
+        div.appendChild(makeButtons(() => restoreFolder(folder.id), () => permanentDeleteFolder(folder.id)));
+        return div;
+    });
+
+    addSection('주제', deletedCats, (cat) => {
+        const div = document.createElement('div'); div.className = 'trash-item';
+        const dateStr = cat.deletedAt ? new Date(cat.deletedAt).toLocaleDateString() : '';
+        div.innerHTML = `<div class="trash-info"><h4><i class="ph ph-tag"></i> ${cat.name}</h4>${dateStr ? `<p>${dateStr} 삭제</p>` : ''}</div>`;
+        div.appendChild(makeButtons(() => restoreCategory(cat.id), () => permanentDeleteCategory(cat.id)));
+        return div;
+    });
+
+    addSection('글', deletedEntries, (entry) => {
+        const div = document.createElement('div'); div.className = 'trash-item';
+        div.innerHTML = `<div class="trash-info"><h4>${entry.title}</h4><p>${entry.date}</p></div>`;
+        div.appendChild(makeButtons(() => restoreEntry(entry.id), () => permanentDelete(entry.id)));
+        return div;
+    });
 }
 
 export function closeAllModals(goBack = true) {
@@ -240,17 +276,19 @@ export function renderFolders() {
     if (!row) return;
     row.innerHTML = '';
 
-    if (state.currentFolder !== null && !state.allFolders.find(f => f.id === state.currentFolder)) {
-        state.currentFolder = null;
+    if (state.currentFolder !== null) {
+        const cur = state.allFolders.find(f => f.id === state.currentFolder);
+        if (!cur || cur.isDeleted) state.currentFolder = null;
     }
 
     const sortedFolders = [];
-    state.folderOrder.forEach(id => { const f = state.allFolders.find(f => f.id === id); if (f) sortedFolders.push(f); });
-    state.allFolders.forEach(f => { if (!state.folderOrder.includes(f.id)) sortedFolders.push(f); });
+    state.folderOrder.forEach(id => { const f = state.allFolders.find(f => f.id === id); if (f && !f.isDeleted) sortedFolders.push(f); });
+    state.allFolders.forEach(f => { if (!f.isDeleted && !state.folderOrder.includes(f.id)) sortedFolders.push(f); });
 
     const visibleFolders = sortedFolders.filter(f => (f.parentFolderId || null) === state.currentFolder);
+    const liveFoldersExist = state.allFolders.some(f => !f.isDeleted);
 
-    if (state.currentFolder === null && state.allFolders.length === 0) {
+    if (state.currentFolder === null && !liveFoldersExist) {
         row.classList.add('hidden');
         return;
     }
@@ -292,7 +330,7 @@ export function renderFolders() {
         const btn = document.createElement('button');
         btn.className = 'folder-tab';
         btn.dataset.folderId = folder.id;
-        const hasChildren = state.allFolders.some(f => f.parentFolderId === folder.id);
+        const hasChildren = state.allFolders.some(f => f.parentFolderId === folder.id && !f.isDeleted);
         const childIcon = hasChildren ? ' <i class="ph ph-caret-right" style="font-size:10px;opacity:0.6;"></i>' : '';
         btn.innerHTML = `<i class="ph ph-folder-simple"></i> ${folder.name}${childIcon}`;
         btn.onclick = () => {
@@ -388,29 +426,63 @@ export function renameFolderAction() {
 export function deleteFolderAction() {
     getEl('folder-context-menu')?.classList.add('hidden');
     const folder = state.allFolders.find(f => f.id === state.contextFolderId);
-    if (!folder) return;
+    if (!folder || folder.isDeleted) return;
 
     const collectDescendants = (id) => {
-        const direct = state.allFolders.filter(f => f.parentFolderId === id);
+        const direct = state.allFolders.filter(f => f.parentFolderId === id && !f.isDeleted);
         return direct.reduce((acc, f) => acc.concat([f.id], collectDescendants(f.id)), []);
     };
     const descendants = collectDescendants(folder.id);
-    const allToDelete = new Set([folder.id, ...descendants]);
+    const allFolderIds = new Set([folder.id, ...descendants]);
+    const affectedCats = state.allCategories.filter(c => c.folderId && allFolderIds.has(c.folderId) && !c.isDeleted);
 
-    const confirmMsg = descendants.length > 0
-        ? `'${folder.name}' 폴더와 그 안의 하위 폴더 ${descendants.length}개를 삭제하시겠습니까?\n(소속된 주제는 폴더 없음 상태가 됩니다)`
-        : `'${folder.name}' 폴더를 삭제하시겠습니까?\n(소속된 주제는 폴더 없음 상태가 됩니다)`;
+    let extra = '';
+    if (descendants.length > 0 && affectedCats.length > 0) extra = ` (하위 폴더 ${descendants.length}개, 주제 ${affectedCats.length}개 포함)`;
+    else if (descendants.length > 0) extra = ` (하위 폴더 ${descendants.length}개 포함)`;
+    else if (affectedCats.length > 0) extra = ` (소속 주제 ${affectedCats.length}개 포함)`;
 
-    if (confirm(confirmMsg)) {
-        state.allCategories.forEach(c => { if (c.folderId && allToDelete.has(c.folderId)) delete c.folderId; });
-        state.allFolders = state.allFolders.filter(f => !allToDelete.has(f.id));
-        state.folderOrder = state.folderOrder.filter(id => !allToDelete.has(id));
-        if (state.currentFolder && allToDelete.has(state.currentFolder)) {
+    if (confirm(`'${folder.name}' 폴더를 휴지통으로 보내시겠습니까?${extra}`)) {
+        const now = new Date().toISOString();
+        state.allFolders.forEach(f => { if (allFolderIds.has(f.id)) { f.isDeleted = true; f.deletedAt = now; } });
+        affectedCats.forEach(c => { c.isDeleted = true; c.deletedAt = now; });
+        if (state.currentFolder && allFolderIds.has(state.currentFolder)) {
             state.currentFolder = folder.parentFolderId || null;
         }
-        state.categoryUpdatedAt = new Date().toISOString();
+        if (state.allCategories.find(c => c.id === state.currentCategory)?.isDeleted) {
+            const next = state.allCategories.find(c => !c.isDeleted);
+            if (next) { state.currentCategory = next.id; applyCategorySort(); }
+        }
+        state.categoryUpdatedAt = now;
         saveCategoriesToLocal(); renderFolders(); renderTabs(); renderEntries(); saveToDrive();
     }
+}
+
+export function restoreFolder(id) {
+    const folder = state.allFolders.find(f => f.id === id);
+    if (!folder) return;
+    delete folder.isDeleted;
+    delete folder.deletedAt;
+    let parentId = folder.parentFolderId;
+    while (parentId) {
+        const parent = state.allFolders.find(f => f.id === parentId);
+        if (!parent) { delete folder.parentFolderId; break; }
+        if (parent.isDeleted) { delete parent.isDeleted; delete parent.deletedAt; }
+        parentId = parent.parentFolderId;
+    }
+    state.categoryUpdatedAt = new Date().toISOString();
+    saveCategoriesToLocal(); renderTrash(); renderFolders(); renderTabs(); renderEntries(); saveToDrive();
+}
+
+export function permanentDeleteFolder(id) {
+    if (!confirm('이 폴더를 영구 삭제하시겠습니까? 되돌릴 수 없습니다.')) return;
+    const folder = state.allFolders.find(f => f.id === id);
+    if (!folder) return;
+    state.allFolders.forEach(f => { if (f.parentFolderId === id) delete f.parentFolderId; });
+    state.allCategories.forEach(c => { if (c.folderId === id) delete c.folderId; });
+    state.allFolders = state.allFolders.filter(f => f.id !== id);
+    state.folderOrder = state.folderOrder.filter(fid => fid !== id);
+    state.categoryUpdatedAt = new Date().toISOString();
+    saveCategoriesToLocal(); renderTrash(); renderFolders(); renderTabs(); renderEntries(); saveToDrive();
 }
 
 function renderFolderAssignList() {
@@ -430,8 +502,8 @@ function renderFolderAssignList() {
     list.appendChild(noneDiv);
 
     const sortedFolders = [];
-    state.folderOrder.forEach(id => { const f = state.allFolders.find(f => f.id === id); if (f) sortedFolders.push(f); });
-    state.allFolders.forEach(f => { if (!state.folderOrder.includes(f.id)) sortedFolders.push(f); });
+    state.folderOrder.forEach(id => { const f = state.allFolders.find(f => f.id === id); if (f && !f.isDeleted) sortedFolders.push(f); });
+    state.allFolders.forEach(f => { if (!f.isDeleted && !state.folderOrder.includes(f.id)) sortedFolders.push(f); });
 
     const renderLevel = (parentId, depth) => {
         sortedFolders.filter(f => (f.parentFolderId || null) === parentId).forEach(folder => {
@@ -507,18 +579,52 @@ export function renameCategoryAction() {
 export function deleteCategoryAction() {
     getEl('category-context-menu')?.classList.add('hidden');
     const cat = state.allCategories.find(c => c.id === state.contextCatId);
-    if (!cat || state.allCategories.length <= 1) return;
-    if (confirm(`'${cat.name}' 주제를 삭제하시겠습니까?\n(소속된 글은 첫 번째 주제로 이동됩니다)`)) {
-        state.allCategories = state.allCategories.filter(c => c.id !== state.contextCatId);
-        state.categoryOrder = state.categoryOrder.filter(id => id !== state.contextCatId);
-        const newCatId = state.allCategories[0].id;
-        // 삭제된 카테고리에 속한 글을 첫 번째 카테고리로 이동
-        state.entries.forEach(e => { if (e.category === state.contextCatId) e.category = newCatId; });
-        localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-        if (state.currentCategory === state.contextCatId) { state.currentCategory = newCatId; applyCategorySort(); }
-        state.categoryUpdatedAt = new Date().toISOString();
+    if (!cat || cat.isDeleted) return;
+    const visible = state.allCategories.filter(c => !c.isDeleted);
+    if (visible.length <= 1) { alert('마지막 주제는 삭제할 수 없습니다.'); return; }
+    if (confirm(`'${cat.name}' 주제를 휴지통으로 보내시겠습니까?\n(소속된 글은 주제를 복구하면 다시 보입니다)`)) {
+        const now = new Date().toISOString();
+        cat.isDeleted = true;
+        cat.deletedAt = now;
+        if (state.currentCategory === cat.id) {
+            const next = state.allCategories.find(c => !c.isDeleted);
+            if (next) { state.currentCategory = next.id; applyCategorySort(); }
+        }
+        state.categoryUpdatedAt = now;
         saveCategoriesToLocal(); renderFolders(); renderTabs(); renderEntries(); saveToDrive();
     }
+}
+
+export function restoreCategory(id) {
+    const cat = state.allCategories.find(c => c.id === id);
+    if (!cat) return;
+    delete cat.isDeleted;
+    delete cat.deletedAt;
+    let parentId = cat.folderId;
+    while (parentId) {
+        const parent = state.allFolders.find(f => f.id === parentId);
+        if (!parent) { delete cat.folderId; break; }
+        if (parent.isDeleted) { delete parent.isDeleted; delete parent.deletedAt; }
+        parentId = parent.parentFolderId;
+    }
+    state.categoryUpdatedAt = new Date().toISOString();
+    saveCategoriesToLocal(); renderTrash(); renderFolders(); renderTabs(); renderEntries(); saveToDrive();
+}
+
+export function permanentDeleteCategory(id) {
+    const remaining = state.allCategories.filter(c => !c.isDeleted && c.id !== id);
+    if (remaining.length === 0) { alert('영구 삭제 후 남는 주제가 없어 삭제할 수 없습니다.'); return; }
+    if (!confirm('이 주제를 영구 삭제하시겠습니까? 소속된 글도 다른 주제로 옮겨집니다.')) return;
+    const cat = state.allCategories.find(c => c.id === id);
+    if (!cat) return;
+    state.allCategories = state.allCategories.filter(c => c.id !== id);
+    state.categoryOrder = state.categoryOrder.filter(cid => cid !== id);
+    const newCatId = remaining[0].id;
+    state.entries.forEach(e => { if (e.category === id) e.category = newCatId; });
+    try { localStorage.setItem('faithLogDB', JSON.stringify(state.entries)); } catch(e) { console.error(e); }
+    if (state.currentCategory === id) { state.currentCategory = newCatId; applyCategorySort(); }
+    state.categoryUpdatedAt = new Date().toISOString();
+    saveCategoriesToLocal(); renderTrash(); renderFolders(); renderTabs(); renderEntries(); saveToDrive();
 }
 
 export async function renameEntryAction() {
@@ -545,8 +651,8 @@ export function openMoveModal() {
     }
 
     const sortedCats = [];
-    state.categoryOrder.forEach(id => { const found = state.allCategories.find(c => c.id === id); if(found) sortedCats.push(found); });
-    state.allCategories.forEach(c => { if(!state.categoryOrder.includes(c.id)) sortedCats.push(c); });
+    state.categoryOrder.forEach(id => { const found = state.allCategories.find(c => c.id === id); if(found && !found.isDeleted) sortedCats.push(found); });
+    state.allCategories.forEach(c => { if(!c.isDeleted && !state.categoryOrder.includes(c.id)) sortedCats.push(c); });
 
     sortedCats.forEach(cat => {
         const div = document.createElement('div');

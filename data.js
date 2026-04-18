@@ -1,5 +1,5 @@
-import { state } from './state.js';
-import { renderEntries, renderTrash } from './ui.js';
+import { state, saveCategoriesToLocal } from './state.js';
+import { renderEntries, renderTrash, renderFolders, renderTabs } from './ui.js';
 import { saveToDrive } from './drive.js';
 
 function safeLocalSave() {
@@ -132,32 +132,75 @@ export async function permanentDelete(id) {
 }
 
 export async function emptyTrash() {
-    const trashItems = state.entries.filter(e => e.isDeleted && !e.isPurged);
-    if(trashItems.length === 0) return alert("휴지통이 이미 비어있습니다.");
-    if(confirm(`휴지통의 ${trashItems.length}개 항목을 모두 영구 삭제하시겠습니까?`)) {
-        const now = new Date().toISOString();
-        trashItems.forEach(e => { e.isPurged = true; e.modifiedAt = now; });
-        safeLocalSave();
-        renderTrash();
-        await saveToDrive();
+    const trashEntries = state.entries.filter(e => e.isDeleted && !e.isPurged);
+    const trashFolders = state.allFolders.filter(f => f.isDeleted);
+    const trashCats = state.allCategories.filter(c => c.isDeleted);
+    const total = trashEntries.length + trashFolders.length + trashCats.length;
+    if (total === 0) return alert("휴지통이 이미 비어있습니다.");
+    if (!confirm(`휴지통의 ${total}개 항목을 모두 영구 삭제하시겠습니까?`)) return;
+
+    const now = new Date().toISOString();
+    trashEntries.forEach(e => { e.isPurged = true; e.modifiedAt = now; });
+
+    const deletedFolderIds = new Set(trashFolders.map(f => f.id));
+    if (deletedFolderIds.size > 0) {
+        state.allFolders.forEach(f => { if (f.parentFolderId && deletedFolderIds.has(f.parentFolderId)) delete f.parentFolderId; });
+        state.allCategories.forEach(c => { if (c.folderId && deletedFolderIds.has(c.folderId)) delete c.folderId; });
+        state.allFolders = state.allFolders.filter(f => !f.isDeleted);
+        state.folderOrder = state.folderOrder.filter(id => !deletedFolderIds.has(id));
     }
+
+    const deletedCatIds = new Set(trashCats.map(c => c.id));
+    if (deletedCatIds.size > 0) {
+        const remaining = state.allCategories.find(c => !c.isDeleted && !deletedCatIds.has(c.id));
+        if (remaining) state.entries.forEach(e => { if (deletedCatIds.has(e.category)) e.category = remaining.id; });
+        state.allCategories = state.allCategories.filter(c => !c.isDeleted);
+        state.categoryOrder = state.categoryOrder.filter(id => !deletedCatIds.has(id));
+    }
+
+    if (deletedFolderIds.size > 0 || deletedCatIds.size > 0) {
+        state.categoryUpdatedAt = now;
+        saveCategoriesToLocal();
+    }
+    safeLocalSave();
+    renderTrash(); renderFolders(); renderTabs(); renderEntries();
+    await saveToDrive();
 }
 
 export async function checkOldTrash() {
     const now = new Date();
-    let changed = false;
+    const cutoff = (ts) => (now - new Date(ts)) / (1000 * 60 * 60 * 24) > 30;
+    let entryChanged = false, metaChanged = false;
+
     state.entries.forEach(e => {
-        if(e.isDeleted && !e.isPurged) {
-            const trashDate = new Date(e.modifiedAt || e.timestamp);
-            if((now - trashDate) / (1000 * 60 * 60 * 24) > 30) {
-                e.isPurged = true; e.modifiedAt = now.toISOString(); changed = true;
-            }
+        if(e.isDeleted && !e.isPurged && cutoff(e.modifiedAt || e.timestamp)) {
+            e.isPurged = true; e.modifiedAt = now.toISOString(); entryChanged = true;
         }
     });
-    if(changed) {
-        safeLocalSave();
-        await saveToDrive();
+
+    const oldFolderIds = new Set();
+    state.allFolders.forEach(f => { if (f.isDeleted && f.deletedAt && cutoff(f.deletedAt)) oldFolderIds.add(f.id); });
+    if (oldFolderIds.size > 0) {
+        state.allFolders.forEach(f => { if (f.parentFolderId && oldFolderIds.has(f.parentFolderId)) delete f.parentFolderId; });
+        state.allCategories.forEach(c => { if (c.folderId && oldFolderIds.has(c.folderId)) delete c.folderId; });
+        state.allFolders = state.allFolders.filter(f => !oldFolderIds.has(f.id));
+        state.folderOrder = state.folderOrder.filter(id => !oldFolderIds.has(id));
+        metaChanged = true;
     }
+
+    const oldCatIds = new Set();
+    state.allCategories.forEach(c => { if (c.isDeleted && c.deletedAt && cutoff(c.deletedAt)) oldCatIds.add(c.id); });
+    if (oldCatIds.size > 0) {
+        const remaining = state.allCategories.find(c => !c.isDeleted && !oldCatIds.has(c.id));
+        if (remaining) state.entries.forEach(e => { if (oldCatIds.has(e.category)) { e.category = remaining.id; entryChanged = true; } });
+        state.allCategories = state.allCategories.filter(c => !oldCatIds.has(c.id));
+        state.categoryOrder = state.categoryOrder.filter(id => !oldCatIds.has(id));
+        metaChanged = true;
+    }
+
+    if (metaChanged) { state.categoryUpdatedAt = now.toISOString(); saveCategoriesToLocal(); }
+    if (entryChanged) safeLocalSave();
+    if (entryChanged || metaChanged) await saveToDrive();
 }
 
 export async function bulkUpdateEntryField(ids, fields) {

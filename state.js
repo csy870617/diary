@@ -88,9 +88,13 @@ export function loadCategoriesFromLocal() {
                 state.allFolders = parsed.folders || [];
                 state.folderOrder = parsed.folderOrder || [];
                 state.categoryUpdatedAt = parsed.updatedAt || new Date(0).toISOString();
-                const exists = state.allCategories.find(c => c.id === state.currentCategory);
-                if (!exists && state.categoryOrder.length > 0) {
-                    state.currentCategory = state.categoryOrder[0];
+                const exists = state.allCategories.find(c => c.id === state.currentCategory && !c.isDeleted);
+                if (!exists) {
+                    const firstAvailable = state.categoryOrder
+                        .map(id => state.allCategories.find(c => c.id === id))
+                        .find(c => c && !c.isDeleted)
+                        || state.allCategories.find(c => !c.isDeleted);
+                    if (firstAvailable) state.currentCategory = firstAvailable.id;
                 }
             }
         } catch (e) {
