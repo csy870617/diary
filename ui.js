@@ -400,6 +400,8 @@ function renderFolderPopupContent() {
     subFolders.forEach(f => {
         const item = document.createElement('div');
         item.className = 'popup-item folder-popup-item';
+        item.dataset.itemId = f.id;
+        item.dataset.itemType = 'folder';
         const hasChildren = folderHasContent(f.id);
         const caret = hasChildren ? '<i class="ph ph-caret-right popup-item-arrow"></i>' : '';
         item.innerHTML = `<i class="ph ph-folder-simple"></i><span class="popup-item-label">${f.name}</span>${caret}`;
@@ -417,6 +419,8 @@ function renderFolderPopupContent() {
     topics.forEach(c => {
         const item = document.createElement('div');
         item.className = `popup-item topic-popup-item${state.currentCategory === c.id ? ' active' : ''}`;
+        item.dataset.itemId = c.id;
+        item.dataset.itemType = 'topic';
         item.innerHTML = `<i class="ph ph-tag"></i><span class="popup-item-label">${c.name}</span>`;
         item.onclick = (e) => {
             e.stopPropagation();
@@ -469,6 +473,52 @@ function renderFolderPopupContent() {
         saveToDrive();
     };
     list.appendChild(addFolder);
+
+    initPopupSortable(list);
+}
+
+function initPopupSortable(list) {
+    if (typeof Sortable === 'undefined' || !list) return;
+    if (list._sortable) { try { list._sortable.destroy(); } catch(e) {} }
+    list._sortable = new Sortable(list, {
+        animation: 150,
+        delay: 200,
+        delayOnTouchOnly: true,
+        touchStartThreshold: 5,
+        draggable: '.folder-popup-item, .topic-popup-item',
+        filter: '.popup-add-item, .popup-divider, .popup-empty',
+        preventOnFilter: false,
+        onEnd: async () => {
+            const newFolderIds = [];
+            const newTopicIds = [];
+            list.querySelectorAll('[data-item-id]').forEach(el => {
+                const type = el.dataset.itemType;
+                const id = el.dataset.itemId;
+                if (!id) return;
+                if (type === 'folder') newFolderIds.push(id);
+                else if (type === 'topic') newTopicIds.push(id);
+            });
+
+            const reorderGlobal = (globalOrder, subsetIds) => {
+                const subsetSet = new Set(subsetIds);
+                let i = 0;
+                const result = globalOrder.map(id => (subsetSet.has(id) ? subsetIds[i++] : id));
+                subsetIds.forEach(id => { if (!globalOrder.includes(id)) result.push(id); });
+                return result;
+            };
+
+            if (newFolderIds.length > 0) {
+                state.folderOrder = reorderGlobal(state.folderOrder, newFolderIds);
+            }
+            if (newTopicIds.length > 0) {
+                state.categoryOrder = reorderGlobal(state.categoryOrder, newTopicIds);
+            }
+
+            state.categoryUpdatedAt = new Date().toISOString();
+            saveCategoriesToLocal();
+            await saveToDrive();
+        }
+    });
 }
 
 function positionFolderPopup() {
