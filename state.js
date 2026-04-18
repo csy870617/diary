@@ -11,6 +11,7 @@ export const state = {
     categoryUpdatedAt: new Date(0).toISOString(),
     allFolders: [],
     folderOrder: [],
+    rootOrder: [],
     currentFolder: null,
     currentSortBy: 'created',
     currentSortOrder: 'desc',
@@ -42,9 +43,24 @@ export function saveCategoriesToLocal() {
         order: state.categoryOrder,
         folders: state.allFolders,
         folderOrder: state.folderOrder,
+        rootOrder: state.rootOrder,
         updatedAt: state.categoryUpdatedAt || new Date().toISOString()
     };
     localStorage.setItem('faithCatData', JSON.stringify(data));
+}
+
+export function migrateRootOrder() {
+    const topFolders = state.allFolders.filter(f => !f.parentFolderId);
+    const orphanTopics = state.allCategories.filter(c => !c.folderId);
+    const validIds = new Set([...topFolders.map(f => f.id), ...orphanTopics.map(c => c.id)]);
+    const existing = (state.rootOrder || []).filter(id => validIds.has(id));
+    const existingSet = new Set(existing);
+    const appended = [];
+    state.folderOrder.forEach(id => { if (validIds.has(id) && !existingSet.has(id)) { appended.push(id); existingSet.add(id); } });
+    topFolders.forEach(f => { if (!existingSet.has(f.id)) { appended.push(f.id); existingSet.add(f.id); } });
+    state.categoryOrder.forEach(id => { if (validIds.has(id) && !existingSet.has(id)) { appended.push(id); existingSet.add(id); } });
+    orphanTopics.forEach(c => { if (!existingSet.has(c.id)) { appended.push(c.id); existingSet.add(c.id); } });
+    state.rootOrder = [...existing, ...appended];
 }
 
 export function isReadOnlyView() {
@@ -87,10 +103,16 @@ export function loadCategoriesFromLocal() {
                 state.categoryOrder = parsed.order;
                 state.allFolders = parsed.folders || [];
                 state.folderOrder = parsed.folderOrder || [];
+                state.rootOrder = parsed.rootOrder || [];
                 state.categoryUpdatedAt = parsed.updatedAt || new Date(0).toISOString();
-                const exists = state.allCategories.find(c => c.id === state.currentCategory);
-                if (!exists && state.categoryOrder.length > 0) {
-                    state.currentCategory = state.categoryOrder[0];
+                migrateRootOrder();
+                const exists = state.allCategories.find(c => c.id === state.currentCategory && !c.isDeleted);
+                if (!exists) {
+                    const firstAvailable = state.categoryOrder
+                        .map(id => state.allCategories.find(c => c.id === id))
+                        .find(c => c && !c.isDeleted)
+                        || state.allCategories.find(c => !c.isDeleted);
+                    if (firstAvailable) state.currentCategory = firstAvailable.id;
                 }
             }
         } catch (e) {

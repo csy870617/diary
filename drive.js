@@ -1,5 +1,5 @@
 import { GOOGLE_CONFIG, APP_FOLDER_NAME, DB_FILE_NAME } from './config.js';
-import { state, saveCategoriesToLocal, isReadOnlyView } from './state.js';
+import { state, saveCategoriesToLocal, isReadOnlyView, migrateRootOrder } from './state.js';
 import { renderEntries, renderTabs, renderFolders } from './ui.js';
 import { refreshEditorContent } from './editor.js';
 
@@ -474,7 +474,9 @@ export async function saveToDrive() {
             state.categoryOrder = mergedCats.order;
             state.allFolders = mergedCats.folders;
             state.folderOrder = mergedCats.folderOrder;
+            state.rootOrder = mergedCats.rootOrder;
             state.categoryUpdatedAt = mergedCats.updatedAt;
+            migrateRootOrder();
 
             try {
                 localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
@@ -520,6 +522,7 @@ async function uploadToDrive(folderId, fileId) {
         categoryUpdatedAt: state.categoryUpdatedAt,
         folders: state.allFolders,
         folderOrder: state.folderOrder,
+        rootOrder: state.rootOrder,
         lastSync: new Date().toISOString()
     };
     const fileContent = JSON.stringify(finalData);
@@ -566,6 +569,7 @@ function mergeCategories(localState, cloudData) {
             order: cloudData.order || [],
             folders: cloudData.folders || [],
             folderOrder: cloudData.folderOrder || [],
+            rootOrder: cloudData.rootOrder || [],
             updatedAt: cloudData.categoryUpdatedAt
         };
     } else {
@@ -574,6 +578,7 @@ function mergeCategories(localState, cloudData) {
             order: localState.categoryOrder,
             folders: localState.allFolders,
             folderOrder: localState.folderOrder,
+            rootOrder: localState.rootOrder || [],
             updatedAt: localState.categoryUpdatedAt
         };
     }
