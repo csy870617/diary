@@ -52,7 +52,6 @@
         </header>
         <div class="nav-row">
             <div class="folder-row" id="folder-row"></div>
-            <div class="tabs" id="tab-container"></div>
         </div>
         <div class="controls-row">
             <div class="nav-actions">
@@ -343,7 +342,18 @@
             <button id="close-folder-assign-btn" class="cancel-btn" style="width:100%;">취소</button>
         </div>
     </div>
+    <div id="folder-popup" class="folder-popup hidden">
+        <div id="folder-popup-back" class="folder-popup-back hidden">
+            <button><i class="ph ph-caret-left"></i> <span class="popup-back-label">뒤로</span></button>
+        </div>
+        <div id="folder-popup-header" class="folder-popup-header"></div>
+        <div id="folder-popup-list" class="folder-popup-list"></div>
+    </div>
+    <div id="add-menu-popup" class="add-menu-popup hidden">
+        <button class="add-menu-item" data-action="topic"><i class="ph ph-tag"></i> 새 주제</button>
+        <button class="add-menu-item" data-action="folder"><i class="ph ph-folder-plus"></i> 새 폴더</button>
+    </div>
     <div id="modal-overlay" class="modal-overlay hidden"></div>
-    <script type="module" src="script.js?v=3.3"></script>
+    <script type="module" src="script.js?v=3.4"></script>
 </body>
 </html>

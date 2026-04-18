@@ -148,6 +148,7 @@ export async function emptyTrash() {
         state.allCategories.forEach(c => { if (c.folderId && deletedFolderIds.has(c.folderId)) delete c.folderId; });
         state.allFolders = state.allFolders.filter(f => !f.isDeleted);
         state.folderOrder = state.folderOrder.filter(id => !deletedFolderIds.has(id));
+        state.rootOrder = (state.rootOrder || []).filter(id => !deletedFolderIds.has(id));
     }
 
     const deletedCatIds = new Set(trashCats.map(c => c.id));
@@ -156,6 +157,7 @@ export async function emptyTrash() {
         if (remaining) state.entries.forEach(e => { if (deletedCatIds.has(e.category)) e.category = remaining.id; });
         state.allCategories = state.allCategories.filter(c => !c.isDeleted);
         state.categoryOrder = state.categoryOrder.filter(id => !deletedCatIds.has(id));
+        state.rootOrder = (state.rootOrder || []).filter(id => !deletedCatIds.has(id));
     }
 
     if (deletedFolderIds.size > 0 || deletedCatIds.size > 0) {
@@ -185,6 +187,7 @@ export async function checkOldTrash() {
         state.allCategories.forEach(c => { if (c.folderId && oldFolderIds.has(c.folderId)) delete c.folderId; });
         state.allFolders = state.allFolders.filter(f => !oldFolderIds.has(f.id));
         state.folderOrder = state.folderOrder.filter(id => !oldFolderIds.has(id));
+        state.rootOrder = (state.rootOrder || []).filter(id => !oldFolderIds.has(id));
         metaChanged = true;
     }
 
@@ -195,6 +198,7 @@ export async function checkOldTrash() {
         if (remaining) state.entries.forEach(e => { if (oldCatIds.has(e.category)) { e.category = remaining.id; entryChanged = true; } });
         state.allCategories = state.allCategories.filter(c => !oldCatIds.has(c.id));
         state.categoryOrder = state.categoryOrder.filter(id => !oldCatIds.has(id));
+        state.rootOrder = (state.rootOrder || []).filter(id => !oldCatIds.has(id));
         metaChanged = true;
     }
 

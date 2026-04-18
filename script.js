@@ -1,6 +1,6 @@
 import { state, loadCategoriesFromLocal, saveCategoriesToLocal, isReadOnlyView, loadCategorySortsFromLocal, setCategorySort } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
-import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, renameFolderAction, deleteFolderAction, openFolderAssignModal, createFolderFromAssignModal, addSubfolderAction, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort } from './ui.js';
+import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, renameFolderAction, deleteFolderAction, openFolderAssignModal, createFolderFromAssignModal, addSubfolderAction, closeFolderPopup, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort } from './ui.js';
 import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, ensureTokenOnResume, startKeepAlive } from './drive.js';
@@ -192,47 +192,19 @@ function updateAuthUI(isLoggedIn) {
 }
 
 function setupListeners() {
-    const tabContainer = document.getElementById('tab-container');
-    if (typeof Sortable !== 'undefined' && tabContainer) {
-        new Sortable(tabContainer, {
-            animation: 150, delay: 200, delayOnTouchOnly: true, touchStartThreshold: 5,
-            onEnd: async () => {
-                const visibleIds = [];
-                tabContainer.querySelectorAll('.tab-btn').forEach(btn => { if(btn.dataset.id) visibleIds.push(btn.dataset.id); });
-                if (state.currentFolder !== null) {
-                    const folderSet = new Set(visibleIds);
-                    const others = state.categoryOrder.filter(id => !folderSet.has(id));
-                    const insertIdx = state.categoryOrder.findIndex(id => folderSet.has(id));
-                    state.categoryOrder = insertIdx >= 0
-                        ? [...others.slice(0, insertIdx), ...visibleIds, ...others.slice(insertIdx)]
-                        : [...others, ...visibleIds];
-                } else {
-                    state.categoryOrder = visibleIds;
-                }
-                state.categoryUpdatedAt = new Date().toISOString();
-                saveCategoriesToLocal(); await saveToDrive();
-            }
-        });
-    }
-
     const folderRow = document.getElementById('folder-row');
     if (typeof Sortable !== 'undefined' && folderRow) {
         new Sortable(folderRow, {
             animation: 150, delay: 200, delayOnTouchOnly: true, touchStartThreshold: 5,
-            filter: '.folder-back-btn, .folder-add-btn, .folder-current',
+            filter: '.nav-add-btn',
             preventOnFilter: false,
             onEnd: async () => {
-                const visibleIds = [];
-                folderRow.querySelectorAll('[data-folder-id]:not(.folder-current)').forEach(btn => {
-                    if (btn.dataset.folderId) visibleIds.push(btn.dataset.folderId);
+                const newOrder = [];
+                folderRow.querySelectorAll('[data-item-id]').forEach(el => {
+                    if (el.dataset.itemId) newOrder.push(el.dataset.itemId);
                 });
-                if (visibleIds.length === 0) return;
-                const visibleSet = new Set(visibleIds);
-                const others = state.folderOrder.filter(id => !visibleSet.has(id));
-                const insertIdx = state.folderOrder.findIndex(id => visibleSet.has(id));
-                state.folderOrder = insertIdx >= 0
-                    ? [...others.slice(0, insertIdx), ...visibleIds, ...others.slice(insertIdx)]
-                    : [...others, ...visibleIds];
+                if (newOrder.length === 0) return;
+                state.rootOrder = newOrder;
                 state.categoryUpdatedAt = new Date().toISOString();
                 saveCategoriesToLocal(); await saveToDrive();
             }
@@ -277,6 +249,19 @@ function setupListeners() {
             const el = document.getElementById(id);
             if (el && !el.contains(e.target) && !e.target.closest('.tool-btn') && !e.target.closest('#font-size-input')) el.classList.add('hidden');
         });
+
+        const folderPopup = document.getElementById('folder-popup');
+        if (folderPopup && !folderPopup.classList.contains('hidden')
+            && !folderPopup.contains(e.target)
+            && !e.target.closest('.folder-nav')) {
+            closeFolderPopup();
+        }
+        const addMenu = document.getElementById('add-menu-popup');
+        if (addMenu && !addMenu.classList.contains('hidden')
+            && !addMenu.contains(e.target)
+            && !e.target.closest('.nav-add-btn')) {
+            addMenu.classList.add('hidden');
+        }
     }, true);
 
     setupAuthListeners();
