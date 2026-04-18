@@ -528,6 +528,7 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
     background: var(--gray-200);
     border-radius: 2px;
     overflow: hidden;
+    position: relative;
 }
 .tts-progress-bar {
     width: 0%;
@@ -535,6 +536,43 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
     background: var(--accent);
     border-radius: 2px;
     transition: width 0.3s ease;
+}
+.tts-progress-slider {
+    position: absolute;
+    inset: -6px 0;
+    width: 100%;
+    height: 15px;
+    margin: 0;
+    background: transparent;
+    -webkit-appearance: none;
+    appearance: none;
+    cursor: pointer;
+}
+.tts-progress-slider::-webkit-slider-runnable-track {
+    height: 3px;
+    background: transparent;
+}
+.tts-progress-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    background: var(--surface-color);
+    margin-top: -4px;
+}
+.tts-progress-slider::-moz-range-track {
+    height: 3px;
+    background: transparent;
+    border: none;
+}
+.tts-progress-slider::-moz-range-thumb {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    background: var(--surface-color);
 }
 .tts-pct {
     font-size: 11px;

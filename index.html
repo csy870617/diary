@@ -225,7 +225,10 @@
                 <button id="tts-pause-btn" class="tts-ctrl hidden" title="일시정지"><i class="ph-fill ph-pause"></i></button>
                 <button id="tts-stop-btn" class="tts-ctrl" title="정지" disabled><i class="ph ph-stop"></i></button>
                 <div class="tts-bar-progress">
-                    <div class="tts-progress-track"><div id="tts-progress-bar" class="tts-progress-bar"></div></div>
+                    <div class="tts-progress-track" id="tts-progress-track">
+                        <div id="tts-progress-bar" class="tts-progress-bar"></div>
+                        <input type="range" id="tts-progress-slider" class="tts-progress-slider" min="0" max="100" value="0" step="1" aria-label="TTS 진행 위치">
+                    </div>
                     <span id="tts-progress-text" class="tts-pct">0%</span>
                     <span id="tts-time-text" class="tts-time">0:00 / 0:00</span>
                 </div>

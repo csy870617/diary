@@ -347,6 +347,21 @@ function updateTimeDisplay() {
     el.textContent = `${formatTime(elapsed)} / ${formatTime(total)}`;
 }
 
+function buildChunkTimings(chunks, speed, gapSec) {
+    const timings = [];
+    let elapsed = 0;
+    for (let i = 0; i < chunks.length; i++) {
+        const spokenLen = cleanForSpeech(chunks[i].text).length;
+        const speakSec = spokenLen / CHARS_PER_SEC / speed;
+        timings.push({ index: i, startSec: elapsed, speakSec });
+        elapsed += speakSec;
+        if (i < chunks.length - 1) {
+            elapsed += gapSec + extraPauseForDots(chunks[i].dots);
+        }
+    }
+    return timings;
+}
+
 function startTimeTicker() {
     stopTimeTicker();
     ttsTimerInterval = setInterval(updateTimeDisplay, 500);
@@ -433,6 +448,58 @@ export function playTTS() {
     updateTimeDisplay();
     startTimeTicker();
     speakNext();
+}
+
+export function seekTTSByPercent(percent) {
+    const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
+    const ratio = clamped / 100;
+    const text = getTextToSpeak();
+    const targetMs = Math.round((ttsTotalSec || estimateTotalTime()) * ratio * 1000);
+
+    setProgress(clamped);
+    ttsElapsedBeforePause = targetMs;
+    ttsPlayStartMs = isTTSSpeaking && !isTTSPaused ? Date.now() : 0;
+    updateTimeDisplay();
+
+    if (!text) return;
+
+    const chunks = splitChunks(text, 180);
+    if (!chunks.length) return;
+
+    const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
+    const gap = parseFloat(document.getElementById('tts-gap-slider')?.value || '0') || 0;
+    const timings = buildChunkTimings(chunks, speed, gap);
+    const targetSec = (ttsTotalSec || estimateTotalTime()) * ratio;
+
+    let chunkIndex = chunks.length - 1;
+    for (const t of timings) {
+        if (targetSec < t.startSec + t.speakSec) {
+            chunkIndex = t.index;
+            break;
+        }
+    }
+
+    const wasPlaying = isTTSSpeaking && !isTTSPaused;
+    const wasPaused = isTTSPaused;
+
+    ttsChunks = chunks;
+    ttsChunkIndex = chunkIndex;
+
+    clearTimeout(ttsGapTimer);
+    ttsGapTimer = null;
+    speechSynthesis.cancel();
+
+    if (wasPlaying) {
+        isTTSPaused = false;
+        isTTSSpeaking = true;
+        ttsPlayStartMs = Date.now();
+        startTimeTicker();
+        speakNext();
+    } else if (wasPaused) {
+        isTTSPaused = true;
+        isTTSSpeaking = true;
+        syncUI();
+    }
 }
 
 function splitChunks(text, max) {
@@ -606,8 +673,10 @@ export function playSelection() {
 function setProgress(pct) {
     const bar = document.getElementById('tts-progress-bar');
     const txt = document.getElementById('tts-progress-text');
+    const slider = document.getElementById('tts-progress-slider');
     if (bar) bar.style.width = pct + '%';
     if (txt) txt.textContent = pct + '%';
+    if (slider) slider.value = String(Math.round(pct));
 }
 
 function syncUI() {
