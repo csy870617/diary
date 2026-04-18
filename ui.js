@@ -192,6 +192,8 @@ function showContextMenu(x, y, id) {
     const contextMenu = getEl('context-menu');
     if(!contextMenu) return;
     getEl('category-context-menu')?.classList.add('hidden');
+    getEl('folder-context-menu')?.classList.add('hidden');
+    getEl('add-menu-popup')?.classList.add('hidden');
     state.contextTargetId = id;
     contextMenu.style.top = `${y}px`;
     contextMenu.style.left = `${x}px`;
@@ -214,6 +216,8 @@ function showCatContextMenu(x, y, id) {
     const catContextMenu = getEl('category-context-menu');
     if(!catContextMenu) return;
     getEl('context-menu')?.classList.add('hidden');
+    getEl('folder-context-menu')?.classList.add('hidden');
+    getEl('add-menu-popup')?.classList.add('hidden');
     state.contextCatId = id;
     catContextMenu.style.top = `${y}px`;
     catContextMenu.style.left = `${x}px`;
@@ -332,6 +336,10 @@ function buildTopicNavItem(cat) {
 }
 
 export function showFolderPopup(folderId, anchor) {
+    getEl('add-menu-popup')?.classList.add('hidden');
+    getEl('context-menu')?.classList.add('hidden');
+    getEl('category-context-menu')?.classList.add('hidden');
+    getEl('folder-context-menu')?.classList.add('hidden');
     popupFolderId = folderId;
     popupHistory = [];
     popupAnchor = anchor;
@@ -540,6 +548,10 @@ function positionFolderPopup() {
 function showAddMenu(anchor) {
     const menu = getEl('add-menu-popup');
     if (!menu) return;
+    closeFolderPopup();
+    getEl('context-menu')?.classList.add('hidden');
+    getEl('category-context-menu')?.classList.add('hidden');
+    getEl('folder-context-menu')?.classList.add('hidden');
     const rect = anchor.getBoundingClientRect();
     menu.style.left = `${Math.max(10, rect.right - 140)}px`;
     menu.style.top = `${rect.bottom + 4}px`;
@@ -609,6 +621,7 @@ function showFolderContextMenu(x, y, folderId) {
     if (!menu) return;
     getEl('context-menu')?.classList.add('hidden');
     getEl('category-context-menu')?.classList.add('hidden');
+    getEl('add-menu-popup')?.classList.add('hidden');
     state.contextFolderId = folderId;
     menu.style.top = `${y}px`;
     menu.style.left = `${x}px`;

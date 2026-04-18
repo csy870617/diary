@@ -311,7 +311,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .trash-btn-group button { padding: 6px 12px; font-size: 12px; border-radius: 6px; cursor: pointer; border: none; font-weight: 500; font-family: var(--text-sans); }
 .btn-restore { background: var(--active-bg); color: var(--active-text); }
 .btn-perm-delete { background: #FEE2E2; color: var(--danger); }
-.context-menu { position: fixed; background: var(--surface-color); border: 1px solid var(--gray-200); border-radius: 8px; padding: 6px 0; box-shadow: 0 4px 12px var(--shadow-color); z-index: 3000; min-width: 160px; display: flex; flex-direction: column; }
+.context-menu { position: fixed; background: var(--surface-color); border: 1px solid var(--gray-200); border-radius: 8px; padding: 6px 0; box-shadow: 0 4px 12px var(--shadow-color); z-index: 3200; min-width: 160px; display: flex; flex-direction: column; }
 .ctx-item { background: none; border: none; text-align: left; padding: 10px 16px; font-size: 14px; font-family: var(--text-sans); color: var(--gray-900); cursor: pointer; display: flex; align-items: center; gap: 8px; width: 100%; transition: background 0.2s; }
 .ctx-item:hover { background: var(--gray-100); }
 .ctx-item.danger { color: var(--danger); }
