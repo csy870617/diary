@@ -195,10 +195,7 @@ function showContextMenu(x, y, id) {
     getEl('folder-context-menu')?.classList.add('hidden');
     getEl('add-menu-popup')?.classList.add('hidden');
     state.contextTargetId = id;
-    contextMenu.style.top = `${y}px`;
-    contextMenu.style.left = `${x}px`;
-    if (x + 160 > window.innerWidth) contextMenu.style.left = `${window.innerWidth - 170}px`;
-    contextMenu.classList.remove('hidden');
+    placeFloatingMenu(contextMenu, { x, y });
 }
 
 function attachCatContextMenu(element, catId) {
@@ -219,9 +216,7 @@ function showCatContextMenu(x, y, id) {
     getEl('folder-context-menu')?.classList.add('hidden');
     getEl('add-menu-popup')?.classList.add('hidden');
     state.contextCatId = id;
-    catContextMenu.style.top = `${y}px`;
-    catContextMenu.style.left = `${x}px`;
-    catContextMenu.classList.remove('hidden');
+    placeFloatingMenu(catContextMenu, { x, y });
 }
 
 let popupFolderId = null;
@@ -532,16 +527,22 @@ function initPopupSortable(list) {
 function positionFolderPopup() {
     const popup = getEl('folder-popup');
     if (!popup || !popupAnchor) return;
+    const margin = 10;
     const rect = popupAnchor.getBoundingClientRect();
     popup.style.visibility = 'hidden';
     popup.classList.remove('hidden');
     const popupRect = popup.getBoundingClientRect();
     let left = rect.left;
-    if (left + popupRect.width > window.innerWidth - 10) {
-        left = Math.max(10, window.innerWidth - popupRect.width - 10);
+    if (left + popupRect.width > window.innerWidth - margin) {
+        left = Math.max(margin, window.innerWidth - popupRect.width - margin);
+    }
+    let top = rect.bottom + 4;
+    if (top + popupRect.height > window.innerHeight - margin) {
+        const topAboveAnchor = rect.top - popupRect.height - 4;
+        top = topAboveAnchor >= margin ? topAboveAnchor : Math.max(margin, window.innerHeight - popupRect.height - margin);
     }
     popup.style.left = `${left}px`;
-    popup.style.top = `${rect.bottom + 4}px`;
+    popup.style.top = `${top}px`;
     popup.style.visibility = '';
 }
 
@@ -553,9 +554,7 @@ function showAddMenu(anchor) {
     getEl('category-context-menu')?.classList.add('hidden');
     getEl('folder-context-menu')?.classList.add('hidden');
     const rect = anchor.getBoundingClientRect();
-    menu.style.left = `${Math.max(10, rect.right - 140)}px`;
-    menu.style.top = `${rect.bottom + 4}px`;
-    menu.classList.remove('hidden');
+    placeFloatingMenu(menu, { x: rect.right, y: rect.bottom + 4, alignRight: true });
     menu.querySelectorAll('.add-menu-item').forEach(b => {
         b.onclick = (e) => {
             e.stopPropagation();
@@ -623,10 +622,22 @@ function showFolderContextMenu(x, y, folderId) {
     getEl('category-context-menu')?.classList.add('hidden');
     getEl('add-menu-popup')?.classList.add('hidden');
     state.contextFolderId = folderId;
-    menu.style.top = `${y}px`;
-    menu.style.left = `${x}px`;
-    if (x + 160 > window.innerWidth) menu.style.left = `${window.innerWidth - 170}px`;
+    placeFloatingMenu(menu, { x, y });
+}
+
+function placeFloatingMenu(menu, { x, y, alignRight = false }) {
+    if (!menu) return;
+    const margin = 10;
+    menu.style.visibility = 'hidden';
     menu.classList.remove('hidden');
+    const rect = menu.getBoundingClientRect();
+    let left = alignRight ? x - rect.width : x;
+    left = Math.max(margin, Math.min(left, window.innerWidth - rect.width - margin));
+    const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
+    const top = Math.max(margin, Math.min(y, maxTop));
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+    menu.style.visibility = '';
 }
 
 export function renameFolderAction() {
