@@ -424,12 +424,15 @@ function stripParentheses(text) {
  */
 function cleanForSpeech(text) {
     if (!text) return '';
+    // 일부 엔진이 아포스트로피/대시를 기호명으로 읽는 문제를 피하기 위해 사전 제거
+    // 예) ' -> "아포스트로피", - -> "대시/다시"
+    const normalized = text.replace(/['’`´\-‐‑‒–—―]+/g, ' ');
     // 허용: 글자(\p{L}), 숫자(\p{N}), 공백, 운율용 기본 문장부호
-    //  . , ! ? : ; … · ~ - — – 및 한중일 대응 부호(。、，．！？：；‥)
+    //  . , ! ? : ; … · ~ 및 한중일 대응 부호(。、，．！？：；‥)
     //  큰따옴표·작은따옴표·한국식 인용부호(「」『』)
-    const allowed = /[\p{L}\p{N}\s.,!?:;…·~\-—–。、，．！？：；‥"'「」『』]/u;
+    const allowed = /[\p{L}\p{N}\s.,!?:;…·~。、，．！？：；‥"「」『』]/u;
     let out = '';
-    for (const ch of text) {
+    for (const ch of normalized) {
         out += allowed.test(ch) ? ch : ' ';
     }
     return out.replace(/[ \t]+/g, ' ').trim();
