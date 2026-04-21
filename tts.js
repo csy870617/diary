@@ -362,6 +362,29 @@ function buildChunkTimings(chunks, speed, gapSec) {
     return timings;
 }
 
+function getSeekState(text, percent) {
+    const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
+    const chunks = splitChunks(text, 180);
+    if (!chunks.length) {
+        return { percent: clamped, chunks: [], chunkIndex: 0, targetMs: 0 };
+    }
+    const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
+    const gap = parseFloat(document.getElementById('tts-gap-slider')?.value || '0') || 0;
+    const timings = buildChunkTimings(chunks, speed, gap);
+    const totalSec = ttsTotalSec || estimateTotalTime();
+    const targetSec = totalSec * (clamped / 100);
+    const targetMs = Math.round(targetSec * 1000);
+
+    let chunkIndex = chunks.length - 1;
+    for (const t of timings) {
+        if (targetSec < t.startSec + t.speakSec) {
+            chunkIndex = t.index;
+            break;
+        }
+    }
+    return { percent: clamped, chunks, chunkIndex, targetMs };
+}
+
 function startTimeTicker() {
     stopTimeTicker();
     ttsTimerInterval = setInterval(updateTimeDisplay, 500);
@@ -436,15 +459,24 @@ export function playTTS() {
         return;
     }
 
-    stopTTS();
     const text = getTextToSpeak();
     if (!text) { alert('읽을 내용이 없습니다.'); return; }
 
-    ttsChunks = splitChunks(text, 180);
-    ttsChunkIndex = 0;
+    // 새 재생 시: 사용자가 옮긴 진행바 위치(정지 상태에서도)를 시작점으로 반영
+    const sliderPercent = Number(document.getElementById('tts-progress-slider')?.value || '0');
+    const seekPercent = (sliderPercent > 0 && sliderPercent < 100) ? sliderPercent : 0;
+    const seekState = getSeekState(text, seekPercent);
+
+    speechSynthesis.cancel();
+    clearTimeout(ttsGapTimer);
+    ttsGapTimer = null;
+
+    ttsChunks = seekState.chunks;
+    ttsChunkIndex = seekState.chunkIndex;
     ttsTotalSec = estimateTotalTime();
-    ttsElapsedBeforePause = 0;
+    ttsElapsedBeforePause = seekState.targetMs;
     ttsPlayStartMs = Date.now();
+    setProgress(seekState.percent);
     updateTimeDisplay();
     startTimeTicker();
     speakNext();
@@ -452,38 +484,22 @@ export function playTTS() {
 
 export function seekTTSByPercent(percent) {
     const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
-    const ratio = clamped / 100;
     const text = getTextToSpeak();
-    const targetMs = Math.round((ttsTotalSec || estimateTotalTime()) * ratio * 1000);
+    const seekState = getSeekState(text, clamped);
 
     setProgress(clamped);
-    ttsElapsedBeforePause = targetMs;
+    ttsElapsedBeforePause = seekState.targetMs;
     ttsPlayStartMs = isTTSSpeaking && !isTTSPaused ? Date.now() : 0;
     updateTimeDisplay();
 
     if (!text) return;
-
-    const chunks = splitChunks(text, 180);
-    if (!chunks.length) return;
-
-    const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
-    const gap = parseFloat(document.getElementById('tts-gap-slider')?.value || '0') || 0;
-    const timings = buildChunkTimings(chunks, speed, gap);
-    const targetSec = (ttsTotalSec || estimateTotalTime()) * ratio;
-
-    let chunkIndex = chunks.length - 1;
-    for (const t of timings) {
-        if (targetSec < t.startSec + t.speakSec) {
-            chunkIndex = t.index;
-            break;
-        }
-    }
+    if (!seekState.chunks.length) return;
 
     const wasPlaying = isTTSSpeaking && !isTTSPaused;
     const wasPaused = isTTSPaused;
 
-    ttsChunks = chunks;
-    ttsChunkIndex = chunkIndex;
+    ttsChunks = seekState.chunks;
+    ttsChunkIndex = seekState.chunkIndex;
 
     clearTimeout(ttsGapTimer);
     ttsGapTimer = null;
