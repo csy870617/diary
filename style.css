@@ -524,9 +524,9 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
 }
 .tts-progress-track {
     flex: 1;
-    height: 3px;
+    height: 6px;
     background: var(--gray-200);
-    border-radius: 2px;
+    border-radius: 999px;
     overflow: hidden;
     position: relative;
 }
@@ -539,9 +539,9 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
 }
 .tts-progress-slider {
     position: absolute;
-    inset: -6px 0;
+    inset: -10px 0;
     width: 100%;
-    height: 15px;
+    height: 24px;
     margin: 0;
     background: transparent;
     -webkit-appearance: none;
@@ -549,27 +549,27 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
     cursor: pointer;
 }
 .tts-progress-slider::-webkit-slider-runnable-track {
-    height: 3px;
+    height: 6px;
     background: transparent;
 }
 .tts-progress-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 11px;
-    height: 11px;
+    width: 16px;
+    height: 16px;
     border-radius: 50%;
     border: 2px solid var(--accent);
     background: var(--surface-color);
-    margin-top: -4px;
+    margin-top: -5px;
 }
 .tts-progress-slider::-moz-range-track {
-    height: 3px;
+    height: 6px;
     background: transparent;
     border: none;
 }
 .tts-progress-slider::-moz-range-thumb {
-    width: 11px;
-    height: 11px;
+    width: 16px;
+    height: 16px;
     border-radius: 50%;
     border: 2px solid var(--accent);
     background: var(--surface-color);
