@@ -618,8 +618,11 @@ function speakNext() {
         }
     };
     utt.onerror = (e) => {
-        if (e.error !== 'canceled') console.error('TTS error:', e.error);
-        isTTSSpeaking = false; isTTSPaused = false;
+        // cancel()로 인해 발생하는 canceled 에러는 탐색/정지/재시작 과정의 정상 동작
+        if (e.error === 'canceled') return;
+        console.error('TTS error:', e.error);
+        isTTSSpeaking = false;
+        isTTSPaused = false;
         stopTimeTicker();
         syncUI();
     };
