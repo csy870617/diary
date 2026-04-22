@@ -427,6 +427,44 @@ export function jumpToPage(index) {
     updateBookNav();
 }
 
+function findVisibleAnchor() {
+    const container = document.getElementById('editor-container');
+    if (!container) return null;
+    const cr = container.getBoundingClientRect();
+    const ys = [cr.top + 8, cr.top + 40, cr.top + 100, cr.top + 200, cr.top + 320];
+    const xs = [cr.left + 24, cr.left + 80, cr.left + 200, cr.left + 360];
+    for (const y of ys) {
+        if (y >= cr.bottom - 4) break;
+        for (const x of xs) {
+            if (x >= cr.right - 4) break;
+            const el = document.elementFromPoint(x, y);
+            if (el && container.contains(el) && el !== container) return el;
+        }
+    }
+    return null;
+}
+
+function scrollAnchorIntoView(anchor, mode) {
+    if (!anchor || !anchor.isConnected) return false;
+    const container = document.getElementById('editor-container');
+    if (!container) return false;
+    const cr = container.getBoundingClientRect();
+    const r = anchor.getBoundingClientRect();
+    if (mode === 'book') {
+        const stride = Math.floor(container.clientWidth);
+        if (stride <= 0) return false;
+        const offsetX = r.left - cr.left + container.scrollLeft;
+        const totalPages = Math.max(1, Math.ceil(container.scrollWidth / stride));
+        const pageIndex = Math.max(0, Math.min(totalPages - 1, Math.floor(offsetX / stride)));
+        currentBookPageIndex = pageIndex;
+        container.scrollLeft = pageIndex * stride;
+    } else {
+        const offsetY = r.top - cr.top + container.scrollTop;
+        container.scrollTop = Math.max(0, offsetY);
+    }
+    return true;
+}
+
 function updateBookLayout() {
     const container = document.getElementById('editor-container');
     if (!container) return;
@@ -1094,6 +1132,7 @@ export function refreshEditorContent() {
 export function toggleViewMode(mode) {
     const container = document.getElementById('editor-container'), writeModal = document.getElementById('write-modal'), editBody = document.getElementById('editor-body'), editTitle = document.getElementById('edit-title'), editSubtitle = document.getElementById('edit-subtitle'), editorToolbar = document.getElementById('editor-toolbar');
     const wasBookMode = state.currentViewMode === 'book', oldScrollTop = container ? container.scrollTop : 0, oldHeight = container ? container.clientHeight : 0, lastPageIndex = currentBookPageIndex;
+    const anchor = findVisibleAnchor();
     state.currentViewMode = mode;
     const btnReadOnly = document.getElementById('btn-readonly'), btnBookMode = document.getElementById('btn-bookmode');
     if(btnReadOnly) btnReadOnly.classList.toggle('active', mode === 'readOnly');
@@ -1102,11 +1141,40 @@ export function toggleViewMode(mode) {
     if (wasBookMode) { const body = document.getElementById('editor-body'); if (body) body.querySelectorAll('img').forEach(img => { img.style.maxHeight = ''; img.style.width = img.dataset.bookOrigWidth || ''; img.style.height = img.dataset.bookOrigHeight || ''; delete img.dataset.bookOrigWidth; delete img.dataset.bookOrigHeight; }); }
     writeModal.classList.remove('mode-read-only', 'mode-book');
     document.querySelectorAll('.book-nav, #page-indicator, #book-slider-container, #btn-scroll-top').forEach(el => el.classList.add('hidden'));
-    hideSelection(); 
+    hideSelection();
     toggleBookEventListeners(mode === 'book');
-    if (mode === 'book') { editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false"; linkifyContents(editBody); writeModal.classList.add('mode-book'); updateBookLayout(); if (!wasBookMode && oldHeight > 0) currentBookPageIndex = Math.floor(oldScrollTop / oldHeight); updateBookNav(); if (container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth); editorToolbar?.classList.add('collapsed'); }
-    else if (mode === 'readOnly') { editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false"; linkifyContents(editBody); writeModal.classList.add('mode-read-only'); editorToolbar?.classList.add('collapsed'); if (wasBookMode && container) requestAnimationFrame(() => { container.scrollTop = lastPageIndex * oldHeight; }); }
-    else { editTitle.readOnly = false; editSubtitle.readOnly = false; editBody.contentEditable = "true"; editorToolbar?.classList.remove('collapsed'); if (wasBookMode && container) requestAnimationFrame(() => { container.scrollTop = lastPageIndex * oldHeight; }); }
+    if (mode === 'book') {
+        editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false";
+        linkifyContents(editBody);
+        writeModal.classList.add('mode-book');
+        updateBookLayout();
+        editorToolbar?.classList.add('collapsed');
+        if (!scrollAnchorIntoView(anchor, 'book')) {
+            if (!wasBookMode && oldHeight > 0) currentBookPageIndex = Math.floor(oldScrollTop / oldHeight);
+            if (container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
+        }
+        updateBookNav();
+    }
+    else if (mode === 'readOnly') {
+        editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false";
+        linkifyContents(editBody);
+        writeModal.classList.add('mode-read-only');
+        editorToolbar?.classList.add('collapsed');
+        requestAnimationFrame(() => {
+            if (!scrollAnchorIntoView(anchor, 'normal') && wasBookMode && container) {
+                container.scrollTop = lastPageIndex * oldHeight;
+            }
+        });
+    }
+    else {
+        editTitle.readOnly = false; editSubtitle.readOnly = false; editBody.contentEditable = "true";
+        editorToolbar?.classList.remove('collapsed');
+        requestAnimationFrame(() => {
+            if (!scrollAnchorIntoView(anchor, 'normal') && wasBookMode && container) {
+                container.scrollTop = lastPageIndex * oldHeight;
+            }
+        });
+    }
 }
 
 export function formatDoc(cmd, value = null) { 
