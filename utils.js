@@ -758,6 +758,64 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
         e.preventDefault();
     });
     
+    async function readImageFileAsDataUrl(file) {
+        if (!file || !file.type?.startsWith('image/')) return null;
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (event) => resolve(event.target?.result || null);
+            reader.onerror = () => resolve(null);
+            reader.readAsDataURL(file);
+        });
+    }
+
+    async function compressImageDataUrl(dataUrl, maxWidth = 800, quality = 0.7) {
+        if (!dataUrl) return null;
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+                try {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    let { width, height } = img;
+                    if (width > maxWidth) {
+                        height *= maxWidth / width;
+                        width = maxWidth;
+                    }
+                    canvas.width = width;
+                    canvas.height = height;
+                    ctx.drawImage(img, 0, 0, width, height);
+                    resolve(canvas.toDataURL('image/jpeg', quality));
+                } catch {
+                    resolve(dataUrl);
+                }
+            };
+            img.onerror = () => resolve(dataUrl);
+            img.src = dataUrl;
+        });
+    }
+
+    async function getPastedImageDataUrl(clipboardData) {
+        if (!clipboardData) return null;
+
+        const items = Array.from(clipboardData.items || []);
+        for (const item of items) {
+            if (item.kind === 'file' && item.type.startsWith('image/')) {
+                const file = item.getAsFile();
+                const rawDataUrl = await readImageFileAsDataUrl(file);
+                return compressImageDataUrl(rawDataUrl);
+            }
+        }
+
+        const files = Array.from(clipboardData.files || []);
+        const imageFile = files.find(file => file.type.startsWith('image/'));
+        if (imageFile) {
+            const rawDataUrl = await readImageFileAsDataUrl(imageFile);
+            return compressImageDataUrl(rawDataUrl);
+        }
+
+        return null;
+    }
+
     // ========== 붙여넣기 이벤트 ==========
     editorElement.addEventListener('paste', (e) => {
         const selectedCells = document.querySelectorAll('td.selected-cell');
@@ -802,80 +860,92 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
         e.preventDefault();
         if (callbacks.onBeforePaste) callbacks.onBeforePaste();
 
-        let html = e.clipboardData.getData('text/html');
-        let text = e.clipboardData.getData('text/plain');
+        getPastedImageDataUrl(e.clipboardData).then((imageDataUrl) => {
+            if (imageDataUrl) {
+                if (callbacks.onPasteImage) {
+                    callbacks.onPasteImage(imageDataUrl);
+                } else {
+                    document.execCommand('insertImage', false, imageDataUrl);
+                    if (callbacks.onAfterPaste) callbacks.onAfterPaste();
+                }
+                return;
+            }
 
-        // 외부에서 복사한 테이블이 있고 현재 셀 안에 있는 경우 → 셀 내용 교체
-        if (html && html.includes('<table') && currentCell) {
-            const table = currentCell.closest('table');
-            if (table) {
+            let html = e.clipboardData.getData('text/html');
+            let text = e.clipboardData.getData('text/plain');
+
+            // 외부에서 복사한 테이블이 있고 현재 셀 안에 있는 경우 → 셀 내용 교체
+            if (html && html.includes('<table') && currentCell) {
+                const table = currentCell.closest('table');
+                if (table) {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, 'text/html');
+                    const pastedTable = doc.querySelector('table');
+
+                    if (pastedTable) {
+                        const startRow = currentCell.parentElement.rowIndex;
+                        const startCol = currentCell.cellIndex;
+
+                        Array.from(pastedTable.rows).forEach((pastedRow, rIdx) => {
+                            const targetRow = table.rows[startRow + rIdx];
+                            if (targetRow) {
+                                Array.from(pastedRow.cells).forEach((pastedCell, cIdx) => {
+                                    const targetCellEl = targetRow.cells[startCol + cIdx];
+                                    if (targetCellEl) {
+                                        targetCellEl.innerHTML = pastedCell.innerHTML || '<br>';
+                                    }
+                                });
+                            }
+                        });
+
+                        if (callbacks.onAfterPaste) callbacks.onAfterPaste();
+                        return;
+                    }
+                }
+            }
+
+            // 외부에서 복사한 테이블이 있고 표 밖인 경우 → 새 표로 삽입
+            if (html && html.includes('<table') && !currentCell) {
                 const parser = new DOMParser();
                 const doc = parser.parseFromString(html, 'text/html');
                 const pastedTable = doc.querySelector('table');
 
                 if (pastedTable) {
-                    const startRow = currentCell.parentElement.rowIndex;
-                    const startCol = currentCell.cellIndex;
-
-                    Array.from(pastedTable.rows).forEach((pastedRow, rIdx) => {
-                        const targetRow = table.rows[startRow + rIdx];
-                        if (targetRow) {
-                            Array.from(pastedRow.cells).forEach((pastedCell, cIdx) => {
-                                const targetCellEl = targetRow.cells[startCol + cIdx];
-                                if (targetCellEl) {
-                                    targetCellEl.innerHTML = pastedCell.innerHTML || '<br>';
-                                }
-                            });
-                        }
-                    });
-
+                    const tableHtml = `<div class="table-wrapper"><table>${pastedTable.innerHTML}</table></div><p><br></p>`;
+                    document.execCommand('insertHTML', false, tableHtml);
                     if (callbacks.onAfterPaste) callbacks.onAfterPaste();
                     return;
                 }
             }
-        }
 
-        // 외부에서 복사한 테이블이 있고 표 밖인 경우 → 새 표로 삽입
-        if (html && html.includes('<table') && !currentCell) {
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
-            const pastedTable = doc.querySelector('table');
+            // 내부에서 복사한 것인지 확인 (텍스트 내용이 같으면 내부 복사)
+            const isInternalCopy = internalClipboard.text && internalClipboard.text === text;
 
-            if (pastedTable) {
-                const tableHtml = `<div class="table-wrapper"><table>${pastedTable.innerHTML}</table></div><p><br></p>`;
-                document.execCommand('insertHTML', false, tableHtml);
+            // 내부에서 복사한 것이면 서식 전체 유지
+            if (isInternalCopy && internalClipboard.html) {
+                document.execCommand('insertHTML', false, internalClipboard.html);
                 if (callbacks.onAfterPaste) callbacks.onAfterPaste();
                 return;
             }
-        }
-        
-        // 내부에서 복사한 것인지 확인 (텍스트 내용이 같으면 내부 복사)
-        const isInternalCopy = internalClipboard.text && internalClipboard.text === text;
 
-        // 내부에서 복사한 것이면 서식 전체 유지
-        if (isInternalCopy && internalClipboard.html) {
-            document.execCommand('insertHTML', false, internalClipboard.html);
+            // 외부에서 복사한 내용은 서식을 제거하고 기본 서식으로 붙여넣기
+            if (text) {
+                let cleanText = text
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/\n/g, '<br>');
+
+                cleanText = cleanText.replace(
+                    /(https?:\/\/[^\s<]+)/g,
+                    '<a href="$1" target="_blank" style="color:#2563EB; text-decoration:underline; cursor:pointer;">$1</a>'
+                );
+
+                document.execCommand('insertHTML', false, cleanText);
+            }
+
             if (callbacks.onAfterPaste) callbacks.onAfterPaste();
-            return;
-        }
-
-        // 외부에서 복사한 내용은 서식을 제거하고 기본 서식으로 붙여넣기
-        if (text) {
-            let cleanText = text
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/\n/g, '<br>');
-
-            cleanText = cleanText.replace(
-                /(https?:\/\/[^\s<]+)/g,
-                '<a href="$1" target="_blank" style="color:#2563EB; text-decoration:underline; cursor:pointer;">$1</a>'
-            );
-
-            document.execCommand('insertHTML', false, cleanText);
-        }
-
-        if (callbacks.onAfterPaste) callbacks.onAfterPaste();
+        });
     });
 }
 
