@@ -687,6 +687,7 @@ function setupBasicHandling() {
     setupLinkPreservation(editorBody, {
         onBeforePaste: () => saveBeforeChange('paste'),
         onAfterPaste: () => triggerAutoSave(),
+        onPasteImage: (src) => insertImage(src),
         getSelectedElement: () => currentSelectedElement,
         clearSelectedElement: () => hideSelection()
     });
