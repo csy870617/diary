@@ -353,7 +353,7 @@ export async function triggerAutoSave() {
     if (autoSaveTimer) clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(async () => {
         const editBody = document.getElementById('editor-body');
-        if (!editBody || state.currentViewMode !== 'default') return;
+        if (!editBody || (state.currentViewMode !== 'default' && state.currentViewMode !== 'book-edit')) return;
         await saveEntry(); 
         if (window.gapi && gapi.client && gapi.client.getToken()) await saveToDrive(); 
     }, 2000); 
@@ -381,7 +381,7 @@ function handleBookTouchEnd(e) {
     }
 }
 function handleBookResize() {
-    if (state.currentViewMode === 'book') {
+    if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') {
         updateBookLayout();
         const container = document.getElementById('editor-container');
         if(container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
@@ -487,8 +487,8 @@ function updateBookLayout() {
     }
 }
 
-export function updateBookNav() { 
-    if (state.currentViewMode !== 'book') return; 
+export function updateBookNav() {
+    if (state.currentViewMode !== 'book' && state.currentViewMode !== 'book-edit') return;
     const container = document.getElementById('editor-container');
     if(!container) return;
     const stride = Math.floor(container.clientWidth);
@@ -1079,7 +1079,7 @@ function setupBasicHandling() {
     });
     editSubtitle?.addEventListener('focus', () => saveBeforeChange('subtitle'));
     
-    window.addEventListener('resize', () => { updateSelectionBox(); if(state.currentViewMode === 'book') handleBookResize(); });
+    window.addEventListener('resize', () => { updateSelectionBox(); if(state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') handleBookResize(); });
 }
 
 export function openEditor(isEdit, entryData) { 
@@ -1130,24 +1130,26 @@ export function refreshEditorContent() {
     const latestEntry = state.entries.find(e => e.id === state.editingId);
     if (!latestEntry) return;
     const editTitle = document.getElementById('edit-title'), editSubtitle = document.getElementById('edit-subtitle'), editBody = document.getElementById('editor-body');
-    if (state.currentViewMode !== 'default' || document.activeElement !== editBody) {
+    const isEditableMode = state.currentViewMode === 'default' || state.currentViewMode === 'book-edit';
+    if (!isEditableMode || document.activeElement !== editBody) {
         if (editTitle.value !== latestEntry.title) editTitle.value = latestEntry.title || '';
         if (editSubtitle.value !== latestEntry.subtitle) editSubtitle.value = latestEntry.subtitle || '';
-        if (editBody.innerHTML !== latestEntry.body) { editBody.innerHTML = latestEntry.body || ''; linkifyContents(editBody); setupTableWrapperScroll(editBody); if (state.currentViewMode === 'book') updateBookNav(); }
+        if (editBody.innerHTML !== latestEntry.body) { editBody.innerHTML = latestEntry.body || ''; if (!isEditableMode) linkifyContents(editBody); setupTableWrapperScroll(editBody); if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') updateBookNav(); }
     }
 }
 
 export function toggleViewMode(mode) {
     const container = document.getElementById('editor-container'), writeModal = document.getElementById('write-modal'), editBody = document.getElementById('editor-body'), editTitle = document.getElementById('edit-title'), editSubtitle = document.getElementById('edit-subtitle'), editorToolbar = document.getElementById('editor-toolbar');
-    const wasBookMode = state.currentViewMode === 'book', oldScrollTop = container ? container.scrollTop : 0, oldHeight = container ? container.clientHeight : 0, lastPageIndex = currentBookPageIndex;
-    const anchor = findVisibleAnchor();
+    const wasBookMode = state.currentViewMode === 'book' || state.currentViewMode === 'book-edit', oldScrollTop = container ? container.scrollTop : 0, oldHeight = container ? container.clientHeight : 0, lastPageIndex = currentBookPageIndex;
+    const isBookToBook = wasBookMode && (mode === 'book' || mode === 'book-edit');
+    const anchor = isBookToBook ? null : findVisibleAnchor();
     state.currentViewMode = mode;
     const btnReadOnly = document.getElementById('btn-readonly'), btnBookMode = document.getElementById('btn-bookmode');
     if(btnReadOnly) btnReadOnly.classList.toggle('active', mode === 'readOnly');
-    if(btnBookMode) btnBookMode.classList.toggle('active', mode === 'book');
-    if(container) { container.style.height = ''; container.style.overflow = ''; container.style.columnWidth = ''; container.style.columnGap = ''; container.scrollLeft = 0; }
-    if (wasBookMode) { const body = document.getElementById('editor-body'); if (body) body.querySelectorAll('img').forEach(img => { img.style.maxHeight = ''; img.style.width = img.dataset.bookOrigWidth || ''; img.style.height = img.dataset.bookOrigHeight || ''; delete img.dataset.bookOrigWidth; delete img.dataset.bookOrigHeight; }); }
-    writeModal.classList.remove('mode-read-only', 'mode-book');
+    if(btnBookMode) btnBookMode.classList.toggle('active', mode === 'book' || mode === 'book-edit');
+    if(!isBookToBook && container) { container.style.height = ''; container.style.overflow = ''; container.style.columnWidth = ''; container.style.columnGap = ''; container.scrollLeft = 0; }
+    if (wasBookMode && !isBookToBook) { const body = document.getElementById('editor-body'); if (body) body.querySelectorAll('img').forEach(img => { img.style.maxHeight = ''; img.style.width = img.dataset.bookOrigWidth || ''; img.style.height = img.dataset.bookOrigHeight || ''; delete img.dataset.bookOrigWidth; delete img.dataset.bookOrigHeight; }); }
+    writeModal.classList.remove('mode-read-only', 'mode-book', 'mode-book-edit');
     document.querySelectorAll('.book-nav, #page-indicator, #book-slider-container, #btn-scroll-top').forEach(el => el.classList.add('hidden'));
     hideSelection();
     toggleBookEventListeners(mode === 'book');
@@ -1157,10 +1159,19 @@ export function toggleViewMode(mode) {
         writeModal.classList.add('mode-book');
         updateBookLayout();
         editorToolbar?.classList.add('collapsed');
-        if (!scrollAnchorIntoView(anchor, 'book')) {
-            if (!wasBookMode && oldHeight > 0) currentBookPageIndex = Math.floor(oldScrollTop / oldHeight);
-            if (container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
+        if (!isBookToBook) {
+            if (!scrollAnchorIntoView(anchor, 'book')) {
+                if (!wasBookMode && oldHeight > 0) currentBookPageIndex = Math.floor(oldScrollTop / oldHeight);
+                if (container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
+            }
         }
+        updateBookNav();
+    }
+    else if (mode === 'book-edit') {
+        editTitle.readOnly = false; editSubtitle.readOnly = false; editBody.contentEditable = "true";
+        writeModal.classList.add('mode-book', 'mode-book-edit');
+        if (!isBookToBook) updateBookLayout();
+        editorToolbar?.classList.add('collapsed');
         updateBookNav();
     }
     else if (mode === 'readOnly') {
