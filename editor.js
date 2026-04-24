@@ -985,6 +985,14 @@ function setupBasicHandling() {
     // 셀이 아닌 곳에서의 키 처리
     function handleNonCellKeys(e) {
         const selectedCells = document.querySelectorAll('td.selected-cell');
+
+        // 본문에서 Tab 입력 시 3칸 들여쓰기
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            saveBeforeChange('typing');
+            document.execCommand('insertText', false, '   ');
+            return;
+        }
         
         // Delete 키로 선택된 셀 또는 요소 삭제
         if (e.key === 'Delete' || e.key === 'Backspace') {
