@@ -549,8 +549,15 @@ function setupUIListeners() {
             if (backBtnText) backBtnText.innerText = '목록';
         }
     });
-    document.getElementById('btn-readonly')?.addEventListener('click', () => toggleViewMode(state.currentViewMode === 'readOnly' ? 'default' : 'readOnly'));
-    document.getElementById('btn-bookmode')?.addEventListener('click', () => toggleViewMode(state.currentViewMode === 'book' ? 'default' : 'book'));
+    document.getElementById('btn-readonly')?.addEventListener('click', () => {
+        if (state.currentViewMode === 'book-edit') toggleViewMode('default');
+        else toggleViewMode(state.currentViewMode === 'readOnly' ? 'default' : 'readOnly');
+    });
+    document.getElementById('btn-bookmode')?.addEventListener('click', () => {
+        if (state.currentViewMode === 'book') toggleViewMode('book-edit');
+        else if (state.currentViewMode === 'book-edit') toggleViewMode('book');
+        else toggleViewMode('book');
+    });
     document.getElementById('trash-btn')?.addEventListener('click', openTrashModal);
     document.getElementById('close-trash-btn')?.addEventListener('click', () => closeAllModals(true));
     document.getElementById('btn-empty-trash')?.addEventListener('click', emptyTrash);
