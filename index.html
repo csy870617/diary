@@ -12,7 +12,8 @@
         (function() {
             var saved = localStorage.getItem('faith_theme');
             var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-            if (saved === 'dark' || (!saved && prefersDark)) {
+            var effective = (saved === 'light' || saved === 'dark') ? saved : (prefersDark ? 'dark' : 'light');
+            if (effective === 'dark') {
                 document.documentElement.setAttribute('data-theme', 'dark');
             }
         })();

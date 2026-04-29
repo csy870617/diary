@@ -21,33 +21,47 @@ const stickers = [
     '📝','✏️','🖍️','📌','📎','📅','⏳','💡','🔔','🎁','🎀','💌','🏠','🚪'
 ];
 
-function initTheme() {
+function getThemePref() {
     const saved = localStorage.getItem('faith_theme');
+    return (saved === 'light' || saved === 'dark' || saved === 'system') ? saved : 'system';
+}
+
+function applyTheme(pref) {
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    const isDark = saved ? saved === 'dark' : prefersDark;
-    if (isDark) document.documentElement.setAttribute('data-theme', 'dark');
+    const effective = pref === 'system' ? (prefersDark ? 'dark' : 'light') : pref;
+    if (effective === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
     else document.documentElement.removeAttribute('data-theme');
-    updateThemeIcon(isDark);
+    updateThemeIcon(pref);
+}
+
+function initTheme() {
+    applyTheme(getThemePref());
+    // 시스템 설정을 따를 때 OS 테마 변화를 즉시 반영
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = () => { if (getThemePref() === 'system') applyTheme('system'); };
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    else if (mq.addListener) mq.addListener(onChange);
 }
 
 function toggleTheme() {
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    if (isDark) {
-        document.documentElement.removeAttribute('data-theme');
-        localStorage.setItem('faith_theme', 'light');
-    } else {
-        document.documentElement.setAttribute('data-theme', 'dark');
-        localStorage.setItem('faith_theme', 'dark');
-    }
-    updateThemeIcon(!isDark);
+    const order = ['light', 'dark', 'system'];
+    const next = order[(order.indexOf(getThemePref()) + 1) % order.length];
+    localStorage.setItem('faith_theme', next);
+    applyTheme(next);
 }
 
-function updateThemeIcon(isDark) {
+function updateThemeIcon(pref) {
     const btn = document.getElementById('theme-toggle-btn');
     if (!btn) return;
     const icon = btn.querySelector('i');
-    if (icon) icon.className = isDark ? 'ph ph-sun' : 'ph ph-moon';
-    btn.title = isDark ? '라이트모드 전환' : '다크모드 전환';
+    if (icon) {
+        icon.className = pref === 'light' ? 'ph ph-moon'
+                       : pref === 'dark' ? 'ph ph-monitor'
+                       : 'ph ph-sun';
+    }
+    btn.title = pref === 'light' ? '다크모드 전환'
+              : pref === 'dark' ? '시스템 설정 따르기'
+              : '라이트모드 전환';
 }
 
 function init() {
