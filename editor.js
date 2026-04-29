@@ -1833,6 +1833,26 @@ function getCellAt(table, rowIndex, colIndex) {
 
 export function insertSticker(emoji) { saveBeforeChange('insert'); document.execCommand('insertText', false, emoji); triggerAutoSave(); }
 export function insertImage(src) { saveBeforeChange('insert'); document.execCommand('insertImage', false, src); triggerAutoSave(); if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') { updateBookLayout(); updateBookNav(); } }
+export function insertPlainText(text) {
+    if (!text) return;
+    const editor = document.getElementById('editor-body');
+    if (!editor) return;
+    saveBeforeChange('insert');
+    editor.focus();
+    const sel = window.getSelection();
+    if (!sel.rangeCount || !editor.contains(sel.anchorNode)) {
+        const range = document.createRange();
+        range.selectNodeContents(editor);
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+    }
+    const escape = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const html = escape(text).replace(/\r\n|\r|\n/g, '<br>');
+    document.execCommand('insertHTML', false, html);
+    triggerAutoSave();
+    if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') { updateBookLayout(); updateBookNav(); }
+}
 export function insertTable(rows, cols) {
     saveBeforeChange('insert');
     let tableHtml = '<div class="table-wrapper"><table><tbody>';
