@@ -283,7 +283,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 #write-modal.mode-book .editor-title, #write-modal.mode-book .editor-subtitle { padding: 0 40px; box-sizing: border-box; }
 #write-modal.mode-book .meta-info-row, #write-modal.mode-book .divider { margin-left: 40px; margin-right: 40px; }
 #write-modal.mode-book .editor-title, #write-modal.mode-book .editor-subtitle, #write-modal.mode-book .meta-info-row, #write-modal.mode-book .divider { break-inside: avoid; }
-#write-modal.mode-book .editor-body img { object-fit: contain; break-inside: avoid; display: block; margin: 10px auto; }
+#write-modal.mode-book .editor-body img { object-fit: contain; break-inside: avoid; display: block; margin: 10px 0; }
 #write-modal.mode-book .meta-info-row { margin-top: 12px; }
 /* 책 편집 모드: 편집 가능 커서 + 하단 편집 표시 바 */
 #write-modal.mode-book-edit .editor-body { cursor: text; caret-color: var(--primary-color, #4F46E5); }
