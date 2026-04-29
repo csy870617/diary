@@ -511,32 +511,57 @@ function getBookPageContentSize(container) {
     return { pageWidth, pageHeight };
 }
 
+function captureBookTargetSizes() {
+    const body = document.getElementById('editor-body');
+    if (!body) return;
+    body.querySelectorAll('img').forEach(img => {
+        if (img.dataset.bookTargetW !== undefined) return;
+        const r = img.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) {
+            img.dataset.bookTargetW = String(Math.round(r.width));
+            img.dataset.bookTargetH = String(Math.round(r.height));
+        } else if (img.naturalWidth && img.naturalHeight) {
+            img.dataset.bookTargetW = String(img.naturalWidth);
+            img.dataset.bookTargetH = String(img.naturalHeight);
+        }
+    });
+}
+
 function fitImageToBookPage(img, container) {
     const { pageWidth, pageHeight } = getBookPageContentSize(container);
     const apply = () => {
-        const nW = img.naturalWidth, nH = img.naturalHeight;
-        if (!nW || !nH) {
+        let tW = parseFloat(img.dataset.bookTargetW);
+        let tH = parseFloat(img.dataset.bookTargetH);
+        if (!tW || !tH) {
+            const nW = img.naturalWidth, nH = img.naturalHeight;
+            if (nW && nH) { tW = nW; tH = nH; }
+        }
+        if (!tW || !tH) {
             img.style.width = '';
             img.style.height = '';
             img.style.maxWidth = pageWidth + 'px';
             img.style.maxHeight = pageHeight + 'px';
             return;
         }
-        const scale = Math.min(1, pageWidth / nW, pageHeight / nH);
-        const w = Math.floor(nW * scale);
-        const h = Math.floor(nH * scale);
+        const scale = Math.min(1, pageWidth / tW, pageHeight / tH);
+        const w = Math.floor(tW * scale);
+        const h = Math.floor(tH * scale);
         img.style.width = w + 'px';
         img.style.height = h + 'px';
         img.style.maxWidth = '';
         img.style.maxHeight = '';
     };
-    if (img.complete && img.naturalWidth) {
+    if (img.complete && (img.naturalWidth || img.dataset.bookTargetW)) {
         apply();
     } else if (!img._bookLoadHooked) {
         img._bookLoadHooked = true;
         img.addEventListener('load', () => {
             img._bookLoadHooked = false;
             if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') {
+                if (img.dataset.bookTargetW === undefined && img.naturalWidth) {
+                    img.dataset.bookTargetW = String(img.naturalWidth);
+                    img.dataset.bookTargetH = String(img.naturalHeight);
+                }
                 apply();
                 updateBookNav();
             }
@@ -1251,8 +1276,12 @@ export function toggleViewMode(mode) {
     if(btnReadOnly) btnReadOnly.classList.toggle('active', mode === 'readOnly');
     if(btnBookMode) btnBookMode.classList.toggle('active', mode === 'book' || mode === 'book-edit');
     if(!isBookToBook && container) { container.style.height = ''; container.style.overflow = ''; container.style.columnWidth = ''; container.style.columnGap = ''; container.scrollLeft = 0; }
-    if (wasBookMode && !isBookToBook) { const body = document.getElementById('editor-body'); if (body) body.querySelectorAll('img').forEach(img => { img.style.maxHeight = ''; img.style.maxWidth = ''; img.style.width = img.dataset.bookOrigWidth || ''; img.style.height = img.dataset.bookOrigHeight || ''; delete img.dataset.bookOrigWidth; delete img.dataset.bookOrigHeight; }); }
+    if (wasBookMode && !isBookToBook) { const body = document.getElementById('editor-body'); if (body) body.querySelectorAll('img').forEach(img => { img.style.maxHeight = ''; img.style.maxWidth = ''; img.style.width = img.dataset.bookOrigWidth || ''; img.style.height = img.dataset.bookOrigHeight || ''; delete img.dataset.bookOrigWidth; delete img.dataset.bookOrigHeight; delete img.dataset.bookTargetW; delete img.dataset.bookTargetH; }); }
     writeModal.classList.remove('mode-read-only', 'mode-book', 'mode-book-edit');
+    if (!wasBookMode && (mode === 'book' || mode === 'book-edit')) {
+        // 책 모드 진입 직전(기본 레이아웃 상태)에서 이미지 렌더링 크기를 기록해 둔다.
+        captureBookTargetSizes();
+    }
     document.querySelectorAll('.book-nav, #page-indicator, #book-slider-container, #btn-scroll-top').forEach(el => el.classList.add('hidden'));
     hideSelection();
     toggleBookEventListeners(mode === 'book');
@@ -1322,7 +1351,15 @@ export function formatDoc(cmd, value = null) {
         const selectedCells = document.querySelectorAll('td.selected-cell');
         const alignMap = { 'justifyLeft': 'left', 'justifyCenter': 'center', 'justifyRight': 'right' };
         const alignValue = alignMap[cmd];
-        if (selectedCells.length > 0) { selectedCells.forEach(cell => cell.style.textAlign = alignValue); } 
+        if (selectedCells.length > 0) { selectedCells.forEach(cell => cell.style.textAlign = alignValue); }
+        else if (currentSelectedElement && currentSelectedElement.tagName === 'IMG') {
+            const img = currentSelectedElement;
+            img.style.display = 'block';
+            if (alignValue === 'left') { img.style.marginLeft = '0'; img.style.marginRight = 'auto'; }
+            else if (alignValue === 'right') { img.style.marginLeft = 'auto'; img.style.marginRight = '0'; }
+            else { img.style.marginLeft = 'auto'; img.style.marginRight = 'auto'; }
+            updateSelectionBox();
+        }
         else { const selection = window.getSelection(); const td = selection.anchorNode?.nodeType === 3 ? selection.anchorNode.parentElement.closest('td') : selection.anchorNode.closest('td'); if (td) td.style.textAlign = alignValue; else document.execCommand(cmd, false, value); }
     } else {
         const selectedCells = document.querySelectorAll('td.selected-cell');
@@ -1833,6 +1870,26 @@ function getCellAt(table, rowIndex, colIndex) {
 
 export function insertSticker(emoji) { saveBeforeChange('insert'); document.execCommand('insertText', false, emoji); triggerAutoSave(); }
 export function insertImage(src) { saveBeforeChange('insert'); document.execCommand('insertImage', false, src); triggerAutoSave(); if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') { updateBookLayout(); updateBookNav(); } }
+export function insertPlainText(text) {
+    if (!text) return;
+    const editor = document.getElementById('editor-body');
+    if (!editor) return;
+    saveBeforeChange('insert');
+    editor.focus();
+    const sel = window.getSelection();
+    if (!sel.rangeCount || !editor.contains(sel.anchorNode)) {
+        const range = document.createRange();
+        range.selectNodeContents(editor);
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+    }
+    const escape = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const html = escape(text).replace(/\r\n|\r|\n/g, '<br>');
+    document.execCommand('insertHTML', false, html);
+    triggerAutoSave();
+    if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') { updateBookLayout(); updateBookNav(); }
+}
 export function insertTable(rows, cols) {
     saveBeforeChange('insert');
     let tableHtml = '<div class="table-wrapper"><table><tbody>';

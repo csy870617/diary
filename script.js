@@ -1,7 +1,7 @@
 import { state, loadCategoriesFromLocal, saveCategoriesToLocal, isReadOnlyView, loadCategorySortsFromLocal, setCategorySort } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
 import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, renameFolderAction, deleteFolderAction, openFolderAssignModal, createFolderFromAssignModal, addSubfolderAction, closeFolderPopup, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort } from './ui.js';
-import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize } from './editor.js';
+import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, ensureTokenOnResume, startKeepAlive } from './drive.js';
 import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, setTTSStart, setTTSEnd, resetTTSRange, playSelection, updateSpeedDisplay, updatePitchDisplay, updateGapDisplay, initTTS, updateTTSRange, seekTTSByPercent } from './tts.js';
@@ -509,6 +509,10 @@ function setupUIListeners() {
     document.getElementById('toolbar-image-btn')?.addEventListener('click', () => { document.getElementById('editor-body')?.focus(); imageInput?.click(); });
     imageInput?.addEventListener('change', (e) => { if (e.target.files[0]) processImage(e.target.files[0]); e.target.value = ''; });
 
+    const textFileInput = document.getElementById('textfile-upload-input');
+    document.getElementById('toolbar-textfile-btn')?.addEventListener('click', () => { document.getElementById('editor-body')?.focus(); textFileInput?.click(); });
+    textFileInput?.addEventListener('change', (e) => { if (e.target.files[0]) processTextFile(e.target.files[0]); e.target.value = ''; });
+
     document.getElementById('toolbar-toggle-btn')?.addEventListener('click', function() {
         const toolbar = document.getElementById('editor-toolbar');
         if (toolbar) {
@@ -596,6 +600,17 @@ function openColorPalette() {
 function renderStickers() { 
     const grid = document.getElementById('sticker-grid');
     if (grid) grid.innerHTML = stickers.map(s => `<span class="sticker-item" onmousedown="event.preventDefault(); window.insertSticker('${s}')">${s}</span>`).join(''); 
+}
+
+function processTextFile(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const text = typeof e.target.result === 'string' ? e.target.result.replace(/^﻿/, '') : '';
+        if (!text) return;
+        insertPlainText(text);
+    };
+    reader.onerror = () => alert('파일을 읽는 중 오류가 발생했습니다.');
+    reader.readAsText(file, 'UTF-8');
 }
 
 function processImage(file) {
