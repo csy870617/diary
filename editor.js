@@ -384,9 +384,42 @@ function handleBookResize() {
     if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') {
         updateBookLayout();
         const container = document.getElementById('editor-container');
-        if(container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
+        if (state.currentViewMode === 'book-edit') {
+            // Keep the caret visible when the visual viewport changes (e.g. virtual keyboard).
+            if (!scrollCursorIntoBookView()) {
+                if (container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
+            }
+        } else {
+            if (container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
+        }
         updateBookNav();
     }
+}
+
+function scrollCursorIntoBookView() {
+    const container = document.getElementById('editor-container');
+    if (!container) return false;
+    const editBody = document.getElementById('editor-body');
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return false;
+    const range = sel.getRangeAt(0);
+    if (editBody && !editBody.contains(range.startContainer)) return false;
+    const r = range.cloneRange(); r.collapse(true);
+    let rect = r.getBoundingClientRect();
+    if (!rect || (rect.width === 0 && rect.height === 0 && rect.left === 0 && rect.top === 0)) {
+        const node = r.startContainer.nodeType === Node.TEXT_NODE ? r.startContainer.parentElement : r.startContainer;
+        if (node && node.getBoundingClientRect) rect = node.getBoundingClientRect();
+    }
+    if (!rect) return false;
+    const cr = container.getBoundingClientRect();
+    const stride = Math.floor(container.clientWidth);
+    if (stride <= 0) return false;
+    const offsetX = rect.left - cr.left + container.scrollLeft;
+    const totalPages = Math.max(1, Math.ceil(container.scrollWidth / stride));
+    const pageIndex = Math.max(0, Math.min(totalPages - 1, Math.floor(offsetX / stride)));
+    currentBookPageIndex = pageIndex;
+    container.scrollLeft = pageIndex * stride;
+    return true;
 }
 
 function toggleBookEventListeners(enable) {
@@ -465,24 +498,72 @@ function scrollAnchorIntoView(anchor, mode) {
     return true;
 }
 
+function getBookViewportHeight() {
+    return (window.visualViewport && window.visualViewport.height) ? window.visualViewport.height : window.innerHeight;
+}
+
+function getBookPageContentSize(container) {
+    const colWidth = Math.floor(container.clientWidth);
+    const isMobile = window.innerWidth <= 650;
+    const horizontalPad = isMobile ? 40 : 80; // editor-body padding-left + padding-right
+    const pageWidth = Math.max(50, colWidth - horizontalPad);
+    const pageHeight = Math.max(50, getBookViewportHeight() - 180);
+    return { pageWidth, pageHeight };
+}
+
+function fitImageToBookPage(img, container) {
+    const { pageWidth, pageHeight } = getBookPageContentSize(container);
+    const apply = () => {
+        const nW = img.naturalWidth, nH = img.naturalHeight;
+        if (!nW || !nH) {
+            img.style.width = '';
+            img.style.height = '';
+            img.style.maxWidth = pageWidth + 'px';
+            img.style.maxHeight = pageHeight + 'px';
+            return;
+        }
+        const scale = Math.min(1, pageWidth / nW, pageHeight / nH);
+        const w = Math.floor(nW * scale);
+        const h = Math.floor(nH * scale);
+        img.style.width = w + 'px';
+        img.style.height = h + 'px';
+        img.style.maxWidth = '';
+        img.style.maxHeight = '';
+    };
+    if (img.complete && img.naturalWidth) {
+        apply();
+    } else if (!img._bookLoadHooked) {
+        img._bookLoadHooked = true;
+        img.addEventListener('load', () => {
+            img._bookLoadHooked = false;
+            if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') {
+                apply();
+                updateBookNav();
+            }
+        }, { once: true });
+        // placeholder constraints while loading
+        img.style.width = '';
+        img.style.height = '';
+        img.style.maxWidth = pageWidth + 'px';
+        img.style.maxHeight = pageHeight + 'px';
+    }
+}
+
 function updateBookLayout() {
     const container = document.getElementById('editor-container');
     if (!container) return;
     container.style.columnWidth = `${Math.floor(container.clientWidth)}px`;
     container.style.columnGap = '0px';
-    container.style.height = `${window.innerHeight - 120}px`;
+    container.style.height = `${getBookViewportHeight() - 120}px`;
     container.style.overflow = 'hidden';
-    const maxH = window.innerHeight - 180;
     const body = document.getElementById('editor-body');
     if (body) {
         body.querySelectorAll('img').forEach(img => {
-            if (!img.dataset.bookOrigWidth) {
+            if (img.dataset.bookOrigWidth === undefined) {
                 img.dataset.bookOrigWidth = img.style.width || '';
                 img.dataset.bookOrigHeight = img.style.height || '';
             }
-            img.style.maxHeight = maxH + 'px';
-            img.style.width = 'auto';
-            img.style.height = 'auto';
+            fitImageToBookPage(img, container);
         });
     }
 }
@@ -1080,6 +1161,28 @@ function setupBasicHandling() {
     editSubtitle?.addEventListener('focus', () => saveBeforeChange('subtitle'));
     
     window.addEventListener('resize', () => { updateSelectionBox(); if(state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') handleBookResize(); });
+
+    // 가상 키보드 등으로 visualViewport가 변할 때 책 모드 레이아웃을 다시 맞춰 하단이 가려지지 않도록 한다.
+    if (window.visualViewport) {
+        const onViewportChange = () => { if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') handleBookResize(); };
+        window.visualViewport.addEventListener('resize', onViewportChange);
+        window.visualViewport.addEventListener('scroll', onViewportChange);
+    }
+
+    // 책 편집 모드에서 타이핑/포커스 시 커서가 보이는 페이지로 자동 이동
+    const editorBodyEl = document.getElementById('editor-body');
+    if (editorBodyEl) {
+        const ensureCaretVisible = () => { if (state.currentViewMode === 'book-edit') requestAnimationFrame(() => { scrollCursorIntoBookView(); updateBookNav(); }); };
+        editorBodyEl.addEventListener('input', ensureCaretVisible);
+        editorBodyEl.addEventListener('focus', ensureCaretVisible);
+        editorBodyEl.addEventListener('click', ensureCaretVisible);
+        editorBodyEl.addEventListener('keyup', (e) => {
+            if (state.currentViewMode !== 'book-edit') return;
+            if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','PageUp','PageDown','Enter','Backspace','Delete'].includes(e.key)) {
+                ensureCaretVisible();
+            }
+        });
+    }
 }
 
 export function openEditor(isEdit, entryData) { 
@@ -1148,7 +1251,7 @@ export function toggleViewMode(mode) {
     if(btnReadOnly) btnReadOnly.classList.toggle('active', mode === 'readOnly');
     if(btnBookMode) btnBookMode.classList.toggle('active', mode === 'book' || mode === 'book-edit');
     if(!isBookToBook && container) { container.style.height = ''; container.style.overflow = ''; container.style.columnWidth = ''; container.style.columnGap = ''; container.scrollLeft = 0; }
-    if (wasBookMode && !isBookToBook) { const body = document.getElementById('editor-body'); if (body) body.querySelectorAll('img').forEach(img => { img.style.maxHeight = ''; img.style.width = img.dataset.bookOrigWidth || ''; img.style.height = img.dataset.bookOrigHeight || ''; delete img.dataset.bookOrigWidth; delete img.dataset.bookOrigHeight; }); }
+    if (wasBookMode && !isBookToBook) { const body = document.getElementById('editor-body'); if (body) body.querySelectorAll('img').forEach(img => { img.style.maxHeight = ''; img.style.maxWidth = ''; img.style.width = img.dataset.bookOrigWidth || ''; img.style.height = img.dataset.bookOrigHeight || ''; delete img.dataset.bookOrigWidth; delete img.dataset.bookOrigHeight; }); }
     writeModal.classList.remove('mode-read-only', 'mode-book', 'mode-book-edit');
     document.querySelectorAll('.book-nav, #page-indicator, #book-slider-container, #btn-scroll-top').forEach(el => el.classList.add('hidden'));
     hideSelection();
@@ -1729,7 +1832,7 @@ function getCellAt(table, rowIndex, colIndex) {
 
 
 export function insertSticker(emoji) { saveBeforeChange('insert'); document.execCommand('insertText', false, emoji); triggerAutoSave(); }
-export function insertImage(src) { saveBeforeChange('insert'); document.execCommand('insertImage', false, src); triggerAutoSave(); }
+export function insertImage(src) { saveBeforeChange('insert'); document.execCommand('insertImage', false, src); triggerAutoSave(); if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') { updateBookLayout(); updateBookNav(); } }
 export function insertTable(rows, cols) {
     saveBeforeChange('insert');
     let tableHtml = '<div class="table-wrapper"><table><tbody>';
