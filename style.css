@@ -22,6 +22,7 @@ body { -ms-overflow-style: none; scrollbar-width: none; }
     --shadow-light: rgba(0,0,0,0.08);
     --overlay-bg: rgba(0,0,0,0.4);
     --safe-top: env(safe-area-inset-top); --safe-bottom: env(safe-area-inset-bottom);
+    color-scheme: light;
 }
 
 [data-theme="dark"] {
