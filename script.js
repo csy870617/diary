@@ -55,13 +55,13 @@ function updateThemeIcon(pref) {
     if (!btn) return;
     const icon = btn.querySelector('i');
     if (icon) {
-        icon.className = pref === 'light' ? 'ph ph-moon'
-                       : pref === 'dark' ? 'ph ph-monitor'
-                       : 'ph ph-sun';
+        icon.className = pref === 'light' ? 'ph ph-sun'
+                       : pref === 'dark' ? 'ph ph-moon'
+                       : 'ph ph-monitor';
     }
-    btn.title = pref === 'light' ? '다크모드 전환'
-              : pref === 'dark' ? '시스템 설정 따르기'
-              : '라이트모드 전환';
+    btn.title = pref === 'light' ? '라이트모드 (클릭: 다크)'
+              : pref === 'dark' ? '다크모드 (클릭: 시스템)'
+              : '시스템 설정 따름 (클릭: 라이트)';
 }
 
 function init() {
