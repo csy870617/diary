@@ -396,6 +396,44 @@ function handleBookResize() {
     }
 }
 
+function scrollCaretIntoDefaultView() {
+    if (!window.visualViewport) return;
+    const editBody = document.getElementById('editor-body');
+    if (!editBody) return;
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    if (!editBody.contains(range.startContainer)) return;
+    const r = range.cloneRange(); r.collapse(true);
+    let rect = r.getBoundingClientRect();
+    if (!rect || (rect.width === 0 && rect.height === 0 && rect.left === 0 && rect.top === 0)) {
+        const node = r.startContainer.nodeType === Node.TEXT_NODE ? r.startContainer.parentElement : r.startContainer;
+        if (node && node.getBoundingClientRect) rect = node.getBoundingClientRect();
+    }
+    if (!rect) return;
+    // 가시 영역(visualViewport 기준)에서 커서가 가려지면 최소한만 스크롤
+    const vv = window.visualViewport;
+    const visibleTop = vv.offsetTop;
+    const visibleBottom = vv.offsetTop + vv.height;
+    const margin = 24;
+    let dy = 0;
+    if (rect.bottom > visibleBottom - margin) dy = rect.bottom - (visibleBottom - margin);
+    else if (rect.top < visibleTop + margin) dy = rect.top - (visibleTop + margin);
+    if (dy === 0) return;
+    // 스크롤이 가능한 가장 가까운 조상 컨테이너를 찾아 스크롤
+    let el = editBody;
+    while (el && el !== document.body) {
+        const cs = getComputedStyle(el);
+        const oy = cs.overflowY;
+        if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight) {
+            el.scrollTop += dy;
+            return;
+        }
+        el = el.parentElement;
+    }
+    window.scrollBy(0, dy);
+}
+
 function scrollCursorIntoBookView() {
     const container = document.getElementById('editor-container');
     if (!container) return false;
@@ -1189,7 +1227,10 @@ function setupBasicHandling() {
 
     // 가상 키보드 등으로 visualViewport가 변할 때 책 모드 레이아웃을 다시 맞춰 하단이 가려지지 않도록 한다.
     if (window.visualViewport) {
-        const onViewportChange = () => { if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') handleBookResize(); };
+        const onViewportChange = () => {
+            if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') handleBookResize();
+            else if (state.currentViewMode === 'default') scrollCaretIntoDefaultView();
+        };
         window.visualViewport.addEventListener('resize', onViewportChange);
         window.visualViewport.addEventListener('scroll', onViewportChange);
     }
@@ -1197,12 +1238,15 @@ function setupBasicHandling() {
     // 책 편집 모드에서 타이핑/포커스 시 커서가 보이는 페이지로 자동 이동
     const editorBodyEl = document.getElementById('editor-body');
     if (editorBodyEl) {
-        const ensureCaretVisible = () => { if (state.currentViewMode === 'book-edit') requestAnimationFrame(() => { scrollCursorIntoBookView(); updateBookNav(); }); };
+        const ensureCaretVisible = () => {
+            if (state.currentViewMode === 'book-edit') requestAnimationFrame(() => { scrollCursorIntoBookView(); updateBookNav(); });
+            else if (state.currentViewMode === 'default') requestAnimationFrame(scrollCaretIntoDefaultView);
+        };
         editorBodyEl.addEventListener('input', ensureCaretVisible);
         editorBodyEl.addEventListener('focus', ensureCaretVisible);
         editorBodyEl.addEventListener('click', ensureCaretVisible);
         editorBodyEl.addEventListener('keyup', (e) => {
-            if (state.currentViewMode !== 'book-edit') return;
+            if (state.currentViewMode !== 'book-edit' && state.currentViewMode !== 'default') return;
             if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','PageUp','PageDown','Enter','Backspace','Delete'].includes(e.key)) {
                 ensureCaretVisible();
             }
