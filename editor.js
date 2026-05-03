@@ -396,20 +396,72 @@ function handleBookResize() {
     }
 }
 
+// 커서(접힌 Range)의 위치 사각형을 안전하게 구한다.
+// range.getBoundingClientRect()가 zero-rect를 돌려주는 경우(빈 새 줄 등)에도
+// 부모 요소의 rect로 폴백하면, 다중 컬럼/큰 컨테이너의 좌상단(rect.left=0,
+// rect.top=0)으로 잘못 판단해 페이지가 처음으로 튕기는 문제가 생긴다.
+// 따라서 인접한 자식/형제 노드의 rect로 좁혀서 보정하고, 그래도 신뢰할 수 없으면
+// null을 돌려 호출 측에서 스크롤을 건너뛰도록 한다.
+function getCaretRect(editBody) {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return null;
+    const range = sel.getRangeAt(0);
+    if (editBody && !editBody.contains(range.startContainer)) return null;
+    const r = range.cloneRange(); r.collapse(true);
+    const isValid = (rc) => rc && (rc.width !== 0 || rc.height !== 0 || rc.left !== 0 || rc.top !== 0);
+    let rect = r.getBoundingClientRect();
+    if (isValid(rect)) return rect;
+    const node = r.startContainer;
+    const offset = r.startOffset;
+    const rectAtStart = (rc) => ({ left: rc.left, right: rc.left, top: rc.top, bottom: rc.bottom, width: 0, height: rc.height, x: rc.left, y: rc.top });
+    const rectAtEnd = (rc) => ({ left: rc.right, right: rc.right, top: rc.top, bottom: rc.bottom, width: 0, height: rc.height, x: rc.right, y: rc.top });
+    if (node.nodeType === Node.TEXT_NODE && node.length > 0) {
+        const r2 = document.createRange();
+        if (offset > 0) {
+            r2.setStart(node, offset - 1); r2.setEnd(node, offset);
+            const rc = r2.getBoundingClientRect();
+            if (isValid(rc)) return rectAtEnd(rc);
+        }
+        if (offset < node.length) {
+            r2.setStart(node, offset); r2.setEnd(node, offset + 1);
+            const rc = r2.getBoundingClientRect();
+            if (isValid(rc)) return rectAtStart(rc);
+        }
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+        const children = node.childNodes;
+        if (offset < children.length) {
+            const child = children[offset];
+            if (child.nodeType === Node.ELEMENT_NODE) {
+                const rc = child.getBoundingClientRect();
+                if (isValid(rc)) return rectAtStart(rc);
+            } else if (child.nodeType === Node.TEXT_NODE && child.length > 0) {
+                const r2 = document.createRange();
+                r2.setStart(child, 0); r2.setEnd(child, 1);
+                const rc = r2.getBoundingClientRect();
+                if (isValid(rc)) return rectAtStart(rc);
+            }
+        }
+        if (offset > 0 && offset <= children.length) {
+            const child = children[offset - 1];
+            if (child.nodeType === Node.ELEMENT_NODE) {
+                const rc = child.getBoundingClientRect();
+                if (isValid(rc)) return rectAtEnd(rc);
+            } else if (child.nodeType === Node.TEXT_NODE && child.length > 0) {
+                const r2 = document.createRange();
+                r2.setStart(child, child.length - 1); r2.setEnd(child, child.length);
+                const rc = r2.getBoundingClientRect();
+                if (isValid(rc)) return rectAtEnd(rc);
+            }
+        }
+    }
+    return null;
+}
+
 function scrollCaretIntoDefaultView() {
     if (!window.visualViewport) return;
     const editBody = document.getElementById('editor-body');
     if (!editBody) return;
-    const sel = window.getSelection();
-    if (!sel || !sel.rangeCount) return;
-    const range = sel.getRangeAt(0);
-    if (!editBody.contains(range.startContainer)) return;
-    const r = range.cloneRange(); r.collapse(true);
-    let rect = r.getBoundingClientRect();
-    if (!rect || (rect.width === 0 && rect.height === 0 && rect.left === 0 && rect.top === 0)) {
-        const node = r.startContainer.nodeType === Node.TEXT_NODE ? r.startContainer.parentElement : r.startContainer;
-        if (node && node.getBoundingClientRect) rect = node.getBoundingClientRect();
-    }
+    const rect = getCaretRect(editBody);
     if (!rect) return;
     // 가시 영역(visualViewport 기준)에서 커서가 가려지면 최소한만 스크롤
     const vv = window.visualViewport;
@@ -438,16 +490,7 @@ function scrollCursorIntoBookView() {
     const container = document.getElementById('editor-container');
     if (!container) return false;
     const editBody = document.getElementById('editor-body');
-    const sel = window.getSelection();
-    if (!sel || !sel.rangeCount) return false;
-    const range = sel.getRangeAt(0);
-    if (editBody && !editBody.contains(range.startContainer)) return false;
-    const r = range.cloneRange(); r.collapse(true);
-    let rect = r.getBoundingClientRect();
-    if (!rect || (rect.width === 0 && rect.height === 0 && rect.left === 0 && rect.top === 0)) {
-        const node = r.startContainer.nodeType === Node.TEXT_NODE ? r.startContainer.parentElement : r.startContainer;
-        if (node && node.getBoundingClientRect) rect = node.getBoundingClientRect();
-    }
+    const rect = getCaretRect(editBody);
     if (!rect) return false;
     const cr = container.getBoundingClientRect();
     const stride = Math.floor(container.clientWidth);
