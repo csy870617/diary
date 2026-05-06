@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <meta name="referrer" content="origin"> 
     <title>신앙일지 | Faith Log</title>
-    <link rel="stylesheet" href="style.css?v=3.7">
+    <link rel="stylesheet" href="style.css?v=3.8">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
     <script>
         // 페이지 로드 전 다크모드 적용 (깜빡임 방지)
@@ -291,6 +291,26 @@
             <div class="modal-btns">
                 <button id="btn-confirm-table" class="primary-btn">만들기</button>
                 <button id="btn-cancel-table" class="cancel-btn">취소</button>
+            </div>
+        </div>
+    </div>
+    <div id="crop-modal" class="modal-overlay hidden">
+        <div class="simple-modal crop-modal-inner">
+            <h3>이미지 자르기</h3>
+            <div id="crop-stage">
+                <img id="crop-image" alt="">
+                <div id="crop-box">
+                    <div class="crop-handle" data-dir="nw"></div>
+                    <div class="crop-handle" data-dir="ne"></div>
+                    <div class="crop-handle" data-dir="sw"></div>
+                    <div class="crop-handle" data-dir="se"></div>
+                </div>
+            </div>
+            <p id="crop-hint" style="margin-top:12px;">박스를 드래그하여 영역을 조절하세요.</p>
+            <div class="modal-btns">
+                <button id="btn-confirm-crop" class="primary-btn">자르기</button>
+                <button id="btn-skip-crop" class="cancel-btn">원본</button>
+                <button id="btn-cancel-crop" class="cancel-btn">취소</button>
             </div>
         </div>
     </div>
