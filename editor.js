@@ -912,7 +912,13 @@ function setupBasicHandling() {
     setupLinkPreservation(editorBody, {
         onBeforePaste: () => saveBeforeChange('paste'),
         onAfterPaste: () => triggerAutoSave(),
-        onPasteImage: (src) => insertImage(src),
+        onPasteImage: (src) => {
+            if (typeof window.processImageDataUrl === 'function') {
+                window.processImageDataUrl(src);
+            } else {
+                insertImage(src);
+            }
+        },
         getSelectedElement: () => currentSelectedElement,
         clearSelectedElement: () => hideSelection()
     });
