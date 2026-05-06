@@ -4,7 +4,7 @@ import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, op
 import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, ensureTokenOnResume, startKeepAlive } from './drive.js';
-import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, setTTSStart, setTTSEnd, resetTTSRange, playSelection, updateSpeedDisplay, updatePitchDisplay, updateGapDisplay, initTTS, updateTTSRange, seekTTSByPercent } from './tts.js';
+import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, setTTSStart, setTTSEnd, resetTTSRange, playSelection, updateSpeedDisplay, updatePitchDisplay, updateGapDisplay, initTTS, updateTTSRange, seekTTSByPercent, saveTTSVoice } from './tts.js';
 
 window.addNewCategory = addNewCategory;
 window.restoreEntry = restoreEntry;
@@ -466,6 +466,7 @@ function setupUIListeners() {
     document.getElementById('tts-speed-slider')?.addEventListener('input', updateSpeedDisplay);
     document.getElementById('tts-pitch-slider')?.addEventListener('input', updatePitchDisplay);
     document.getElementById('tts-gap-slider')?.addEventListener('input', updateGapDisplay);
+    document.getElementById('tts-voice-select')?.addEventListener('change', saveTTSVoice);
     document.getElementById('tts-progress-slider')?.addEventListener('input', (e) => seekTTSByPercent(e.target.value));
     initTTS();
 

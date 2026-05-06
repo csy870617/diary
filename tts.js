@@ -719,18 +719,30 @@ function syncUI() {
 export function updateSpeedDisplay() {
     const s = document.getElementById('tts-speed-slider');
     const d = document.getElementById('tts-speed-value');
-    if (s && d) d.textContent = parseFloat(s.value).toFixed(1) + 'x';
+    if (s) {
+        const v = parseFloat(s.value);
+        if (d) d.textContent = v.toFixed(1) + 'x';
+        localStorage.setItem('faith_tts_speed', String(v));
+    }
     if (!isTTSSpeaking) refreshTTSTotalTime();
 }
 
 export function updatePitchDisplay() {
     const s = document.getElementById('tts-pitch-slider');
     const d = document.getElementById('tts-pitch-value');
-    if (s && d) {
+    if (s) {
         const v = parseFloat(s.value);
-        let label = v < 0.9 ? '낮음' : v > 1.1 ? '높음' : '보통';
-        d.textContent = label;
+        if (d) {
+            let label = v < 0.9 ? '낮음' : v > 1.1 ? '높음' : '보통';
+            d.textContent = label;
+        }
+        localStorage.setItem('faith_tts_pitch', String(v));
     }
+}
+
+export function saveTTSVoice() {
+    const sel = document.getElementById('tts-voice-select');
+    if (sel && sel.value) localStorage.setItem('faith_tts_voice', sel.value);
 }
 
 export function updateGapDisplay() {
