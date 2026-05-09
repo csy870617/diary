@@ -647,16 +647,18 @@ function compressAndInsertImage(dataUrl) {
 function processImage(file) {
     const reader = new FileReader();
     reader.onload = (e) => {
-        openCropModal(e.target.result, (resultDataUrl) => {
-            compressAndInsertImage(resultDataUrl);
+        openCropModal(e.target.result, (resultDataUrl, wasCropped) => {
+            if (wasCropped) insertImage(resultDataUrl);
+            else compressAndInsertImage(resultDataUrl);
         });
     };
     reader.readAsDataURL(file);
 }
 
 function processImageDataUrl(dataUrl) {
-    openCropModal(dataUrl, (resultDataUrl) => {
-        compressAndInsertImage(resultDataUrl);
+    openCropModal(dataUrl, (resultDataUrl, wasCropped) => {
+        if (wasCropped) insertImage(resultDataUrl);
+        else compressAndInsertImage(resultDataUrl);
     });
 }
 window.processImageDataUrl = processImageDataUrl;
@@ -722,8 +724,11 @@ function performCrop() {
     canvas.width = Math.max(1, Math.round(sw));
     canvas.height = Math.max(1, Math.round(sh));
     const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(imgEl, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL('image/jpeg', 0.92);
+    // 원본 해상도 유지 + 무손실(PNG)로 인코딩하여 화질 보존
+    return canvas.toDataURL('image/png');
 }
 
 function setupCropModalHandlers() {
@@ -828,13 +833,13 @@ function setupCropModalHandlers() {
         const cb = cropState?.onConfirm;
         const result = performCrop();
         closeCropModal();
-        if (cb && result) cb(result);
+        if (cb && result) cb(result, true);
     });
     skipBtn?.addEventListener('click', () => {
         const cb = cropState?.onConfirm;
         const original = cropState?.dataUrl;
         closeCropModal();
-        if (cb && original) cb(original);
+        if (cb && original) cb(original, false);
     });
     cancelBtn?.addEventListener('click', () => {
         closeCropModal();
