@@ -39,7 +39,8 @@ export async function saveEntry() {
     const subtitle = subtitleEl ? subtitleEl.value : '';
     const nowISO = new Date().toISOString(); 
 
-    if(!title.trim() && !bodyEl.innerText.trim()) return;
+    // 이미지·표·스티커만 있는 글도 저장되도록 텍스트 외 콘텐츠 존재 여부도 확인
+    if(!title.trim() && !bodyEl.innerText.trim() && !bodyEl.querySelector('img, table')) return;
 
     if (!state.editingId) state.editingId = Date.now().toString();
     const index = state.entries.findIndex(e => e.id === state.editingId);

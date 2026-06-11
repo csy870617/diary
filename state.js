@@ -98,12 +98,13 @@ export function loadCategoriesFromLocal() {
     if (localData) {
         try {
             const parsed = JSON.parse(localData);
-            if (parsed.categories && parsed.order) {
+            // 손상된 데이터로 비배열이 들어오면 이후 렌더링 전체가 깨지므로 배열 여부까지 검증
+            if (Array.isArray(parsed.categories) && Array.isArray(parsed.order)) {
                 state.allCategories = parsed.categories;
                 state.categoryOrder = parsed.order;
-                state.allFolders = parsed.folders || [];
-                state.folderOrder = parsed.folderOrder || [];
-                state.rootOrder = parsed.rootOrder || [];
+                state.allFolders = Array.isArray(parsed.folders) ? parsed.folders : [];
+                state.folderOrder = Array.isArray(parsed.folderOrder) ? parsed.folderOrder : [];
+                state.rootOrder = Array.isArray(parsed.rootOrder) ? parsed.rootOrder : [];
                 state.categoryUpdatedAt = parsed.updatedAt || new Date(0).toISOString();
                 migrateRootOrder();
                 const exists = state.allCategories.find(c => c.id === state.currentCategory && !c.isDeleted);
