@@ -11,6 +11,10 @@ let ttsChunkIndex = 0;
 let ttsStartOffset = null;
 let ttsEndOffset = null;
 let ttsGapTimer = null;
+let ttsGen = 0;                // 재생 세대 카운터 — 이전 발화의 stale onend/onerror 무시용
+let ttsGapInterrupted = false; // 청크 간 쉼 도중 일시정지됨 → 재개 시 speakNext로 진입
+let ttsHeartbeatTimer = null;  // Chrome ~15초 침묵 중단 방지용 resume 하트비트
+let ttsVoicesListener = null;
 
 // 재생 시간 추적
 let ttsTotalSec = 0;           // 예상 총 재생 시간
@@ -218,7 +222,19 @@ export function loadVoices() {
     };
 
     populate();
-    if (!ttsVoices.length) speechSynthesis.onvoiceschanged = populate;
+    // onvoiceschanged 직접 할당은 다른 리스너를 덮어쓰고 이후에도 재실행되므로
+    // addEventListener를 사용하고 음성 로드 성공 시 제거
+    if (!ttsVoices.length) {
+        if (ttsVoicesListener) speechSynthesis.removeEventListener('voiceschanged', ttsVoicesListener);
+        ttsVoicesListener = () => {
+            populate();
+            if (ttsVoices.length) {
+                speechSynthesis.removeEventListener('voiceschanged', ttsVoicesListener);
+                ttsVoicesListener = null;
+            }
+        };
+        speechSynthesis.addEventListener('voiceschanged', ttsVoicesListener);
+    }
 }
 
 // ─── 구간 선택 ───
@@ -317,12 +333,18 @@ function formatTime(sec) {
     return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+/** Chrome의 ~15초 발화 중단을 피하기 위해 속도에 비례해 청크 최대 길이 산정 */
+function getMaxChunkLen() {
+    const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
+    return Math.max(60, Math.min(300, Math.round(180 * speed)));
+}
+
 function estimateTotalTime() {
     const text = getTextToSpeak();
     if (!text) return 0;
     const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
     const gap = parseFloat(document.getElementById('tts-gap-slider')?.value || '0') || 0;
-    const chunks = splitChunks(text, 180);
+    const chunks = splitChunks(text, getMaxChunkLen());
     const speakTime = text.length / CHARS_PER_SEC / speed;
     const baseGapTime = Math.max(0, chunks.length - 1) * gap;
     const dotGapTime = chunks
@@ -364,7 +386,7 @@ function buildChunkTimings(chunks, speed, gapSec) {
 
 function getSeekState(text, percent) {
     const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
-    const chunks = splitChunks(text, 180);
+    const chunks = splitChunks(text, getMaxChunkLen());
     if (!chunks.length) {
         return { percent: clamped, chunks: [], chunkIndex: 0, targetMs: 0 };
     }
@@ -394,6 +416,21 @@ function stopTimeTicker() {
     if (ttsTimerInterval) {
         clearInterval(ttsTimerInterval);
         ttsTimerInterval = null;
+    }
+}
+
+// Chrome은 ~15초 이상 이어지는 발화를 조용히 중단하므로 주기적 resume()으로 유지
+function startTTSHeartbeat() {
+    stopTTSHeartbeat();
+    ttsHeartbeatTimer = setInterval(() => {
+        if (isTTSSpeaking && !isTTSPaused) speechSynthesis.resume();
+    }, 10000);
+}
+
+function stopTTSHeartbeat() {
+    if (ttsHeartbeatTimer) {
+        clearInterval(ttsHeartbeatTimer);
+        ttsHeartbeatTimer = null;
     }
 }
 
@@ -453,12 +490,19 @@ export function playTTS() {
 
     // 일시정지 → 재개
     if (isTTSPaused) {
-        speechSynthesis.resume();
         isTTSPaused = false;
         isTTSSpeaking = true;
         ttsPlayStartMs = Date.now();
         startTimeTicker();
+        startTTSHeartbeat();
         syncUI();
+        if (ttsGapInterrupted) {
+            // 청크 간 쉼 도중 일시정지된 경우 → 살아있는 발화가 없으므로 speakNext로 재진입
+            ttsGapInterrupted = false;
+            speakNext();
+        } else {
+            speechSynthesis.resume();
+        }
         return;
     }
 
@@ -470,6 +514,8 @@ export function playTTS() {
     const seekPercent = (sliderPercent > 0 && sliderPercent < 100) ? sliderPercent : 0;
     const seekState = getSeekState(text, seekPercent);
 
+    ttsGen++; // 이전 발화의 stale 이벤트 무효화
+    ttsGapInterrupted = false;
     speechSynthesis.cancel();
     clearTimeout(ttsGapTimer);
     ttsGapTimer = null;
@@ -482,6 +528,7 @@ export function playTTS() {
     setProgress(seekState.percent);
     updateTimeDisplay();
     startTimeTicker();
+    startTTSHeartbeat();
     speakNext();
 }
 
@@ -506,15 +553,20 @@ export function seekTTSByPercent(percent) {
 
     clearTimeout(ttsGapTimer);
     ttsGapTimer = null;
+    ttsGen++; // 이전 발화의 stale 이벤트 무효화
     speechSynthesis.cancel();
 
     if (wasPlaying) {
+        ttsGapInterrupted = false;
         isTTSPaused = false;
         isTTSSpeaking = true;
         ttsPlayStartMs = Date.now();
         startTimeTicker();
+        startTTSHeartbeat();
         speakNext();
     } else if (wasPaused) {
+        // cancel()로 발화가 사라졌으므로 재개 시 speakNext로 진입해야 함
+        ttsGapInterrupted = true;
         isTTSPaused = true;
         isTTSSpeaking = true;
         syncUI();
@@ -565,6 +617,7 @@ function speakNext() {
         ttsChunkIndex = 0;
         setProgress(100);
         stopTimeTicker();
+        stopTTSHeartbeat();
         ttsElapsedBeforePause = (ttsTotalSec || 0) * 1000;
         ttsPlayStartMs = 0;
         updateTimeDisplay();
@@ -604,8 +657,13 @@ function speakNext() {
     localStorage.setItem('faith_tts_speed', String(speed));
     localStorage.setItem('faith_tts_pitch', String(pitch));
 
-    utt.onstart = () => { isTTSSpeaking = true; isTTSPaused = false; syncUI(); };
+    const myGen = ttsGen; // 발화 세대 캡처 — 교체된 발화의 stale 이벤트 무시
+    utt.onstart = () => {
+        if (myGen !== ttsGen) return;
+        isTTSSpeaking = true; isTTSPaused = false; syncUI();
+    };
     utt.onend = () => {
+        if (myGen !== ttsGen) return;
         ttsChunkIndex++;
         setProgress(Math.round((ttsChunkIndex / ttsChunks.length) * 100));
         const baseGap = parseFloat(document.getElementById('tts-gap-slider')?.value || '0') * 1000;
@@ -618,12 +676,14 @@ function speakNext() {
         }
     };
     utt.onerror = (e) => {
-        // cancel()로 인해 발생하는 canceled 에러는 탐색/정지/재시작 과정의 정상 동작
-        if (e.error === 'canceled') return;
+        if (myGen !== ttsGen) return;
+        // cancel()로 인해 발생하는 canceled/interrupted 에러는 탐색/정지/재시작 과정의 정상 동작
+        if (e.error === 'canceled' || e.error === 'interrupted') return;
         console.error('TTS error:', e.error);
         isTTSSpeaking = false;
         isTTSPaused = false;
         stopTimeTicker();
+        stopTTSHeartbeat();
         syncUI();
     };
 
@@ -633,6 +693,12 @@ function speakNext() {
 
 export function pauseTTS() {
     if (isTTSSpeaking && !isTTSPaused) {
+        // 청크 간 쉼(gap) 도중이면 대기 타이머를 해제하고 재개 시 speakNext로 진입하도록 표시
+        if (ttsGapTimer) {
+            clearTimeout(ttsGapTimer);
+            ttsGapTimer = null;
+            ttsGapInterrupted = true;
+        }
         speechSynthesis.pause();
         isTTSPaused = true;
         if (ttsPlayStartMs) {
@@ -640,12 +706,15 @@ export function pauseTTS() {
             ttsPlayStartMs = 0;
         }
         stopTimeTicker();
+        stopTTSHeartbeat();
         updateTimeDisplay();
         syncUI();
     }
 }
 
 export function stopTTS() {
+    ttsGen++; // 이전 발화의 stale 이벤트 무효화
+    ttsGapInterrupted = false;
     speechSynthesis.cancel();
     clearTimeout(ttsGapTimer);
     ttsGapTimer = null;
@@ -655,6 +724,7 @@ export function stopTTS() {
     ttsChunkIndex = 0;
     setProgress(0);
     stopTimeTicker();
+    stopTTSHeartbeat();
     ttsElapsedBeforePause = 0;
     ttsPlayStartMs = 0;
     ttsTotalSec = estimateTotalTime();
@@ -673,7 +743,7 @@ export function playSelection() {
     stopTTS();
     const selText = stripParentheses(info.text).trim();
     if (!selText) { alert('읽을 내용이 없습니다.'); return; }
-    ttsChunks = splitChunks(selText, 180);
+    ttsChunks = splitChunks(selText, getMaxChunkLen());
     ttsChunkIndex = 0;
     const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
     const gap = parseFloat(document.getElementById('tts-gap-slider')?.value || '0') || 0;
@@ -687,6 +757,7 @@ export function playSelection() {
     ttsPlayStartMs = Date.now();
     updateTimeDisplay();
     startTimeTicker();
+    startTTSHeartbeat();
     speakNext();
 }
 

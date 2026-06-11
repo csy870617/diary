@@ -64,6 +64,24 @@ function updateThemeIcon(pref) {
               : '시스템 설정 따름 (클릭: 라이트)';
 }
 
+// 공유 링크(?share=)로 들어온 외부 HTML 정화 (XSS 방지)
+// utils.js의 sanitizeExternalHtml은 export되지 않아 최소한의 로컬 구현을 사용
+function sanitizeSharedHtml(html) {
+    const doc = new DOMParser().parseFromString(html || '', 'text/html');
+    doc.querySelectorAll('script, iframe, object, embed, form, input, textarea, select, button, meta, link, style, base').forEach(el => el.remove());
+    doc.body.querySelectorAll('*').forEach(el => {
+        Array.from(el.attributes).forEach(attr => {
+            const name = attr.name.toLowerCase();
+            const value = attr.value.trim().toLowerCase();
+            if (name.startsWith('on')) el.removeAttribute(attr.name);
+            else if ((name === 'href' || name === 'src' || name === 'srcset' || name === 'xlink:href')
+                && (value.startsWith('javascript:') || value.startsWith('vbscript:') || value.startsWith('data:text/html'))) el.removeAttribute(attr.name);
+            else if (name === 'style' && (value.includes('expression') || value.includes('javascript'))) el.removeAttribute(attr.name);
+        });
+    });
+    return doc.body.innerHTML;
+}
+
 function init() {
     if (!history.state) history.replaceState({ modal: 'main' }, null, '');
 
@@ -91,6 +109,9 @@ function init() {
             if (!window.syncInterval) {
                 window.syncInterval = setInterval(async () => {
                     if (isReadOnlyView()) return; // 읽기 전용/책 모드에서는 자동 동기화 안 함
+                    // 편집 가능한 모드로 작성 중일 때 동기화하면 작성 내용이 덮어써지므로 건너뜀
+                    const writeModal = document.getElementById('write-modal');
+                    if (writeModal && !writeModal.classList.contains('hidden')) return;
                     if (!document.hidden && localStorage.getItem('is_faith_logged_in') === 'true') {
                         const valid = await ensureTokenOnResume();
                         if (valid) syncFromDrive();
@@ -98,6 +119,8 @@ function init() {
                 }, 20000);
             }
         } else {
+            // 로그아웃 시 자동 동기화 인터벌 정리
+            if (window.syncInterval) { clearInterval(window.syncInterval); window.syncInterval = null; }
             // 비로그인 상태: 이전에 로그인한 적 있으면 모달 없이 동기화 버튼만 표시
             // (일시적 토큰 갱신 실패일 수 있으므로 풀스크린 모달로 방해하지 않음)
             // 처음 사용자(이메일 없음)만 로그인 모달 표시
@@ -114,11 +137,12 @@ function init() {
             const entry = {
                 title: raw.t || raw.title || '제목 없음',
                 subtitle: raw.s || raw.subtitle || '',
-                body: raw.b || raw.body || '',
+                body: sanitizeSharedHtml(raw.b || raw.body || ''),
                 date: raw.d || raw.date || new Date().toLocaleDateString('ko-KR'),
                 fontFamily: raw.f || raw.fontFamily || 'Pretendard',
                 fontSize: raw.z || raw.fontSize || 16
             };
+            state.isShareView = true; // 공유 보기: 닫을 때 저장하지 않음 (남의 글이 내 일지로 들어오는 것 방지)
             setTimeout(() => {
                 openEditor(true, entry);
                 toggleViewMode('readOnly');
@@ -233,13 +257,18 @@ function setupListeners() {
     window.addEventListener('popstate', async () => {
         stopTTS(); document.getElementById('tts-panel')?.classList.add('hidden'); document.getElementById('write-modal')?.classList.remove('tts-open');
         const writeModal = document.getElementById('write-modal');
-        if (writeModal && !writeModal.classList.contains('hidden')) await saveEntry();
-        closeAllModals(false); 
+        if (writeModal && !writeModal.classList.contains('hidden') && !state.isShareView) {
+            await saveEntry();
+            // 닫기 버튼과 동일하게 Drive에도 저장
+            if (navigator.onLine && window.gapi?.client?.getToken()) await saveToDrive();
+        }
+        closeAllModals(false);
         if (window.location.search.includes('share')) {
             window.history.replaceState({}, document.title, window.location.pathname);
             const backBtnText = document.getElementById('back-btn-text');
             if (backBtnText) backBtnText.innerText = '목록';
         }
+        state.isShareView = false;
     });
 
     const editorBody = document.getElementById('editor-body');
@@ -417,7 +446,7 @@ function setupUIListeners() {
             const shareUrl = `${window.location.origin}${window.location.pathname}?share=${encodedData}`;
             if (shareUrl.length > 4000) { alert("내용이 너무 길어 공유 링크를 생성할 수 없습니다."); return; }
             if (navigator.share) { navigator.share({ title: '신앙일지 공유', text: `${title}`, url: shareUrl }).catch(console.error); } 
-            else { navigator.clipboard.writeText(shareUrl).then(() => { alert('공유 링크가 클립보드에 복사되었습니다.'); }); }
+            else { navigator.clipboard.writeText(shareUrl).then(() => { alert('공유 링크가 클립보드에 복사되었습니다.'); }).catch((err) => { console.error('클립보드 복사 실패', err); alert('클립보드 복사에 실패했습니다. 브라우저 권한을 확인해주세요.'); }); }
         } catch (e) { alert("공유 링크 생성 실패"); }
     });
 
@@ -443,12 +472,17 @@ function setupUIListeners() {
             html2canvas: { scale: 2, useCORS: true },
             jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
         };
-        html2pdf().set(opt).from(element).save().then(() => {
-            // 원래 스타일 복원
+        // 성공/실패와 무관하게 원래 스타일 복원 (복원 안 하면 자동저장으로 임시 스타일이 영구 저장됨)
+        const restoreLinkStyles = () => {
             links.forEach((link, i) => {
                 if (originalStyles[i]) link.setAttribute('style', originalStyles[i]);
                 else link.removeAttribute('style');
             });
+        };
+        html2pdf().set(opt).from(element).save().then(restoreLinkStyles, (err) => {
+            restoreLinkStyles();
+            console.error('PDF 저장 실패', err);
+            alert('PDF 저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
         });
     });
 
@@ -563,12 +597,15 @@ function setupUIListeners() {
     document.getElementById('write-btn')?.addEventListener('click', () => openEditor(false));
     document.getElementById('close-write-btn')?.addEventListener('click', async () => {
         stopTTS(); document.getElementById('tts-panel')?.classList.add('hidden'); document.getElementById('write-modal')?.classList.remove('tts-open');
-        await saveEntry(); closeAllModals(true); if (navigator.onLine && window.gapi?.client?.getToken()) await saveToDrive();
+        if (!state.isShareView) await saveEntry();
+        closeAllModals(true);
+        if (!state.isShareView && navigator.onLine && window.gapi?.client?.getToken()) await saveToDrive();
         if (window.location.search.includes('share')) {
             window.history.replaceState({}, document.title, window.location.pathname);
             const backBtnText = document.getElementById('back-btn-text');
             if (backBtnText) backBtnText.innerText = '목록';
         }
+        state.isShareView = false;
     });
     document.getElementById('btn-readonly')?.addEventListener('click', () => {
         if (state.currentViewMode === 'book-edit') toggleViewMode('default');
@@ -641,6 +678,7 @@ function compressAndInsertImage(dataUrl) {
         ctx.drawImage(img, 0, 0, width, height);
         insertImage(canvas.toDataURL('image/jpeg', 0.7));
     };
+    img.onerror = () => { console.error('이미지 로드 실패'); alert('이미지를 불러올 수 없습니다. 손상된 파일일 수 있습니다.'); };
     img.src = dataUrl;
 }
 
@@ -652,6 +690,7 @@ function processImage(file) {
             else compressAndInsertImage(resultDataUrl);
         });
     };
+    reader.onerror = () => { console.error('이미지 파일 읽기 실패'); alert('이미지 파일을 읽는 중 오류가 발생했습니다.'); };
     reader.readAsDataURL(file);
 }
 

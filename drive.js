@@ -13,6 +13,9 @@ let syncTimeoutTimer = null;
 let refreshTimer = null;
 let keepAliveTimer = null;
 let mainTokenCallback = null; // 원본 tokenClient 콜백 보존용
+let mainTokenErrorCallback = null; // 원본 tokenClient error_callback 보존용
+let syncRunId = 0; // 동기화 실행 세대 — 워치독/finally가 다른 실행의 플래그를 건드리지 않도록 함
+let currentSyncPromise = null; // 진행 중인 동기화 완료 대기용 (로그아웃 시 사용)
 let silentRefreshAbortFn = null; // silent refresh 중단용
 let isRefreshing = false; // 토큰 갱신 중복 방지 뮤텍스
 let refreshPromise = null; // 진행 중인 갱신 Promise 공유용
@@ -94,6 +97,7 @@ function silentTokenRefresh() {
     return new Promise((resolve) => {
         const restoreCallback = () => {
             if (mainTokenCallback) tokenClient.callback = mainTokenCallback;
+            tokenClient.error_callback = mainTokenErrorCallback;
             silentRefreshAbortFn = null;
         };
         const timeout = setTimeout(() => {
@@ -315,10 +319,17 @@ export function initGoogleDrive(callback) {
         if (window.onAuthSuccess) window.onAuthSuccess(); // auth.js 연동
     };
 
+    // 인터랙티브 인증 실패용 기본 error_callback (silent refresh가 끝나면 이걸로 복원됨)
+    mainTokenErrorCallback = (err) => {
+        console.error("Google 인증 실패:", err?.type || err?.message || err);
+        if (callback) callback(false);
+    };
+
     tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: GOOGLE_CONFIG.CLIENT_ID,
         scope: GOOGLE_CONFIG.SCOPES,
         callback: mainTokenCallback,
+        error_callback: mainTokenErrorCallback,
         // FedCM을 사용하면 서드파티 쿠키가 차단된 환경(Safari, Firefox 등)에서도
         // 팝업 없이 silent token refresh가 가능해져 로그인 화면 빈도를 줄임
         use_fedcm_for_prompt: true,
@@ -334,6 +345,7 @@ export function handleAuthClick() {
     if (tokenClient) {
         // 유저 로그인 응답이 mainTokenCallback으로 처리되도록 보장
         tokenClient.callback = mainTokenCallback;
+        tokenClient.error_callback = mainTokenErrorCallback;
         const savedEmail = getSavedUserEmail();
         if (savedEmail) {
             // 이전에 로그인한 적 있으면 login_hint로 계정 선택 생략
@@ -345,18 +357,24 @@ export function handleAuthClick() {
 }
 
 export async function handleSignoutClick(callback) {
-    // 로그아웃 전 마지막 동기화 시도
+    const hasGapi = () => typeof gapi !== 'undefined' && !!gapi.client;
+    // 로그아웃 전 마지막 동기화 시도 (진행 중인 동기화는 최대 10초까지 완료 대기)
     try {
-        const token = gapi.client.getToken();
+        if (currentSyncPromise) {
+            await Promise.race([currentSyncPromise, new Promise(r => setTimeout(r, 10000))]);
+        }
+        const token = hasGapi() ? gapi.client.getToken() : null;
         if (token) {
             await saveToDrive();
         }
     } catch(e) {
         console.warn("로그아웃 전 동기화 실패:", e);
     }
-    const token = gapi.client.getToken();
+    const token = hasGapi() ? gapi.client.getToken() : null;
     if (token !== null) {
-        google.accounts.oauth2.revoke(token.access_token);
+        if (typeof google !== 'undefined' && google.accounts) {
+            google.accounts.oauth2.revoke(token.access_token);
+        }
         gapi.client.setToken('');
     }
     localStorage.removeItem('faith_token');
@@ -446,23 +464,35 @@ export async function saveToDrive() {
         return;
     }
 
+    const runId = ++syncRunId;
     isSyncing = true;
     toggleSpinners(true);
 
+    let resolveRun;
+    const myPromise = new Promise(r => { resolveRun = r; });
+    currentSyncPromise = myPromise;
+
     if (syncTimeoutTimer) clearTimeout(syncTimeoutTimer);
     syncTimeoutTimer = setTimeout(() => {
-        if (isSyncing) { isSyncing = false; toggleSpinners(false); }
+        // 세대가 일치할 때만 해제 — 이후 시작된 다른 실행의 플래그를 건드리지 않음
+        if (runId === syncRunId && isSyncing) { isSyncing = false; toggleSpinners(false); }
     }, 30000);
 
-    try {
+    const doSync = async () => {
         const folderId = await ensureAppFolder();
         const fileMeta = await findDBFileMeta(folderId);
-        
+
         let cloudData = null;
         if (fileMeta) {
             if (!lastCloudModifiedTime || fileMeta.modifiedTime !== lastCloudModifiedTime) {
                 const response = await gapi.client.drive.files.get({ fileId: fileMeta.id, alt: 'media' });
-                cloudData = typeof response.result === 'string' ? JSON.parse(response.result) : response.result;
+                try {
+                    cloudData = typeof response.result === 'string' ? JSON.parse(response.result) : response.result;
+                } catch (parseErr) {
+                    // 클라우드 파일이 손상된 경우 → 병합 생략하고 로컬 데이터로 덮어씀
+                    console.error("클라우드 DB 파싱 실패 - 로컬 데이터로 덮어씁니다:", parseErr);
+                    cloudData = null;
+                }
                 lastCloudModifiedTime = fileMeta.modifiedTime;
             }
         }
@@ -497,18 +527,40 @@ export async function saveToDrive() {
         if (uploadRes && uploadRes.result) {
             lastCloudModifiedTime = uploadRes.result.modifiedTime;
         }
+    };
 
+    try {
+        try {
+            await doSync();
+        } catch (err) {
+            // 서버에서 폐기된 토큰(401, authError 403) → 갱신 후 1회만 재시도
+            const isAuthErr = err && (err.status === 401 ||
+                (err.status === 403 && err.result?.error?.errors?.some(e2 => e2.reason === 'authError')));
+            if (isAuthErr && tokenClient) {
+                const refreshed = await silentTokenRefreshWithRetry();
+                if (!refreshed) throw err;
+                await doSync();
+            } else {
+                throw err;
+            }
+        }
     } catch (err) {
         console.error("구글 드라이브 저장 실패:", err);
         showSyncWarning("클라우드 동기화에 실패했습니다. 데이터는 기기에 저장되어 있습니다.");
     } finally {
-        if (syncTimeoutTimer) clearTimeout(syncTimeoutTimer);
-        isSyncing = false;
-        toggleSpinners(false);
-        if (pendingSync) {
-            pendingSync = false;
-            setTimeout(saveToDrive, 500);
+        // 워치독 발동 후 새 실행이 시작된 경우, 늦게 끝난 이전 실행이 새 실행의 상태를 건드리지 않도록 함
+        if (runId === syncRunId) {
+            if (syncTimeoutTimer) clearTimeout(syncTimeoutTimer);
+            syncTimeoutTimer = null;
+            isSyncing = false;
+            toggleSpinners(false);
+            if (pendingSync) {
+                pendingSync = false;
+                setTimeout(saveToDrive, 500);
+            }
         }
+        if (currentSyncPromise === myPromise) currentSyncPromise = null;
+        resolveRun();
     }
 }
 
