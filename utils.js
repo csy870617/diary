@@ -15,7 +15,10 @@ export function autoLink(text) {
     
     nodesToReplace.forEach(node => {
         const span = document.createElement('span');
-        span.innerHTML = node.nodeValue.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" style="color:#2563EB; text-decoration:underline; pointer-events: auto !important; cursor: pointer;">$1</a>');
+        span.innerHTML = node.nodeValue.replace(/(https?:\/\/[^\s]+)/g, (url) => {
+            const safeUrl = url.replace(/"/g, '&quot;'); // 따옴표 이스케이프로 속성 주입 방지
+            return `<a href="${safeUrl}" target="_blank" style="color:#2563EB; text-decoration:underline; pointer-events: auto !important; cursor: pointer;">${safeUrl}</a>`;
+        });
         node.parentElement.replaceChild(span, node);
         const parent = span.parentElement;
         while(span.firstChild) {
@@ -195,8 +198,10 @@ function sanitizeExternalHtml(html) {
     }
     nodesToProcess.forEach(tn => {
         const span = document.createElement('span');
-        span.innerHTML = tn.nodeValue.replace(/(https?:\/\/[^\s]+)/g,
-            '<a href="$1" target="_blank" style="color:#2563EB; text-decoration:underline; cursor:pointer;">$1</a>');
+        span.innerHTML = tn.nodeValue.replace(/(https?:\/\/[^\s]+)/g, (url) => {
+            const safeUrl = url.replace(/"/g, '&quot;'); // 따옴표 이스케이프로 속성 주입 방지
+            return `<a href="${safeUrl}" target="_blank" style="color:#2563EB; text-decoration:underline; cursor:pointer;">${safeUrl}</a>`;
+        });
         tn.parentElement.replaceChild(span, tn);
         const parent = span.parentElement;
         while (span.firstChild) {
@@ -325,10 +330,12 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
         let html = div.innerHTML;
 
         if (startAnchor && !html.includes('<a ')) {
+            // 속성값의 따옴표 이스케이프 (속성 주입 방지)
+            const escAttr = (v) => String(v ?? '').replace(/"/g, '&quot;');
             const href = startAnchor.getAttribute('href');
             const target = startAnchor.getAttribute('target') || '_blank';
             const style = startAnchor.getAttribute('style') || 'color:#2563EB; text-decoration:underline; cursor:pointer;';
-            html = `<a href="${href}" target="${target}" style="${style}">${html}</a>`;
+            html = `<a href="${escAttr(href)}" target="${escAttr(target)}" style="${escAttr(style)}">${html}</a>`;
         }
 
         // 부분 선택된 상위 서식 요소(span, b, i, u, s, font 등) 복원
@@ -341,8 +348,9 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
         while (node && node !== editorElement) {
             const tag = node.tagName?.toLowerCase();
             if (['span', 'b', 'strong', 'i', 'em', 'u', 's', 'strike', 'font', 'sub', 'sup'].includes(tag)) {
-                const clone = node.cloneNode(false);
-                formatWrappers.unshift(clone.outerHTML.replace(clone.innerHTML, ''));
+                const outer = node.cloneNode(false).outerHTML;
+                // 첫 '>'까지 잘라 여는 태그만 추출 (replace('')는 no-op이라 닫는 태그까지 포함됐었음)
+                formatWrappers.unshift(outer.slice(0, outer.indexOf('>') + 1));
             }
             node = node.parentElement;
         }
@@ -480,29 +488,24 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
 
                 const data = getSelectedCellsData();
                 if (data) {
+                    // 마커를 시스템 클립보드(text/plain)에 기록하여, 붙여넣기 시
+                    // 마커가 일치할 때만 셀 클립보드를 사용 (이미지 copyId 패턴과 동일)
+                    const copyId = `__cells_${Date.now()}`;
+                    data.copyId = copyId;
                     globalCellClipboard = data;
-
-                    // 텍스트(TSV) + HTML 표 모두 시스템 클립보드에 복사
-                    const textContent = data.cellData.map(row =>
-                        row.map(cell => {
-                            const div = document.createElement('div');
-                            div.innerHTML = cell;
-                            return div.textContent || '';
-                        }).join('\t')
-                    ).join('\n');
 
                     const tableHtml = buildTableHtml(data);
 
                     if (navigator.clipboard && window.ClipboardItem) {
                         const htmlBlob = new Blob([tableHtml], { type: 'text/html' });
-                        const textBlob = new Blob([textContent], { type: 'text/plain' });
+                        const textBlob = new Blob([copyId], { type: 'text/plain' });
                         navigator.clipboard.write([
                             new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': textBlob })
                         ]).catch(() => {
-                            navigator.clipboard.writeText(textContent).catch(() => {});
+                            navigator.clipboard.writeText(copyId).catch(() => {});
                         });
                     } else {
-                        navigator.clipboard?.writeText(textContent).catch(() => {});
+                        navigator.clipboard?.writeText(copyId).catch(() => {});
                     }
 
                     // 복사 완료 시각적 피드백
@@ -557,17 +560,12 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
                 
                 const data = getSelectedCellsData();
                 if (data) {
+                    // 마커를 시스템 클립보드에 기록 (복사 경로와 동일한 패턴)
+                    const copyId = `__cells_${Date.now()}`;
+                    data.copyId = copyId;
                     globalCellClipboard = data;
-                    
-                    const textContent = data.cellData.map(row => 
-                        row.map(cell => {
-                            const div = document.createElement('div');
-                            div.innerHTML = cell;
-                            return div.textContent || '';
-                        }).join('\t')
-                    ).join('\n');
-                    
-                    navigator.clipboard?.writeText(textContent).catch(() => {});
+
+                    navigator.clipboard?.writeText(copyId).catch(() => {});
                     
                     // 셀 내용 삭제
                     if (callbacks.onBeforePaste) callbacks.onBeforePaste();
@@ -636,21 +634,41 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
                 e.preventDefault();
                 e.stopPropagation();
 
-                if (callbacks.onBeforePaste) callbacks.onBeforePaste();
+                const doCellPaste = () => {
+                    if (callbacks.onBeforePaste) callbacks.onBeforePaste();
 
-                if (targetCell) {
-                    // 기존 표의 셀에 붙여넣기
-                    if (pasteCellData(targetCell, globalCellClipboard)) {
-                        clearCellSelection();
+                    if (targetCell) {
+                        // 기존 표의 셀에 붙여넣기
+                        if (pasteCellData(targetCell, globalCellClipboard)) {
+                            clearCellSelection();
+                            if (callbacks.onAfterPaste) callbacks.onAfterPaste();
+                            console.log('셀 붙여넣기 완료');
+                        }
+                    } else {
+                        // 표 밖 커서 위치에 새 표로 붙여넣기
+                        const tableHtml = buildTableHtml(globalCellClipboard);
+                        document.execCommand('insertHTML', false, tableHtml);
                         if (callbacks.onAfterPaste) callbacks.onAfterPaste();
-                        console.log('셀 붙여넣기 완료');
+                        console.log('새 표로 붙여넣기 완료');
                     }
+                };
+
+                // 시스템 클립보드의 마커가 일치할 때만 셀 클립보드 사용
+                // (다른 앱에서 새로 복사한 경우 스테일 셀 데이터 방지)
+                if (navigator.clipboard?.readText) {
+                    navigator.clipboard.readText().then(clipText => {
+                        if (clipText && clipText !== globalCellClipboard.copyId) {
+                            globalCellClipboard = { cellData: null, rows: 0, cols: 0 };
+                            // 스테일 셀 클립보드 → 시스템 클립보드 텍스트를 그대로 붙여넣기
+                            if (callbacks.onBeforePaste) callbacks.onBeforePaste();
+                            document.execCommand('insertText', false, clipText);
+                            if (callbacks.onAfterPaste) callbacks.onAfterPaste();
+                        } else {
+                            doCellPaste();
+                        }
+                    }).catch(() => doCellPaste());
                 } else {
-                    // 표 밖 커서 위치에 새 표로 붙여넣기
-                    const tableHtml = buildTableHtml(globalCellClipboard);
-                    document.execCommand('insertHTML', false, tableHtml);
-                    if (callbacks.onAfterPaste) callbacks.onAfterPaste();
-                    console.log('새 표로 붙여넣기 완료');
+                    doCellPaste();
                 }
                 return;
             }
@@ -821,6 +839,15 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
         const selectedCells = document.querySelectorAll('td.selected-cell');
         const currentCell = getCurrentCell();
 
+        // 시스템 클립보드의 마커가 일치하지 않으면 스테일 셀 클립보드 무시
+        // (다른 앱에서 새로 복사한 경우)
+        if (globalCellClipboard.cellData) {
+            const clipText = e.clipboardData?.getData('text/plain') || '';
+            if (clipText && clipText !== globalCellClipboard.copyId) {
+                globalCellClipboard = { cellData: null, rows: 0, cols: 0 };
+            }
+        }
+
         // 셀 클립보드에 데이터가 있으면 붙여넣기 처리
         if (globalCellClipboard.cellData) {
             e.preventDefault();
@@ -936,10 +963,10 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
                     .replace(/>/g, '&gt;')
                     .replace(/\n/g, '<br>');
 
-                cleanText = cleanText.replace(
-                    /(https?:\/\/[^\s<]+)/g,
-                    '<a href="$1" target="_blank" style="color:#2563EB; text-decoration:underline; cursor:pointer;">$1</a>'
-                );
+                cleanText = cleanText.replace(/(https?:\/\/[^\s<]+)/g, (url) => {
+                    const safeUrl = url.replace(/"/g, '&quot;'); // 따옴표 이스케이프로 속성 주입 방지
+                    return `<a href="${safeUrl}" target="_blank" style="color:#2563EB; text-decoration:underline; cursor:pointer;">${safeUrl}</a>`;
+                });
 
                 document.execCommand('insertHTML', false, cleanText);
             }
