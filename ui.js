@@ -1,4 +1,4 @@
-import { state, saveCategoriesToLocal, getCategorySort, migrateRootOrder } from './state.js';
+import { state, saveCategoriesToLocal, getCategorySort, migrateRootOrder, isReadOnlyView } from './state.js';
 import { updateEntryField, bulkUpdateEntryField, emptyTrash, saveEntry, restoreEntry, permanentDelete } from './data.js';
 import { openEditor, toggleViewMode, applyFontStyle, turnPage, formatDoc, changeGlobalFontSize, insertSticker, insertImage } from './editor.js';
 import { saveToDrive, syncFromDrive } from './drive.js'; 
@@ -7,9 +7,18 @@ const getEl = (id) => document.getElementById(id);
 
 function stripHtml(html) {
     if (!html) return '';
-    const div = document.createElement('div');
-    div.innerHTML = html;
-    return div.textContent || '';
+    // DOMParser는 비활성 문서를 사용하므로 img src 등으로 인한 네트워크 요청이 발생하지 않음
+    return new DOMParser().parseFromString(html, 'text/html').body.textContent || '';
+}
+
+// 사용자 입력 텍스트를 innerHTML 템플릿에 넣기 전 이스케이프 (저장형 HTML 주입 방지)
+function escapeHtml(str) {
+    return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 export function applyCategorySort() {
@@ -36,7 +45,7 @@ export function renderEntries(keyword = '') {
         !entry.isPurged && 
         !entry.isDeleted && 
         entry.category === state.currentCategory && 
-        (entry.title.includes(keyword) || stripHtml(entry.body).includes(keyword))
+        ((entry.title || '').includes(keyword) || stripHtml(entry.body).includes(keyword))
     );
     
     filtered.sort((a, b) => { 
@@ -68,7 +77,7 @@ export function renderEntries(keyword = '') {
         const checkboxHtml = state.isSelectMode
             ? `<div class="entry-checkbox ${state.selectedEntries.includes(entry.id) ? 'checked' : ''}"><i class="ph ph-check"></i></div>`
             : '';
-        div.innerHTML = `${checkboxHtml}<div class="entry-card-content"><h3 class="card-title">${entry.title}</h3>${entry.subtitle ? `<p class="card-subtitle">${entry.subtitle}</p>` : ''}<div class="card-meta"><span>${dateStr}</span></div></div>`;
+        div.innerHTML = `${checkboxHtml}<div class="entry-card-content"><h3 class="card-title">${escapeHtml(entry.title)}</h3>${entry.subtitle ? `<p class="card-subtitle">${escapeHtml(entry.subtitle)}</p>` : ''}<div class="card-meta"><span>${dateStr}</span></div></div>`;
 
         if (state.isSelectMode) {
             div.onclick = () => toggleEntrySelection(entry.id);
@@ -76,7 +85,10 @@ export function renderEntries(keyword = '') {
             div.onclick = () => {
                 openEditor(true, entry);
                 toggleViewMode('readOnly');
-                if (window.gapi && gapi.client && gapi.client.getToken()) {
+                // 작성 모달이 편집 가능한 모드로 열려 있으면 동기화 금지 (작성 중 내용 유실 방지)
+                const writeModal = getEl('write-modal');
+                const isEditingOpen = writeModal && !writeModal.classList.contains('hidden') && !isReadOnlyView();
+                if (!isEditingOpen && window.gapi && gapi.client && gapi.client.getToken()) {
                     syncFromDrive();
                 }
             };
@@ -128,7 +140,7 @@ export function renderTrash() {
     addSection('폴더', deletedFolders, (folder) => {
         const div = document.createElement('div'); div.className = 'trash-item';
         const dateStr = folder.deletedAt ? new Date(folder.deletedAt).toLocaleDateString() : '';
-        div.innerHTML = `<div class="trash-info"><h4><i class="ph ph-folder-simple"></i> ${folder.name}</h4>${dateStr ? `<p>${dateStr} 삭제</p>` : ''}</div>`;
+        div.innerHTML = `<div class="trash-info"><h4><i class="ph ph-folder-simple"></i> ${escapeHtml(folder.name)}</h4>${dateStr ? `<p>${dateStr} 삭제</p>` : ''}</div>`;
         div.appendChild(makeButtons(() => restoreFolder(folder.id), () => permanentDeleteFolder(folder.id)));
         return div;
     });
@@ -136,14 +148,14 @@ export function renderTrash() {
     addSection('주제', deletedCats, (cat) => {
         const div = document.createElement('div'); div.className = 'trash-item';
         const dateStr = cat.deletedAt ? new Date(cat.deletedAt).toLocaleDateString() : '';
-        div.innerHTML = `<div class="trash-info"><h4><i class="ph ph-tag"></i> ${cat.name}</h4>${dateStr ? `<p>${dateStr} 삭제</p>` : ''}</div>`;
+        div.innerHTML = `<div class="trash-info"><h4><i class="ph ph-tag"></i> ${escapeHtml(cat.name)}</h4>${dateStr ? `<p>${dateStr} 삭제</p>` : ''}</div>`;
         div.appendChild(makeButtons(() => restoreCategory(cat.id), () => permanentDeleteCategory(cat.id)));
         return div;
     });
 
     addSection('글', deletedEntries, (entry) => {
         const div = document.createElement('div'); div.className = 'trash-item';
-        div.innerHTML = `<div class="trash-info"><h4>${entry.title}</h4><p>${entry.date}</p></div>`;
+        div.innerHTML = `<div class="trash-info"><h4>${escapeHtml(entry.title)}</h4><p>${escapeHtml(entry.date)}</p></div>`;
         div.appendChild(makeButtons(() => restoreEntry(entry.id), () => permanentDelete(entry.id)));
         return div;
     });
@@ -177,15 +189,33 @@ export function openTrashModal() {
     openModal(getEl('trash-modal')); 
 }
 
-function attachContextMenu(element, entryId) {
-    element.oncontextmenu = (e) => { e.preventDefault(); showContextMenu(e.clientX, e.clientY, entryId); };
+// 길게 누르기 공통 처리: 스크롤(touchmove)/취소 시 타이머 해제, 발동 직후 클릭은 무시
+function attachLongPress(element, onLongPress) {
+    let longPressFired = false;
     element.addEventListener('touchstart', (e) => {
+        longPressFired = false;
         state.longPressTimer = setTimeout(() => {
+            longPressFired = true;
             const touch = e.touches[0];
-            showContextMenu(touch.clientX, touch.clientY, entryId);
+            onLongPress(touch.clientX, touch.clientY);
         }, 600);
     }, { passive: true });
-    element.ontouchend = () => clearTimeout(state.longPressTimer);
+    const cancelTimer = () => clearTimeout(state.longPressTimer);
+    element.addEventListener('touchmove', cancelTimer, { passive: true });
+    element.addEventListener('touchcancel', cancelTimer, { passive: true });
+    element.ontouchend = cancelTimer;
+    element.addEventListener('click', (e) => {
+        if (longPressFired) {
+            longPressFired = false;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+        }
+    }, true);
+}
+
+function attachContextMenu(element, entryId) {
+    element.oncontextmenu = (e) => { e.preventDefault(); showContextMenu(e.clientX, e.clientY, entryId); };
+    attachLongPress(element, (x, y) => showContextMenu(x, y, entryId));
 }
 
 function showContextMenu(x, y, id) {
@@ -200,13 +230,7 @@ function showContextMenu(x, y, id) {
 
 function attachCatContextMenu(element, catId) {
     element.oncontextmenu = (e) => { e.preventDefault(); showCatContextMenu(e.clientX, e.clientY, catId); };
-    element.addEventListener('touchstart', (e) => {
-        state.longPressTimer = setTimeout(() => {
-            const touch = e.touches[0];
-            showCatContextMenu(touch.clientX, touch.clientY, catId);
-        }, 600);
-    }, { passive: true });
-    element.ontouchend = () => clearTimeout(state.longPressTimer);
+    attachLongPress(element, (x, y) => showCatContextMenu(x, y, catId));
 }
 
 function showCatContextMenu(x, y, id) {
@@ -297,7 +321,7 @@ function buildFolderNavItem(folder) {
     if (popupFolderId === folder.id || (popupHistory.length > 0 && popupHistory[0] === folder.id)) btn.classList.add('popup-open');
     const hasChildren = folderHasContent(folder.id);
     const caret = hasChildren ? ' <i class="ph ph-caret-down nav-caret"></i>' : '';
-    btn.innerHTML = `<i class="ph ph-folder-simple"></i> <span>${folder.name}</span>${caret}`;
+    btn.innerHTML = `<i class="ph ph-folder-simple"></i> <span>${escapeHtml(folder.name)}</span>${caret}`;
     btn.onclick = (e) => {
         e.stopPropagation();
         if (popupFolderId && (popupFolderId === folder.id || popupHistory[0] === folder.id)) {
@@ -316,7 +340,7 @@ function buildTopicNavItem(cat) {
     btn.dataset.itemId = cat.id;
     btn.dataset.itemType = 'topic';
     btn.dataset.catId = cat.id;
-    btn.innerHTML = `<i class="ph ph-tag"></i> <span>${cat.name}</span>`;
+    btn.innerHTML = `<i class="ph ph-tag"></i> <span>${escapeHtml(cat.name)}</span>`;
     btn.onclick = (e) => {
         e.stopPropagation();
         closeFolderPopup();
@@ -383,7 +407,7 @@ function renderFolderPopupContent() {
     }
 
     if (header) {
-        header.innerHTML = `<i class="ph ph-folder-open"></i> <span>${folder.name}</span>`;
+        header.innerHTML = `<i class="ph ph-folder-open"></i> <span>${escapeHtml(folder.name)}</span>`;
     }
 
     const subFolders = state.allFolders
@@ -407,7 +431,7 @@ function renderFolderPopupContent() {
         item.dataset.itemType = 'folder';
         const hasChildren = folderHasContent(f.id);
         const caret = hasChildren ? '<i class="ph ph-caret-right popup-item-arrow"></i>' : '';
-        item.innerHTML = `<i class="ph ph-folder-simple"></i><span class="popup-item-label">${f.name}</span>${caret}`;
+        item.innerHTML = `<i class="ph ph-folder-simple"></i><span class="popup-item-label">${escapeHtml(f.name)}</span>${caret}`;
         item.onclick = (e) => {
             e.stopPropagation();
             popupHistory.push(popupFolderId);
@@ -424,7 +448,7 @@ function renderFolderPopupContent() {
         item.className = `popup-item topic-popup-item${state.currentCategory === c.id ? ' active' : ''}`;
         item.dataset.itemId = c.id;
         item.dataset.itemType = 'topic';
-        item.innerHTML = `<i class="ph ph-tag"></i><span class="popup-item-label">${c.name}</span>`;
+        item.innerHTML = `<i class="ph ph-tag"></i><span class="popup-item-label">${escapeHtml(c.name)}</span>`;
         item.onclick = (e) => {
             e.stopPropagation();
             state.currentCategory = c.id;
@@ -606,13 +630,7 @@ export function addSubfolderAction() {
 
 function attachFolderContextMenu(element, folderId) {
     element.oncontextmenu = (e) => { e.preventDefault(); showFolderContextMenu(e.clientX, e.clientY, folderId); };
-    element.addEventListener('touchstart', (e) => {
-        state.longPressTimer = setTimeout(() => {
-            const touch = e.touches[0];
-            showFolderContextMenu(touch.clientX, touch.clientY, folderId);
-        }, 600);
-    }, { passive: true });
-    element.ontouchend = () => clearTimeout(state.longPressTimer);
+    attachLongPress(element, (x, y) => showFolderContextMenu(x, y, folderId));
 }
 
 function showFolderContextMenu(x, y, folderId) {
@@ -674,9 +692,7 @@ export function deleteFolderAction() {
         const now = new Date().toISOString();
         state.allFolders.forEach(f => { if (allFolderIds.has(f.id)) { f.isDeleted = true; f.deletedAt = now; } });
         affectedCats.forEach(c => { c.isDeleted = true; c.deletedAt = now; });
-        if (state.currentFolder && allFolderIds.has(state.currentFolder)) {
-            state.currentFolder = folder.parentFolderId || null;
-        }
+        // state.currentFolder는 renderFolders에서 항상 null로 초기화되므로 별도 처리 불필요
         if (state.allCategories.find(c => c.id === state.currentCategory)?.isDeleted) {
             const next = state.allCategories.find(c => !c.isDeleted);
             if (next) { state.currentCategory = next.id; applyCategorySort(); }
@@ -746,7 +762,7 @@ function renderFolderAssignList() {
             const div = document.createElement('div');
             div.className = 'cat-select-item';
             if (depth > 0) div.style.paddingLeft = `${12 + depth * 18}px`;
-            div.innerHTML = `<i class="ph ph-folder-simple"></i> ${folder.name}`;
+            div.innerHTML = `<i class="ph ph-folder-simple"></i> ${escapeHtml(folder.name)}`;
             div.onclick = () => {
                 const cat = state.allCategories.find(c => c.id === state.contextCatId);
                 if (cat) {
