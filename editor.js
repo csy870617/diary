@@ -31,6 +31,7 @@ let lastLocalEditTime = 0; // 마지막 로컬 편집 시간 (동기화 충돌 �
 let undoStack = [];
 let redoStack = [];
 const MAX_HISTORY = 100;
+const MAX_HISTORY_CHARS = 30000000; // 스냅샷 총 문자 수 상한 (대용량 이미지로 인한 메모리 과다 방지)
 let startTableFontSize = 16;
 
 // Undo/Redo 시스템을 위한 상태
@@ -186,43 +187,13 @@ function pushToHistory(snapshot) {
     if (undoStack.length > MAX_HISTORY) {
         undoStack.shift();
     }
+    let totalChars = undoStack.reduce((sum, s) => sum + (s.body ? s.body.length : 0), 0);
+    while (totalChars > MAX_HISTORY_CHARS && undoStack.length > 1) {
+        totalChars -= (undoStack.shift().body || '').length;
+    }
     
     // 새로운 변경이 발생하면 redo 스택 초기화
     redoStack = [];
-}
-
-/**
- * 히스토리 기록 (변경 전 상태 저장)
- * @param {string} actionType - 액션 타입 ('typing', 'format', 'delete', 'paste', 'insert' 등)
- */
-function recordHistory(actionType = 'unknown') {
-    const now = Date.now();
-    const currentSnapshot = createSnapshot();
-    
-    if (!currentSnapshot) return;
-    
-    // IME 조합 중에는 기록하지 않음
-    if (isComposing) {
-        pendingSnapshot = currentSnapshot;
-        return;
-    }
-    
-    // 타이핑 그룹핑: 짧은 시간 내의 연속 타이핑은 하나로 묶음
-    if (actionType === 'typing') {
-        const timeDiff = now - lastInputTime;
-        
-        // 첫 타이핑이거나 시간이 충분히 지났으면 새 히스토리 생성
-        if (lastInputType !== 'typing' || timeDiff > TYPING_GROUP_DELAY) {
-            pushToHistory(currentSnapshot);
-        }
-        // 그렇지 않으면 마지막 히스토리 업데이트 (그룹핑)
-    } else {
-        // 타이핑이 아닌 액션은 항상 새 히스토리
-        pushToHistory(currentSnapshot);
-    }
-    
-    lastInputTime = now;
-    lastInputType = actionType;
 }
 
 /**
@@ -352,11 +323,16 @@ function setCursorOffset(element, offset) {
 export async function triggerAutoSave() {
     if (autoSaveTimer) clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(async () => {
+        autoSaveTimer = null;
         const editBody = document.getElementById('editor-body');
         if (!editBody || (state.currentViewMode !== 'default' && state.currentViewMode !== 'book-edit')) return;
-        await saveEntry(); 
-        if (window.gapi && gapi.client && gapi.client.getToken()) await saveToDrive(); 
-    }, 2000); 
+        try {
+            await saveEntry();
+            if (window.gapi && gapi.client && gapi.client.getToken()) await saveToDrive();
+        } catch (err) {
+            console.error('자동 저장 실패:', err);
+        }
+    }, 2000);
 }
 
 /* --- 책 모드 관련 핸들러 --- */
@@ -522,6 +498,7 @@ export function turnPage(direction) {
     const container = document.getElementById('editor-container');
     if (!container) return;
     const stride = Math.floor(container.clientWidth);
+    if (stride <= 0) return;
     const maxPage = Math.ceil(container.scrollWidth / stride) - 1;
     let nextIndex = Math.max(0, Math.min(maxPage, currentBookPageIndex + direction));
     if (nextIndex === currentBookPageIndex) return;
@@ -534,6 +511,7 @@ export function jumpToPage(index) {
     const container = document.getElementById('editor-container');
     if (!container) return;
     const stride = Math.floor(container.clientWidth);
+    if (stride <= 0) return;
     const maxPage = Math.ceil(container.scrollWidth / stride) - 1;
     let nextIndex = Math.max(0, Math.min(maxPage, index));
     currentBookPageIndex = nextIndex;
@@ -679,7 +657,8 @@ export function updateBookNav() {
     const container = document.getElementById('editor-container');
     if(!container) return;
     const stride = Math.floor(container.clientWidth);
-    const totalPages = Math.ceil(container.scrollWidth / stride) || 1; 
+    if (stride <= 0) return;
+    const totalPages = Math.ceil(container.scrollWidth / stride) || 1;
     document.getElementById('book-nav-left')?.classList.toggle('hidden', currentBookPageIndex <= 0);
     document.getElementById('book-nav-right')?.classList.toggle('hidden', currentBookPageIndex + 1 >= totalPages);
     const pageIndicator = document.getElementById('page-indicator');
@@ -688,18 +667,18 @@ export function updateBookNav() {
     if (slider) { slider.max = totalPages - 1; slider.value = currentBookPageIndex; }
 }
 
-function linkifyContents(element) {
+function linkifyContents(element, force = false) {
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
     const nodes = []; let node; while(node = walker.nextNode()) nodes.push(node);
     const urlRegex = /((https?:\/\/|www\.)[^\s]+)/g;
     nodes.forEach(node => {
-        if (node.parentNode.tagName === 'A' || node.parentNode.isContentEditable) return;
+        if (node.parentNode.tagName === 'A' || (!force && node.parentNode.isContentEditable)) return;
         const text = node.nodeValue;
         if (text.match(urlRegex)) {
             const fragment = document.createDocumentFragment(); let lastIdx = 0;
             text.replace(urlRegex, (match, url, protocol, offset) => {
                 fragment.appendChild(document.createTextNode(text.slice(lastIdx, offset)));
-                const a = document.createElement('a'); a.href = protocol === 'www.' ? 'http://' + url : url; a.target = '_blank'; a.textContent = url;
+                const a = document.createElement('a'); a.href = protocol === 'www.' ? 'http://' + url : url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = url;
                 a.style.textDecoration = 'underline'; a.style.color = '#2563EB'; a.style.cursor = 'pointer';
                 fragment.appendChild(a); lastIdx = offset + match.length;
             });
@@ -763,15 +742,19 @@ function selectCellRange(startTd, endTd) {
     const startTable = startTd.closest('table');
     const endTable = endTd.closest('table');
     if (startTable !== endTable) return;
-    const startR = startTd.parentElement.rowIndex, startC = startTd.cellIndex;
-    const endR = endTd.parentElement.rowIndex, endC = endTd.cellIndex;
-    const minR = Math.min(startR, endR), maxR = Math.max(startR, endR);
-    const minC = Math.min(startC, endC), maxC = Math.max(startC, endC);
-    const isSingleCell = (minR === maxR && minC === maxC);
+    // colspan/rowspan을 고려한 논리적 좌표로 범위 계산
+    const startR = startTd.parentElement.rowIndex, startC = getCellColumnIndex(startTd);
+    const endR = endTd.parentElement.rowIndex, endC = getCellColumnIndex(endTd);
+    const minR = Math.min(startR, endR);
+    const maxR = Math.max(startR + (startTd.rowSpan || 1) - 1, endR + (endTd.rowSpan || 1) - 1);
+    const minC = Math.min(startC, endC);
+    const maxC = Math.max(startC + (startTd.colSpan || 1) - 1, endC + (endTd.colSpan || 1) - 1);
+    const isSingleCell = (startTd === endTd);
     if (!isSingleCell) startTable.classList.add('selecting-cells');
     startTable.querySelectorAll('td').forEach(td => {
-        const r = td.parentElement.rowIndex, c = td.cellIndex;
-        if (!isSingleCell && r >= minR && r <= maxR && c >= minC && c <= maxC) td.classList.add('selected-cell');
+        const r1 = td.parentElement.rowIndex, r2 = r1 + (td.rowSpan || 1) - 1;
+        const c1 = getCellColumnIndex(td), c2 = c1 + (td.colSpan || 1) - 1;
+        if (!isSingleCell && r2 >= minR && r1 <= maxR && c2 >= minC && c1 <= maxC) td.classList.add('selected-cell');
         else td.classList.remove('selected-cell');
     });
 }
@@ -1035,13 +1018,13 @@ function setupBasicHandling() {
 
     editorBody.onkeydown = (e) => {
         // Ctrl+Z / Cmd+Z: Undo
-        if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { 
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
             e.preventDefault(); 
             formatDoc('undo'); 
             return; 
         }
         // Ctrl+Y / Cmd+Y 또는 Ctrl+Shift+Z / Cmd+Shift+Z: Redo
-        if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { 
+        if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) {
             e.preventDefault(); 
             formatDoc('redo'); 
             return; 
@@ -1232,21 +1215,21 @@ function setupBasicHandling() {
         lastInputType = 'typing';
     });
 
-    // input 이벤트: 타이핑 그룹핑 적용
-    let inputTimer;
-    editorBody.addEventListener('input', (e) => { 
-        clearTimeout(inputTimer); 
-        
-        // IME 조합 중이 아닐 때만 처리
-        if (!isComposing) {
-            // 일정 시간 후에 히스토리 기록 (타이핑 멈춤 감지)
-            inputTimer = setTimeout(() => {
-                recordHistory('typing');
-            }, TYPING_GROUP_DELAY);
+    // beforeinput: 변경 직전 상태를 Undo 시작점으로 캡처 (타이핑 그룹핑 적용)
+    editorBody.addEventListener('beforeinput', () => {
+        if (isComposing) return;
+        const now = Date.now();
+        if (lastInputType !== 'typing' || now - lastInputTime > TYPING_GROUP_DELAY) {
+            const snapshot = createSnapshot();
+            if (snapshot) pushToHistory(snapshot);
         }
-        
-        updateSelectionBox(); 
-        triggerAutoSave(); 
+        lastInputTime = now;
+        lastInputType = 'typing';
+    });
+
+    editorBody.addEventListener('input', () => {
+        updateSelectionBox();
+        triggerAutoSave();
     });
     
     const syncButtons = () => { if (currentSelectedElement) updateSelectionBox(); };
@@ -1303,8 +1286,51 @@ function setupBasicHandling() {
     }
 }
 
-export function openEditor(isEdit, entryData) { 
-    state.isEditMode = isEdit; const writeModal = document.getElementById('write-modal'); openModal(writeModal); writeModal.scrollTop = 0; currentBookPageIndex = 0; setupBasicHandling();
+/**
+ * 저장된 본문을 innerHTML에 넣기 전에 위험 요소만 제거합니다.
+ * (utils.js의 sanitizeExternalHtml은 export되지 않아 가벼운 로컬 버전 사용.
+ * 서식은 그대로 보존하고 script/이벤트 핸들러/javascript: URL만 차단)
+ */
+function sanitizeEntryHtml(html) {
+    if (!html) return '';
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    doc.querySelectorAll('script, iframe, object, embed, form, meta, link, style, base').forEach(el => el.remove());
+    doc.body.querySelectorAll('*').forEach(el => {
+        Array.from(el.attributes).forEach(attr => {
+            const name = attr.name.toLowerCase();
+            if (name.startsWith('on')) el.removeAttribute(attr.name);
+            else if ((name === 'href' || name === 'src' || name === 'xlink:href' || name === 'srcdoc' || name === 'formaction') &&
+                     /^\s*(javascript|vbscript)\s*:/i.test(attr.value)) el.removeAttribute(attr.name);
+        });
+    });
+    return doc.body.innerHTML;
+}
+
+/**
+ * 본문 요소를 복제하여 책 모드 레이아웃 흔적(축소된 이미지 크기, data-book-* 속성)을
+ * 제거한 깨끗한 HTML을 반환합니다. 저장 시 사용.
+ */
+export function getCleanBodyHtml(bodyEl) {
+    if (!bodyEl) return '';
+    const clone = bodyEl.cloneNode(true);
+    clone.querySelectorAll('img').forEach(img => {
+        if (img.dataset.bookOrigWidth !== undefined) {
+            img.style.width = img.dataset.bookOrigWidth || '';
+            img.style.height = img.dataset.bookOrigHeight || '';
+            img.style.maxWidth = '';
+            img.style.maxHeight = '';
+        }
+    });
+    clone.querySelectorAll('*').forEach(el => {
+        Array.from(el.attributes).forEach(attr => {
+            if (attr.name.startsWith('data-book-')) el.removeAttribute(attr.name);
+        });
+    });
+    return clone.innerHTML;
+}
+
+export function openEditor(isEdit, entryData) {
+    state.isEditMode = isEdit; const writeModal = document.getElementById('write-modal'); openModal(writeModal); writeModal.scrollTop = 0; currentBookPageIndex = 0; savedRange = null; setupBasicHandling();
     const catName = state.allCategories.find(c => c.id === state.currentCategory)?.name || '기록';
     document.getElementById('display-category').innerText = catName; document.getElementById('display-date').innerText = entryData ? entryData.date : new Date().toLocaleDateString('ko-KR');
     const editTitle = document.getElementById('edit-title'), editSubtitle = document.getElementById('edit-subtitle'), editBody = document.getElementById('editor-body');
@@ -1313,8 +1339,8 @@ export function openEditor(isEdit, entryData) {
         state.editingId = entryData.id; 
         editTitle.value = entryData.title || ''; 
         editSubtitle.value = entryData.subtitle || ''; 
-        editBody.innerHTML = entryData.body || ''; 
-        linkifyContents(editBody);
+        editBody.innerHTML = sanitizeEntryHtml(entryData.body || '');
+        linkifyContents(editBody, true);
         setupTableWrapperScroll(editBody);
         state.currentFontFamily = entryData.fontFamily || 'Pretendard';
         state.currentFontSize = entryData.fontSize || 16;
@@ -1355,7 +1381,7 @@ export function refreshEditorContent() {
     if (!isEditableMode || document.activeElement !== editBody) {
         if (editTitle.value !== latestEntry.title) editTitle.value = latestEntry.title || '';
         if (editSubtitle.value !== latestEntry.subtitle) editSubtitle.value = latestEntry.subtitle || '';
-        if (editBody.innerHTML !== latestEntry.body) { editBody.innerHTML = latestEntry.body || ''; if (!isEditableMode) linkifyContents(editBody); setupTableWrapperScroll(editBody); if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') updateBookNav(); }
+        if (editBody.innerHTML !== latestEntry.body) { editBody.innerHTML = sanitizeEntryHtml(latestEntry.body || ''); if (!isEditableMode) linkifyContents(editBody); setupTableWrapperScroll(editBody); if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') updateBookNav(); }
     }
 }
 
@@ -1364,6 +1390,14 @@ export function toggleViewMode(mode) {
     const wasBookMode = state.currentViewMode === 'book' || state.currentViewMode === 'book-edit', oldScrollTop = container ? container.scrollTop : 0, oldHeight = container ? container.clientHeight : 0, lastPageIndex = currentBookPageIndex;
     const isBookToBook = wasBookMode && (mode === 'book' || mode === 'book-edit');
     const anchor = isBookToBook ? null : findVisibleAnchor();
+    // 편집 모드에서 벗어날 때 보류 중인 자동 저장을 즉시 반영 (디바운스 중 모드 전환으로 인한 편집 유실 방지)
+    const wasEditable = state.currentViewMode === 'default' || state.currentViewMode === 'book-edit';
+    const willBeEditable = mode === 'default' || mode === 'book-edit';
+    if (wasEditable && !willBeEditable && autoSaveTimer) {
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
+        saveEntry().catch(err => console.error('자동 저장 실패:', err));
+    }
     state.currentViewMode = mode;
     const btnReadOnly = document.getElementById('btn-readonly'), btnBookMode = document.getElementById('btn-bookmode');
     if(btnReadOnly) btnReadOnly.classList.toggle('active', mode === 'readOnly');
@@ -1797,7 +1831,8 @@ export function addColumn() {
     const rowIdx = targetCell ? targetCell.parentElement.rowIndex : 0;
     let cellToFocus = null;
     for (let i = 0; i < table.rows.length; i++) {
-        const newCell = table.rows[i].insertCell(colIdx + 1);
+        // 병합된 셀(colspan)이 있는 행에서도 범위를 벗어나지 않도록 보정
+        const newCell = table.rows[i].insertCell(Math.min(colIdx + 1, table.rows[i].cells.length));
         newCell.innerHTML = '<br>';
         if (i === rowIdx) cellToFocus = newCell;
     }
@@ -1813,7 +1848,8 @@ export function deleteColumn() {
     const colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1;
     const rowIdx = targetCell ? targetCell.parentElement.rowIndex : 0;
     for (let i = 0; i < table.rows.length; i++) {
-        table.rows[i].deleteCell(colIdx);
+        // 병합된 셀(colspan)로 셀 수가 적은 행은 건너뜀 (범위 초과 방지)
+        if (colIdx < table.rows[i].cells.length) table.rows[i].deleteCell(colIdx);
     }
     // 삭제 후 인접 셀로 커서 이동
     const newColIdx = Math.min(colIdx, table.rows[0].cells.length - 1);
@@ -1844,21 +1880,26 @@ export function mergeCells() {
     let minRow = Infinity, maxRow = -1, minCol = Infinity, maxCol = -1;
     const cellsInfo = [];
     
+    let coveredArea = 0;
     selectedCells.forEach(cell => {
+        // colspan/rowspan을 고려한 논리적 좌표 사용
         const rowIdx = cell.parentElement.rowIndex;
-        const colIdx = cell.cellIndex;
-        
+        const colIdx = getCellColumnIndex(cell);
+        const rowSpan = cell.rowSpan || 1;
+        const colSpan = cell.colSpan || 1;
+
         minRow = Math.min(minRow, rowIdx);
-        maxRow = Math.max(maxRow, rowIdx);
+        maxRow = Math.max(maxRow, rowIdx + rowSpan - 1);
         minCol = Math.min(minCol, colIdx);
-        maxCol = Math.max(maxCol, colIdx);
-        
+        maxCol = Math.max(maxCol, colIdx + colSpan - 1);
+        coveredArea += rowSpan * colSpan;
+
         cellsInfo.push({ cell, rowIdx, colIdx });
     });
-    
+
     // 직사각형 영역 확인
     const expectedCount = (maxRow - minRow + 1) * (maxCol - minCol + 1);
-    if (selectedCells.length !== expectedCount) {
+    if (coveredArea !== expectedCount) {
         alert('직사각형 형태로만 셀을 합칠 수 있습니다.');
         return;
     }
@@ -1877,30 +1918,17 @@ export function mergeCells() {
         }
     });
     
-    // 첫 번째 셀 (왼쪽 위)
-    const firstCell = table.rows[minRow].cells[minCol];
+    // 첫 번째 셀 (왼쪽 위) - 논리 좌표 기준으로 선택된 셀 중에서 찾음
+    const firstCell = cellsInfo[0].cell;
     if (!firstCell) return;
-    
-    // 각 행에서 삭제할 셀 수 계산 (colspan)
+
     const colsToMerge = maxCol - minCol + 1;
     const rowsToMerge = maxRow - minRow + 1;
-    
-    // 셀 삭제 (역순으로 - 인덱스 변경 방지)
-    for (let r = maxRow; r >= minRow; r--) {
-        const row = table.rows[r];
-        if (!row) continue;
-        
-        // 같은 행에서 오른쪽부터 삭제
-        for (let c = maxCol; c >= minCol; c--) {
-            // 첫 번째 셀은 삭제하지 않음
-            if (r === minRow && c === minCol) continue;
-            
-            const cell = row.cells[c];
-            if (cell) {
-                cell.remove();
-            }
-        }
-    }
+
+    // 첫 번째 셀을 제외한 선택된 셀들만 정확히 삭제 (인덱스 추측 대신 실제 셀 제거)
+    cellsInfo.forEach(info => {
+        if (info.cell !== firstCell) info.cell.remove();
+    });
     
     // 첫 번째 셀에 colspan, rowspan 설정
     if (colsToMerge > 1) {
@@ -1997,11 +2025,20 @@ export function insertTable(rows, cols) {
     const editor = document.getElementById('editor-body');
     editor.focus();
 
-    // 저장된 커서 위치가 있으면 복원하여 해당 위치에 표 삽입
+    // 저장된 커서 위치가 유효하면 복원하여 해당 위치에 표 삽입
     if (savedRange) {
         const selection = window.getSelection();
-        selection.removeAllRanges();
-        selection.addRange(savedRange);
+        if (editor.contains(savedRange.startContainer)) {
+            selection.removeAllRanges();
+            selection.addRange(savedRange);
+        } else {
+            // 저장된 위치가 더 이상 유효하지 않으면 본문 끝으로
+            const range = document.createRange();
+            range.selectNodeContents(editor);
+            range.collapse(false);
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }
         savedRange = null;
     }
 
@@ -2014,7 +2051,7 @@ export function insertTable(rows, cols) {
 
     triggerAutoSave();
 }
-export function createHyperlink() { const selection = window.getSelection(); if (selection.rangeCount > 0 && selection.toString().length > 0) { const url = prompt("연결할 주소(URL)를 입력하세요:", "https://"); if (url && url !== "https://") { saveBeforeChange('link'); document.execCommand('createLink', false, url); const anchor = selection.anchorNode.parentElement; if (anchor && anchor.tagName === 'A') { anchor.target = '_blank'; anchor.style.color = '#2563EB'; anchor.style.textDecoration = 'underline'; anchor.style.cursor = 'pointer'; } triggerAutoSave(); } } else { alert("링크를 걸 문구를 먼저 드래그하여 선택해주세요."); } }
+export function createHyperlink() { const selection = window.getSelection(); if (selection.rangeCount > 0 && selection.toString().length > 0) { const url = prompt("연결할 주소(URL)를 입력하세요:", "https://"); if (url && url !== "https://") { let href = url.trim(); if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href)) href = 'https://' + href; if (!/^https?:\/\//i.test(href)) { alert("http(s) 주소만 링크로 사용할 수 있습니다."); return; } saveBeforeChange('link'); document.execCommand('createLink', false, href); const anchor = selection.anchorNode.parentElement; if (anchor && anchor.tagName === 'A') { anchor.target = '_blank'; anchor.rel = 'noopener noreferrer'; anchor.style.color = '#2563EB'; anchor.style.textDecoration = 'underline'; anchor.style.cursor = 'pointer'; } triggerAutoSave(); } } else { alert("링크를 걸 문구를 먼저 드래그하여 선택해주세요."); } }
 
 /**
  * 표 편집 모달 열기 (편집 모드)

@@ -1,6 +1,7 @@
 import { state, saveCategoriesToLocal } from './state.js';
 import { renderEntries, renderTrash, renderFolders, renderTabs } from './ui.js';
 import { saveToDrive } from './drive.js';
+import { getCleanBodyHtml } from './editor.js';
 
 function safeLocalSave() {
     try {
@@ -35,7 +36,8 @@ export async function saveEntry() {
     if(!titleEl || !bodyEl) return;
     
     const title = titleEl.value;
-    const body = bodyEl.innerHTML; 
+    // 책 모드에서 입혀진 임시 크기(data-book-*)가 원본을 덮어쓰지 않도록 정리 후 저장
+    const body = getCleanBodyHtml(bodyEl);
     const subtitle = subtitleEl ? subtitleEl.value : '';
     const nowISO = new Date().toISOString(); 
 
