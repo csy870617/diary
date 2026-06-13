@@ -212,19 +212,22 @@ function updateAuthUI(isLoggedIn) {
     const logoutBtn = document.getElementById('logout-btn'), 
           loginTriggerBtn = document.getElementById('login-trigger-btn'), 
           loginModal = document.getElementById('login-modal'), 
-          refreshBtn = document.getElementById('refresh-btn'), 
+          refreshBtn = document.getElementById('refresh-btn'),
+          writeSyncBtn = document.getElementById('write-sync-btn'),
           loginMsgArea = document.getElementById('login-msg-area');
-    
+
     if (isLoggedIn) {
         if (logoutBtn) logoutBtn.classList.remove('hidden');
         if (loginTriggerBtn) loginTriggerBtn.classList.add('hidden');
         if (loginModal) loginModal.classList.add('hidden');
         if (refreshBtn) refreshBtn.classList.remove('hidden');
-        if (loginMsgArea) loginMsgArea.classList.add('hidden'); 
+        if (writeSyncBtn) writeSyncBtn.classList.remove('hidden');
+        if (loginMsgArea) loginMsgArea.classList.add('hidden');
     } else {
         if (logoutBtn) logoutBtn.classList.add('hidden');
         if (loginTriggerBtn) loginTriggerBtn.classList.remove('hidden');
         if (refreshBtn) refreshBtn.classList.add('hidden');
+        if (writeSyncBtn) writeSyncBtn.classList.add('hidden');
         if (loginMsgArea) loginMsgArea.classList.remove('hidden');
     }
 }
@@ -338,6 +341,8 @@ function setupUIListeners() {
     
     document.getElementById('search-input')?.addEventListener('input', (e) => renderEntries(e.target.value));
     document.getElementById('refresh-btn')?.addEventListener('click', () => syncFromDrive());
+    // 글 작성 화면에서도 수동 동기화 가능하도록
+    document.getElementById('write-sync-btn')?.addEventListener('click', () => syncFromDrive());
 
     // --- MS Word 스타일 글자 크기 컨트롤 ---
     const FONT_SIZE_PRESETS = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72];

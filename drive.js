@@ -448,9 +448,12 @@ async function checkAuthAndSync(callback) {
 }
 
 function toggleSpinners(active) {
-    const listBtn = document.getElementById('refresh-btn');
-    if (active) { if(listBtn) listBtn.classList.add('rotating'); } 
-    else { if(listBtn) listBtn.classList.remove('rotating'); }
+    const btns = [document.getElementById('refresh-btn'), document.getElementById('write-sync-btn')];
+    btns.forEach(btn => {
+        if (!btn) return;
+        if (active) btn.classList.add('rotating');
+        else btn.classList.remove('rotating');
+    });
 }
 
 export async function saveToDrive() {
