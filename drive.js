@@ -1,7 +1,7 @@
 import { GOOGLE_CONFIG, APP_FOLDER_NAME, DB_FILE_NAME } from './config.js';
 import { state, saveCategoriesToLocal, isReadOnlyView, migrateRootOrder } from './state.js';
 import { renderEntries, renderTabs, renderFolders } from './ui.js';
-import { refreshEditorContent } from './editor.js';
+import { refreshEditorContent, reloadEntryIntoEditor } from './editor.js';
 
 let tokenClient;
 let gapiInited = false;
@@ -500,6 +500,41 @@ export async function saveToDrive(pullOnly = false) {
             }
         }
 
+        // --- 충돌 감지: 편집 중인 글이 다른 기기에서 먼저 수정되었으면 덮어쓰기 전에 확인 ---
+        let skipUpload = pullOnly;
+        if (!pullOnly && cloudData && state.editingId != null) {
+            const writeModal = document.getElementById('write-modal');
+            const editorOpen = writeModal && !writeModal.classList.contains('hidden');
+            if (editorOpen) {
+                const editId = state.editingId;
+                const cloudItem = (cloudData.entries || []).find(e => e && e.id === editId);
+                const localItem = state.entries.find(e => e && e.id === editId);
+                if (cloudItem && localItem) {
+                    const cloudTime = new Date(cloudItem.modifiedAt || cloudItem.timestamp || 0).getTime();
+                    const baseTime = state.editBaseModifiedAt || 0;
+                    const differs = cloudItem.body !== localItem.body
+                        || cloudItem.title !== localItem.title
+                        || cloudItem.subtitle !== localItem.subtitle;
+                    // 내가 편집을 시작한 버전보다 클라우드가 더 최신이고 내용도 다르면 충돌
+                    if (cloudTime > baseTime && differs) {
+                        const overwrite = confirm('이 글이 다른 기기에서 먼저 수정되었습니다.\n\n[확인] 내 변경 내용으로 덮어쓰기\n[취소] 다른 기기의 내용 불러오기 (내 변경은 취소됩니다)');
+                        if (overwrite) {
+                            // 내 버전이 병합에서 이기도록 수정 시각을 최신으로 갱신
+                            localItem.modifiedAt = new Date().toISOString();
+                            state.editBaseModifiedAt = new Date(localItem.modifiedAt).getTime();
+                        } else {
+                            // 다른 기기 내용 채택 → 로컬을 클라우드 버전으로 교체하고 이번엔 업로드 생략
+                            const idx = state.entries.findIndex(e => e && e.id === editId);
+                            if (idx !== -1) state.entries[idx] = cloudItem;
+                            state.editBaseModifiedAt = cloudTime;
+                            reloadEntryIntoEditor(cloudItem);
+                            skipUpload = true;
+                        }
+                    }
+                }
+            }
+        }
+
         if (cloudData) {
             state.entries = mergeEntries(state.entries, cloudData.entries || []);
             const mergedCats = mergeCategories(state, cloudData);
@@ -526,11 +561,16 @@ export async function saveToDrive(pullOnly = false) {
             refreshEditorContent();
         }
 
-        // pullOnly: 다른 기기 변경분만 받아오고 업로드는 생략 (주기 폴링용)
-        if (!pullOnly) {
+        // pullOnly(주기 폴링) 또는 충돌 시 '다른 기기 내용 불러오기'를 택한 경우 업로드 생략
+        if (!skipUpload) {
             const uploadRes = await uploadToDrive(folderId, fileMeta ? fileMeta.id : null);
             if (uploadRes && uploadRes.result) {
                 lastCloudModifiedTime = uploadRes.result.modifiedTime;
+            }
+            // 편집 중인 글의 충돌 기준 시각을 방금 올린 버전으로 갱신 (다음 저장에서 오탐 방지)
+            if (state.editingId != null) {
+                const cur = state.entries.find(e => e && e.id === state.editingId);
+                if (cur) state.editBaseModifiedAt = new Date(cur.modifiedAt || cur.timestamp || 0).getTime();
             }
         }
     };

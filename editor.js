@@ -1335,9 +1335,10 @@ export function openEditor(isEdit, entryData) {
     document.getElementById('display-category').innerText = catName; document.getElementById('display-date').innerText = entryData ? entryData.date : new Date().toLocaleDateString('ko-KR');
     const editTitle = document.getElementById('edit-title'), editSubtitle = document.getElementById('edit-subtitle'), editBody = document.getElementById('editor-body');
     
-    if(isEdit && entryData) { 
-        state.editingId = entryData.id; 
-        editTitle.value = entryData.title || ''; 
+    if(isEdit && entryData) {
+        state.editingId = entryData.id;
+        state.editBaseModifiedAt = new Date(entryData.modifiedAt || entryData.timestamp || 0).getTime(); // 충돌 감지 기준
+        editTitle.value = entryData.title || '';
         editSubtitle.value = entryData.subtitle || ''; 
         editBody.innerHTML = sanitizeEntryHtml(entryData.body || '');
         linkifyContents(editBody, true);
@@ -1346,9 +1347,10 @@ export function openEditor(isEdit, entryData) {
         state.currentFontSize = entryData.fontSize || 16;
         applyFontStyle(state.currentFontFamily, state.currentFontSize); 
     }
-    else { 
-        state.editingId = Date.now().toString(); 
-        editTitle.value = ''; editSubtitle.value = ''; editBody.innerHTML = ''; 
+    else {
+        state.editingId = Date.now().toString();
+        state.editBaseModifiedAt = Date.now(); // 새 글: 충돌 대상 없음
+        editTitle.value = ''; editSubtitle.value = ''; editBody.innerHTML = '';
         state.currentFontFamily = 'Pretendard';
         state.currentFontSize = 16;
         applyFontStyle('Pretendard', 16); 
@@ -1364,6 +1366,23 @@ export function openEditor(isEdit, entryData) {
     
     // 초기 상태 저장 (Undo 히스토리 시작점)
     saveInitialState();
+}
+
+// 충돌 해소 시 다른 기기의 내용을 에디터에 강제로 다시 불러온다 (포커스 여부와 무관하게 교체)
+export function reloadEntryIntoEditor(entry) {
+    const writeModal = document.getElementById('write-modal');
+    if (!writeModal || writeModal.classList.contains('hidden') || !entry) return;
+    const editTitle = document.getElementById('edit-title'), editSubtitle = document.getElementById('edit-subtitle'), editBody = document.getElementById('editor-body');
+    if (editTitle) editTitle.value = entry.title || '';
+    if (editSubtitle) editSubtitle.value = entry.subtitle || '';
+    if (editBody) {
+        editBody.innerHTML = sanitizeEntryHtml(entry.body || '');
+        linkifyContents(editBody, true);
+        setupTableWrapperScroll(editBody);
+    }
+    state.editingId = entry.id;
+    state.editBaseModifiedAt = new Date(entry.modifiedAt || entry.timestamp || 0).getTime();
+    lastLocalEditTime = 0; // 외부 내용으로 교체했으므로 로컬 편집 보호창 해제
 }
 
 export function refreshEditorContent() {
