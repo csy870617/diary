@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import { saveEntry } from './data.js';
-import { saveToDrive } from './drive.js';
+import { saveToDrive, scheduleCloudSync, flushCloudSync } from './drive.js';
 import { openModal } from './ui.js';
 import { setupLinkPreservation, autoLink } from './utils.js';
 
@@ -327,8 +327,8 @@ export async function triggerAutoSave() {
         const editBody = document.getElementById('editor-body');
         if (!editBody || (state.currentViewMode !== 'default' && state.currentViewMode !== 'book-edit')) return;
         try {
-            await saveEntry();
-            if (window.gapi && gapi.client && gapi.client.getToken()) await saveToDrive();
+            await saveEntry(); // 로컬에는 즉시 저장
+            if (window.gapi && gapi.client && gapi.client.getToken()) scheduleCloudSync(); // 클라우드 업로드는 묶어서 전송
         } catch (err) {
             console.error('자동 저장 실패:', err);
         }
@@ -1396,7 +1396,10 @@ export function toggleViewMode(mode) {
     if (wasEditable && !willBeEditable && autoSaveTimer) {
         clearTimeout(autoSaveTimer);
         autoSaveTimer = null;
-        saveEntry().catch(err => console.error('자동 저장 실패:', err));
+        // 즉시 로컬 저장 후, 대기 중인 클라우드 업로드도 바로 전송 (편집 종료 시점 → 다른 기기 반영 보장)
+        saveEntry()
+            .then(() => { flushCloudSync(); })
+            .catch(err => console.error('자동 저장 실패:', err));
     }
     state.currentViewMode = mode;
     const btnReadOnly = document.getElementById('btn-readonly'), btnBookMode = document.getElementById('btn-bookmode');
