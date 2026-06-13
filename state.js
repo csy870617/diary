@@ -20,6 +20,7 @@ export const state = {
     isLoading: true,
     isEditMode: false,
     editingId: null,
+    editBaseModifiedAt: 0, // 편집 시작 시점의 글 수정시각 (다른 기기 충돌 감지 기준)
     currentFontFamily: 'Pretendard',
     currentFontSize: 16, // 기본값 16
     activeColorMode: 'foreColor',
