@@ -456,9 +456,9 @@ function toggleSpinners(active) {
     });
 }
 
-export async function saveToDrive() {
-    if (localStorage.getItem('is_faith_logged_in') !== 'true') return; 
-    if (isSyncing) { pendingSync = true; return; }
+export async function saveToDrive(pullOnly = false) {
+    if (localStorage.getItem('is_faith_logged_in') !== 'true') return;
+    if (isSyncing) { if (!pullOnly) pendingSync = true; return; }
 
     const isValid = await ensureValidToken(true);
     if (!isValid) {
@@ -526,9 +526,12 @@ export async function saveToDrive() {
             refreshEditorContent();
         }
 
-        const uploadRes = await uploadToDrive(folderId, fileMeta ? fileMeta.id : null);
-        if (uploadRes && uploadRes.result) {
-            lastCloudModifiedTime = uploadRes.result.modifiedTime;
+        // pullOnly: 다른 기기 변경분만 받아오고 업로드는 생략 (주기 폴링용)
+        if (!pullOnly) {
+            const uploadRes = await uploadToDrive(folderId, fileMeta ? fileMeta.id : null);
+            if (uploadRes && uploadRes.result) {
+                lastCloudModifiedTime = uploadRes.result.modifiedTime;
+            }
         }
     };
 
@@ -567,7 +570,30 @@ export async function saveToDrive() {
     }
 }
 
-export async function syncFromDrive() { await saveToDrive(); }
+export async function syncFromDrive(pullOnly = false) { await saveToDrive(pullOnly); }
+
+// 클라우드 업로드를 묶어서(디바운스) 보내기 위한 스케줄러.
+// 로컬 저장은 즉시 하되, Drive 업로드는 입력이 멈춘 뒤 한 번만 전송해 전체 파일 반복 업로드를 줄인다.
+let cloudSyncTimer = null;
+const CLOUD_SYNC_DELAY = 5000;
+
+export function scheduleCloudSync(delay = CLOUD_SYNC_DELAY) {
+    if (localStorage.getItem('is_faith_logged_in') !== 'true') return;
+    if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
+    cloudSyncTimer = setTimeout(() => {
+        cloudSyncTimer = null;
+        saveToDrive(); // 병합 + 업로드 (다른 기기 변경분도 함께 반영)
+    }, delay);
+}
+
+// 대기 중인 클라우드 업로드를 즉시 전송 (탭이 백그라운드로 가거나 닫히기 직전 호출 → 다른 기기 동기화 보장)
+export function flushCloudSync() {
+    if (!cloudSyncTimer) return null;
+    clearTimeout(cloudSyncTimer);
+    cloudSyncTimer = null;
+    if (localStorage.getItem('is_faith_logged_in') !== 'true') return null;
+    return saveToDrive();
+}
 
 async function uploadToDrive(folderId, fileId) {
     const finalData = {

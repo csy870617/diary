@@ -3,7 +3,7 @@ import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntr
 import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, renameFolderAction, deleteFolderAction, openFolderAssignModal, createFolderFromAssignModal, addSubfolderAction, closeFolderPopup, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort } from './ui.js';
 import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize } from './editor.js';
 import { setupAuthListeners } from './auth.js';
-import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, ensureTokenOnResume, startKeepAlive } from './drive.js';
+import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, flushCloudSync, ensureTokenOnResume, startKeepAlive } from './drive.js';
 import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, setTTSStart, setTTSEnd, resetTTSRange, playSelection, updateSpeedDisplay, updatePitchDisplay, updateGapDisplay, initTTS, updateTTSRange, seekTTSByPercent, saveTTSVoice } from './tts.js';
 
 window.addNewCategory = addNewCategory;
@@ -114,7 +114,8 @@ function init() {
                     if (writeModal && !writeModal.classList.contains('hidden')) return;
                     if (!document.hidden && localStorage.getItem('is_faith_logged_in') === 'true') {
                         const valid = await ensureTokenOnResume();
-                        if (valid) syncFromDrive();
+                        // 주기 폴링은 다른 기기 변경분만 받아오는 pull 전용 (불필요한 전체 재업로드 방지)
+                        if (valid) syncFromDrive(true);
                     }
                 }, 20000);
             }
@@ -165,8 +166,12 @@ function init() {
     window.addEventListener('focus', handleResume);
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') handleResume();
+        // 백그라운드로 전환되기 직전, 대기 중인 클라우드 업로드를 즉시 전송 → 다른 기기에서 최신 상태 확인 가능
+        else flushCloudSync();
     });
     window.addEventListener('online', handleResume);
+    // 탭/창을 닫거나 떠날 때도 미전송 변경분을 즉시 업로드 (모바일에서 신뢰성 높음)
+    window.addEventListener('pagehide', () => { flushCloudSync(); });
 
     // 사용자 활동 감지 → 토큰 만료 임박 시 자동 갱신 (페이지 활성 상태에서 로그아웃 방지)
     let lastActivityRefresh = 0;
