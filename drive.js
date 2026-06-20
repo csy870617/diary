@@ -233,9 +233,9 @@ export async function ensureTokenOnResume() {
     return false;
 }
 
-export function initGoogleDrive(callback) {
+export function initGoogleDrive(callback, onReady) {
     if (typeof gapi === 'undefined' || typeof google === 'undefined' || !google.accounts) {
-        setTimeout(() => initGoogleDrive(callback), 100);
+        setTimeout(() => initGoogleDrive(callback, onReady), 100);
         return;
     }
 
@@ -257,7 +257,7 @@ export function initGoogleDrive(callback) {
                     // 토큰이 아직 유효 → 팝업 없이 바로 사용
                     gapi.client.setToken({ access_token: storedToken });
                     startKeepAlive();
-                    await checkAuthAndSync(callback);
+                    await checkAuthAndSync(callback, onReady);
                     return;
                 }
                 // 토큰 만료 → silent refresh 시도 (팝업 없이 자동 갱신)
@@ -277,7 +277,7 @@ export function initGoogleDrive(callback) {
                     const refreshed = await silentTokenRefreshWithRetry();
                     if (refreshed) {
                         startKeepAlive();
-                        await checkAuthAndSync(callback);
+                        await checkAuthAndSync(callback, onReady);
                         if (window.onAuthSuccess) window.onAuthSuccess();
                     } else {
                         // silent refresh 실패 → 만료된 토큰만 제거
@@ -315,7 +315,7 @@ export function initGoogleDrive(callback) {
         }
         saveTokenInfo(resp);
         startKeepAlive();
-        await checkAuthAndSync(callback);
+        await checkAuthAndSync(callback, onReady);
         if (window.onAuthSuccess) window.onAuthSuccess(); // auth.js 연동
     };
 
@@ -360,12 +360,18 @@ export async function handleSignoutClick(callback) {
     const hasGapi = () => typeof gapi !== 'undefined' && !!gapi.client;
     // 로그아웃 전 마지막 동기화 시도 (진행 중인 동기화는 최대 10초까지 완료 대기)
     try {
+        // 대기 중인 디바운스 업로드가 있으면 먼저 즉시 전송
+        if (cloudSyncTimer) { clearTimeout(cloudSyncTimer); cloudSyncTimer = null; }
         if (currentSyncPromise) {
             await Promise.race([currentSyncPromise, new Promise(r => setTimeout(r, 10000))]);
         }
         const token = hasGapi() ? gapi.client.getToken() : null;
         if (token) {
             await saveToDrive();
+            // 진행 중이던 동기화 때문에 위 호출이 건너뛰어졌으면(pendingSync) 완료까지 한 번 더 대기
+            if (currentSyncPromise) {
+                await Promise.race([currentSyncPromise, new Promise(r => setTimeout(r, 10000))]);
+            }
         }
     } catch(e) {
         console.warn("로그아웃 전 동기화 실패:", e);
@@ -390,7 +396,7 @@ export async function handleSignoutClick(callback) {
     if(callback) callback();
 }
 
-async function checkAuthAndSync(callback) {
+async function checkAuthAndSync(callback, onReady) {
     if (!gapi.client.getToken()) {
         if(callback) callback(false);
         return;
@@ -445,6 +451,8 @@ async function checkAuthAndSync(callback) {
     } catch (syncErr) {
         console.error("초기 동기화 실패:", syncErr);
     }
+    // 초기 클라우드 병합 이후에만 실행 (예: 오래된 휴지통 정리 — stale 로컬로 영구삭제 전파 방지)
+    if (onReady) { try { onReady(); } catch (e) { console.error("초기 동기화 후 처리 실패:", e); } }
 }
 
 function toggleSpinners(active) {
@@ -456,7 +464,7 @@ function toggleSpinners(active) {
     });
 }
 
-export async function saveToDrive(pullOnly = false) {
+export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
     if (localStorage.getItem('is_faith_logged_in') !== 'true') return;
     if (isSyncing) { if (!pullOnly) pendingSync = true; return; }
 
@@ -470,6 +478,9 @@ export async function saveToDrive(pullOnly = false) {
     const runId = ++syncRunId;
     isSyncing = true;
     toggleSpinners(true);
+
+    // 전체 동기화가 시작되면 대기 중인 디바운스 업로드는 이 실행에 포함되므로 취소 (중복 업로드 방지)
+    if (!pullOnly && cloudSyncTimer) { clearTimeout(cloudSyncTimer); cloudSyncTimer = null; }
 
     let resolveRun;
     const myPromise = new Promise(r => { resolveRun = r; });
@@ -500,28 +511,40 @@ export async function saveToDrive(pullOnly = false) {
             }
         }
 
-        // --- 충돌 감지: 편집 중인 글이 다른 기기에서 먼저 수정되었으면 덮어쓰기 전에 확인 ---
+        // 편집 중인 글이 편집 가능한 모드로 열려 있는지 (이 글은 동기화로 덮어쓰지 않도록 보호)
+        const writeModalEl = document.getElementById('write-modal');
+        const editorOpen = writeModalEl && !writeModalEl.classList.contains('hidden');
+        const editableMode = state.currentViewMode === 'default' || state.currentViewMode === 'book-edit';
+        const editingActive = editorOpen && editableMode && state.editingId != null;
+
+        // --- 충돌 감지: 편집 중인 글이 다른 기기에서 먼저 수정되었으면 처리 ---
         let skipUpload = pullOnly;
-        if (!pullOnly && cloudData && state.editingId != null) {
-            const writeModal = document.getElementById('write-modal');
-            const editorOpen = writeModal && !writeModal.classList.contains('hidden');
-            if (editorOpen) {
-                const editId = state.editingId;
-                const cloudItem = (cloudData.entries || []).find(e => e && e.id === editId);
-                const localItem = state.entries.find(e => e && e.id === editId);
-                if (cloudItem && localItem) {
-                    const cloudTime = new Date(cloudItem.modifiedAt || cloudItem.timestamp || 0).getTime();
-                    const baseTime = state.editBaseModifiedAt || 0;
-                    const differs = cloudItem.body !== localItem.body
-                        || cloudItem.title !== localItem.title
-                        || cloudItem.subtitle !== localItem.subtitle;
-                    // 내가 편집을 시작한 버전보다 클라우드가 더 최신이고 내용도 다르면 충돌
-                    if (cloudTime > baseTime && differs) {
+        if (!pullOnly && cloudData && editingActive) {
+            const editId = state.editingId;
+            const cloudItem = (cloudData.entries || []).find(e => e && e.id === editId);
+            const localItem = state.entries.find(e => e && e.id === editId);
+            if (cloudItem && localItem) {
+                const cloudTime = new Date(cloudItem.modifiedAt || cloudItem.timestamp || 0).getTime();
+                const baseTime = state.editBaseModifiedAt || 0;
+                const differs = cloudItem.body !== localItem.body
+                    || cloudItem.title !== localItem.title
+                    || cloudItem.subtitle !== localItem.subtitle;
+                // 내가 편집을 시작한 버전보다 클라우드가 더 최신이고 내용도 다르면 충돌
+                if (cloudTime > baseTime && differs) {
+                    if (promptOnConflict) {
+                        // confirm()이 동기적으로 블로킹되는 동안 워치독이 오발동하지 않도록 잠시 해제
+                        if (syncTimeoutTimer) { clearTimeout(syncTimeoutTimer); syncTimeoutTimer = null; }
                         const overwrite = confirm('이 글이 다른 기기에서 먼저 수정되었습니다.\n\n[확인] 내 변경 내용으로 덮어쓰기\n[취소] 다른 기기의 내용 불러오기 (내 변경은 취소됩니다)');
-                        if (overwrite) {
-                            // 내 버전이 병합에서 이기도록 수정 시각을 최신으로 갱신
+                        // 워치독 재무장
+                        syncTimeoutTimer = setTimeout(() => {
+                            if (runId === syncRunId && isSyncing) { isSyncing = false; toggleSpinners(false); }
+                        }, 30000);
+                        if (runId !== syncRunId) {
+                            // confirm 동안 다른 실행이 점유 → 이번 업로드는 포기 (중복 업로드 방지)
+                            skipUpload = true;
+                        } else if (overwrite) {
+                            // 내 버전이 병합에서 이기도록 수정 시각만 최신으로 (기준시각은 업로드 성공 후 갱신)
                             localItem.modifiedAt = new Date().toISOString();
-                            state.editBaseModifiedAt = new Date(localItem.modifiedAt).getTime();
                         } else {
                             // 다른 기기 내용 채택 → 로컬을 클라우드 버전으로 교체하고 이번엔 업로드 생략
                             const idx = state.entries.findIndex(e => e && e.id === editId);
@@ -530,13 +553,18 @@ export async function saveToDrive(pullOnly = false) {
                             reloadEntryIntoEditor(cloudItem);
                             skipUpload = true;
                         }
+                    } else {
+                        // 자동저장/백그라운드 등: 묻지 않고 업로드 보류 (양쪽 보존, 다음 명시적 저장에서 확인)
+                        skipUpload = true;
                     }
                 }
             }
         }
 
         if (cloudData) {
-            state.entries = mergeEntries(state.entries, cloudData.entries || []);
+            // 편집 중인 글은 병합으로 덮어쓰지 않도록 보호 (충돌은 확인창으로만 해소)
+            const protectedId = editingActive ? state.editingId : null;
+            state.entries = mergeEntries(state.entries, cloudData.entries || [], protectedId);
             const mergedCats = mergeCategories(state, cloudData);
             state.allCategories = mergedCats.categories;
             state.categoryOrder = mergedCats.order;
@@ -610,7 +638,7 @@ export async function saveToDrive(pullOnly = false) {
     }
 }
 
-export async function syncFromDrive(pullOnly = false) { await saveToDrive(pullOnly); }
+export async function syncFromDrive(pullOnly = false, promptOnConflict = false) { await saveToDrive(pullOnly, promptOnConflict); }
 
 // 클라우드 업로드를 묶어서(디바운스) 보내기 위한 스케줄러.
 // 로컬 저장은 즉시 하되, Drive 업로드는 입력이 멈춘 뒤 한 번만 전송해 전체 파일 반복 업로드를 줄인다.
@@ -622,17 +650,19 @@ export function scheduleCloudSync(delay = CLOUD_SYNC_DELAY) {
     if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
     cloudSyncTimer = setTimeout(() => {
         cloudSyncTimer = null;
-        saveToDrive(); // 병합 + 업로드 (다른 기기 변경분도 함께 반영)
+        // 자동저장 업로드는 충돌 시 묻지 않고 보류 (다음 명시적 저장에서 확인)
+        saveToDrive(false, false).catch(err => console.error('자동 동기화 실패:', err));
     }, delay);
 }
 
 // 대기 중인 클라우드 업로드를 즉시 전송 (탭이 백그라운드로 가거나 닫히기 직전 호출 → 다른 기기 동기화 보장)
-export function flushCloudSync() {
+// promptOnConflict: 명시적 동작(편집 종료 등)에서만 충돌 확인창을 띄움. 언로드/백그라운드 flush는 false.
+export function flushCloudSync(promptOnConflict = false) {
     if (!cloudSyncTimer) return null;
     clearTimeout(cloudSyncTimer);
     cloudSyncTimer = null;
     if (localStorage.getItem('is_faith_logged_in') !== 'true') return null;
-    return saveToDrive();
+    return saveToDrive(false, promptOnConflict).catch(err => console.error('동기화 실패:', err));
 }
 
 async function uploadToDrive(folderId, fileId) {
@@ -665,20 +695,23 @@ async function uploadToDrive(folderId, fileId) {
     });
 }
 
-function mergeEntries(localList, cloudList) {
+function mergeEntries(localList, cloudList, protectedId = null) {
     const entryMap = new Map();
     cloudList.forEach(item => { if(item && item.id) entryMap.set(item.id, item); });
     localList.forEach(localItem => {
         if(!localItem || !localItem.id) return;
         const cloudItem = entryMap.get(localItem.id);
-        if (!cloudItem) { entryMap.set(localItem.id, localItem); } 
+        if (!cloudItem) { entryMap.set(localItem.id, localItem); }
+        else if (localItem.id === protectedId) { entryMap.set(localItem.id, localItem); } // 편집 중인 글은 항상 로컬 유지
         else {
             const localTime = new Date(localItem.modifiedAt || localItem.timestamp || 0).getTime();
             const cloudTime = new Date(cloudItem.modifiedAt || cloudItem.timestamp || 0).getTime();
             if (localTime >= cloudTime) entryMap.set(localItem.id, localItem);
         }
     });
-    return Array.from(entryMap.values()).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    // timestamp 누락 항목에서 NaN 정렬이 깨지지 않도록 modifiedAt·0으로 폴백
+    return Array.from(entryMap.values()).sort((a, b) =>
+        (new Date(b.timestamp || b.modifiedAt || 0).getTime() || 0) - (new Date(a.timestamp || a.modifiedAt || 0).getTime() || 0));
 }
 
 function mergeCategories(localState, cloudData) {

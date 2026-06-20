@@ -1383,11 +1383,18 @@ export function reloadEntryIntoEditor(entry) {
     state.editingId = entry.id;
     state.editBaseModifiedAt = new Date(entry.modifiedAt || entry.timestamp || 0).getTime();
     lastLocalEditTime = 0; // 외부 내용으로 교체했으므로 로컬 편집 보호창 해제
+    // 본문을 통째로 교체했으므로 실행취소 히스토리를 새로 시작 (이전 로컬 편집 복원 방지)
+    saveInitialState();
+    // 책 모드였다면 레이아웃·페이지 내비를 다시 계산
+    if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') {
+        updateBookLayout();
+        updateBookNav();
+    }
 }
 
 export function refreshEditorContent() {
     const writeModal = document.getElementById('write-modal');
-    if (writeModal.classList.contains('hidden') || !state.editingId) return;
+    if (!writeModal || writeModal.classList.contains('hidden') || !state.editingId) return;
     // 최근 로컬 편집 후 5초 이내이면 동기화로 인한 덮어쓰기 방지
     if (Date.now() - lastLocalEditTime < 5000) return;
     // 표 편집 모달이 열려있으면 덮어쓰기 방지
@@ -1396,11 +1403,19 @@ export function refreshEditorContent() {
     const latestEntry = state.entries.find(e => e.id === state.editingId);
     if (!latestEntry) return;
     const editTitle = document.getElementById('edit-title'), editSubtitle = document.getElementById('edit-subtitle'), editBody = document.getElementById('editor-body');
+    if (!editTitle || !editSubtitle || !editBody) return;
     const isEditableMode = state.currentViewMode === 'default' || state.currentViewMode === 'book-edit';
     if (!isEditableMode || document.activeElement !== editBody) {
         if (editTitle.value !== latestEntry.title) editTitle.value = latestEntry.title || '';
         if (editSubtitle.value !== latestEntry.subtitle) editSubtitle.value = latestEntry.subtitle || '';
-        if (editBody.innerHTML !== latestEntry.body) { editBody.innerHTML = sanitizeEntryHtml(latestEntry.body || ''); if (!isEditableMode) linkifyContents(editBody); setupTableWrapperScroll(editBody); if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') updateBookNav(); }
+        // 편집 가능한 모드에서는 본문을 자동 교체하지 않음 (편집 중인 글 보호 — 충돌은 확인창으로만 해소)
+        // 책 모드에서는 정리된 형태로 비교해 불필요한 재설정(커서/스크롤 흔들림) 방지
+        if (!isEditableMode && getCleanBodyHtml(editBody) !== latestEntry.body) {
+            editBody.innerHTML = sanitizeEntryHtml(latestEntry.body || '');
+            linkifyContents(editBody);
+            setupTableWrapperScroll(editBody);
+            if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') updateBookNav();
+        }
     }
 }
 
@@ -1416,8 +1431,9 @@ export function toggleViewMode(mode) {
         clearTimeout(autoSaveTimer);
         autoSaveTimer = null;
         // 즉시 로컬 저장 후, 대기 중인 클라우드 업로드도 바로 전송 (편집 종료 시점 → 다른 기기 반영 보장)
+        // 편집 종료는 의도된 동작이므로 충돌 시 확인창 표시
         saveEntry()
-            .then(() => { flushCloudSync(); })
+            .then(() => { flushCloudSync(true); })
             .catch(err => console.error('자동 저장 실패:', err));
     }
     state.currentViewMode = mode;
@@ -1962,7 +1978,10 @@ export function mergeCells() {
     
     firstCell.innerHTML = mergedContent || '<br>';
     firstCell.classList.remove('selected-cell');
-    
+
+    // 병합 후 셀이 하나도 남지 않은 행은 제거 (이후 행/열 편집 인덱스 어긋남 방지)
+    Array.from(table.rows).forEach(row => { if (row.cells.length === 0) row.remove(); });
+
     // 선택 해제
     clearCellSelection();
     focusCell(firstCell);
