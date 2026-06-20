@@ -270,12 +270,13 @@ function setupListeners() {
     window.addEventListener('popstate', async () => {
         stopTTS(); document.getElementById('tts-panel')?.classList.add('hidden'); document.getElementById('write-modal')?.classList.remove('tts-open');
         const writeModal = document.getElementById('write-modal');
-        if (writeModal && !writeModal.classList.contains('hidden') && !state.isShareView) {
-            await saveEntry();
-            // 닫기 버튼과 동일하게 Drive에도 저장 (편집 종료는 의도된 동작이므로 충돌 시 확인창)
-            if (navigator.onLine && window.gapi?.client?.getToken()) await saveToDrive(false, true);
+        const wasEditing = writeModal && !writeModal.classList.contains('hidden') && !state.isShareView;
+        if (wasEditing) await saveEntry(); // 로컬 저장(빠름)
+        closeAllModals(false); // 목록으로 즉시 나가기
+        // Drive 동기화는 백그라운드로 (UI 지연 방지)
+        if (wasEditing && navigator.onLine && window.gapi?.client?.getToken()) {
+            saveToDrive().catch(err => console.error('동기화 실패:', err));
         }
-        closeAllModals(false);
         if (window.location.search.includes('share')) {
             window.history.replaceState({}, document.title, window.location.pathname);
             const backBtnText = document.getElementById('back-btn-text');
@@ -613,12 +614,12 @@ function setupUIListeners() {
     document.getElementById('write-btn')?.addEventListener('click', () => openEditor(false));
     document.getElementById('close-write-btn')?.addEventListener('click', async () => {
         stopTTS(); document.getElementById('tts-panel')?.classList.add('hidden'); document.getElementById('write-modal')?.classList.remove('tts-open');
-        // 닫기 전에 저장+동기화 (모달이 열려 있어야 충돌 확인창이 동작)
-        if (!state.isShareView) {
-            await saveEntry();
-            if (navigator.onLine && window.gapi?.client?.getToken()) await saveToDrive(false, true);
+        if (!state.isShareView) await saveEntry(); // 로컬 저장(빠름)
+        closeAllModals(true); // 목록으로 즉시 나가기
+        // Drive 동기화는 백그라운드로 (UI 지연 방지)
+        if (!state.isShareView && navigator.onLine && window.gapi?.client?.getToken()) {
+            saveToDrive().catch(err => console.error('동기화 실패:', err));
         }
-        closeAllModals(true);
         if (window.location.search.includes('share')) {
             window.history.replaceState({}, document.title, window.location.pathname);
             const backBtnText = document.getElementById('back-btn-text');
