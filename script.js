@@ -93,7 +93,11 @@ function init() {
     loadCategoriesFromLocal();
     loadCategorySortsFromLocal();
     loadDataFromLocal();
-    checkOldTrash();
+    // 휴지통 자동 정리: 로그인 사용자는 첫 클라우드 동기화 후 실행(병합 전 stale 데이터로 영구삭제 전파 방지),
+    // 비로그인(오프라인) 사용자는 지금 실행
+    if (localStorage.getItem('is_faith_logged_in') !== 'true') {
+        checkOldTrash().catch(err => console.error('휴지통 정리 실패:', err));
+    }
     renderFolders();
     renderTabs();
     applyCategorySort();
@@ -101,6 +105,7 @@ function init() {
     renderEntries();
 
     // [중요] 로그인 성공 시 UI를 강제로 업데이트하는 콜백 전달
+    // 두 번째 인자(onReady): 초기 클라우드 동기화 완료 후 휴지통 자동 정리 실행
     initGoogleDrive((isLoggedIn) => {
         updateAuthUI(isLoggedIn);
         if (isLoggedIn) {
@@ -115,7 +120,7 @@ function init() {
                     if (!document.hidden && localStorage.getItem('is_faith_logged_in') === 'true') {
                         const valid = await ensureTokenOnResume();
                         // 주기 폴링은 다른 기기 변경분만 받아오는 pull 전용 (불필요한 전체 재업로드 방지)
-                        if (valid) syncFromDrive(true);
+                        if (valid) syncFromDrive(true).catch(err => console.error('주기 동기화 실패:', err));
                     }
                 }, 20000);
             }
@@ -130,7 +135,7 @@ function init() {
                 if (loginModal) loginModal.classList.remove('hidden');
             }
         }
-    });
+    }, () => { checkOldTrash().catch(err => console.error('휴지통 정리 실패:', err)); });
 
     if (sharedData) {
         try {
@@ -160,7 +165,7 @@ function init() {
         if (isReadOnlyView()) return; // 읽기 전용/책 모드에서는 자동 동기화 안 함
         if (localStorage.getItem('is_faith_logged_in') === 'true') {
             const valid = await ensureTokenOnResume();
-            if (valid) syncFromDrive();
+            if (valid) syncFromDrive().catch(err => console.error('복귀 동기화 실패:', err));
         }
     };
     window.addEventListener('focus', handleResume);
@@ -267,8 +272,8 @@ function setupListeners() {
         const writeModal = document.getElementById('write-modal');
         if (writeModal && !writeModal.classList.contains('hidden') && !state.isShareView) {
             await saveEntry();
-            // 닫기 버튼과 동일하게 Drive에도 저장
-            if (navigator.onLine && window.gapi?.client?.getToken()) await saveToDrive();
+            // 닫기 버튼과 동일하게 Drive에도 저장 (편집 종료는 의도된 동작이므로 충돌 시 확인창)
+            if (navigator.onLine && window.gapi?.client?.getToken()) await saveToDrive(false, true);
         }
         closeAllModals(false);
         if (window.location.search.includes('share')) {
@@ -345,9 +350,10 @@ function setupUIListeners() {
     });
     
     document.getElementById('search-input')?.addEventListener('input', (e) => renderEntries(e.target.value));
-    document.getElementById('refresh-btn')?.addEventListener('click', () => syncFromDrive());
+    // 수동 동기화는 사용자가 의도한 동작이므로 충돌 시 확인창을 띄움
+    document.getElementById('refresh-btn')?.addEventListener('click', () => syncFromDrive(false, true).catch(err => console.error('동기화 실패:', err)));
     // 글 작성 화면에서도 수동 동기화 가능하도록
-    document.getElementById('write-sync-btn')?.addEventListener('click', () => syncFromDrive());
+    document.getElementById('write-sync-btn')?.addEventListener('click', () => syncFromDrive(false, true).catch(err => console.error('동기화 실패:', err)));
 
     // --- MS Word 스타일 글자 크기 컨트롤 ---
     const FONT_SIZE_PRESETS = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72];
@@ -607,9 +613,12 @@ function setupUIListeners() {
     document.getElementById('write-btn')?.addEventListener('click', () => openEditor(false));
     document.getElementById('close-write-btn')?.addEventListener('click', async () => {
         stopTTS(); document.getElementById('tts-panel')?.classList.add('hidden'); document.getElementById('write-modal')?.classList.remove('tts-open');
-        if (!state.isShareView) await saveEntry();
+        // 닫기 전에 저장+동기화 (모달이 열려 있어야 충돌 확인창이 동작)
+        if (!state.isShareView) {
+            await saveEntry();
+            if (navigator.onLine && window.gapi?.client?.getToken()) await saveToDrive(false, true);
+        }
         closeAllModals(true);
-        if (!state.isShareView && navigator.onLine && window.gapi?.client?.getToken()) await saveToDrive();
         if (window.location.search.includes('share')) {
             window.history.replaceState({}, document.title, window.location.pathname);
             const backBtnText = document.getElementById('back-btn-text');
