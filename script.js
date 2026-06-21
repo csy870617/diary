@@ -243,9 +243,11 @@ function updateAuthUI(isLoggedIn) {
 }
 
 function setupListeners() {
+    // 폴더/주제 칩 드래그 정렬: renderFolders()에서도 렌더마다 재부착하지만,
+    // 캐시 전환기(구버전 ui.js) 대비로 여기서도 한 번 부착해 둔다 (_sortable로 중복 방지)
     const folderRow = document.getElementById('folder-row');
-    if (typeof Sortable !== 'undefined' && folderRow) {
-        new Sortable(folderRow, {
+    if (typeof Sortable !== 'undefined' && folderRow && !folderRow._sortable) {
+        folderRow._sortable = new Sortable(folderRow, {
             animation: 150, delay: 200, delayOnTouchOnly: true, touchStartThreshold: 5,
             filter: '.nav-add-btn',
             preventOnFilter: false,

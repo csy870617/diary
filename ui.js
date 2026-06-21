@@ -308,7 +308,31 @@ export function renderFolders() {
     addBtn.onclick = (e) => { e.stopPropagation(); showAddMenu(addBtn); };
     row.appendChild(addBtn);
 
+    initFolderRowSortable(row); // 폴더/주제 칩 드래그 순서 변경 (렌더마다 재부착)
+
     if (popupFolderId) renderFolderPopupContent();
+}
+
+// 루트 폴더/주제 칩의 드래그 순서 변경. 렌더마다 destroy 후 재생성해 항상 동작하도록 보장
+function initFolderRowSortable(row) {
+    if (typeof Sortable === 'undefined' || !row) return;
+    if (row._sortable) { try { row._sortable.destroy(); } catch (e) {} }
+    row._sortable = new Sortable(row, {
+        animation: 150, delay: 200, delayOnTouchOnly: true, touchStartThreshold: 5,
+        filter: '.nav-add-btn',
+        preventOnFilter: false,
+        onEnd: async () => {
+            const newOrder = [];
+            row.querySelectorAll('[data-item-id]').forEach(el => {
+                if (el.dataset.itemId) newOrder.push(el.dataset.itemId);
+            });
+            if (newOrder.length === 0) return;
+            state.rootOrder = newOrder;
+            state.categoryUpdatedAt = new Date().toISOString();
+            saveCategoriesToLocal();
+            await saveToDrive();
+        }
+    });
 }
 
 function buildFolderNavItem(folder) {
