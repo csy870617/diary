@@ -161,7 +161,18 @@ export function renderTrash() {
     });
 }
 
+// 떠 있는 팝업/확장 패널을 모두 닫는다 (화면 전환·바깥 터치 시 호출)
+export function hideTransientPopups() {
+    ['context-menu', 'category-context-menu', 'folder-context-menu', 'add-menu-popup', 'color-palette-popup', 'sticker-palette', 'table-modal'].forEach(id => {
+        getEl(id)?.classList.add('hidden');
+    });
+    getEl('font-size-dropdown')?.classList.remove('show');
+    getEl('tts-settings')?.classList.add('hidden');
+    closeFolderPopup();
+}
+
 export function closeAllModals(goBack = true) {
+    hideTransientPopups();
     const ids = ['write-modal', 'trash-modal', 'login-modal', 'move-modal', 'folder-assign-modal'];
     ids.forEach(id => {
         const el = getEl(id);

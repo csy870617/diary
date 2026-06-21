@@ -1,7 +1,7 @@
 import { state } from './state.js';
 import { saveEntry } from './data.js';
 import { saveToDrive, scheduleCloudSync, flushCloudSync } from './drive.js';
-import { openModal } from './ui.js';
+import { openModal, hideTransientPopups } from './ui.js';
 import { setupLinkPreservation, autoLink } from './utils.js';
 
 let currentSelectedElement = null; 
@@ -1330,6 +1330,7 @@ export function getCleanBodyHtml(bodyEl) {
 }
 
 export function openEditor(isEdit, entryData) {
+    hideTransientPopups(); // 홈 화면에서 열려 있던 팝업/메뉴를 닫고 에디터로 진입
     state.isEditMode = isEdit; const writeModal = document.getElementById('write-modal'); openModal(writeModal); writeModal.scrollTop = 0; currentBookPageIndex = 0; savedRange = null; setupBasicHandling();
     const catName = state.allCategories.find(c => c.id === state.currentCategory)?.name || '기록';
     document.getElementById('display-category').innerText = catName; document.getElementById('display-date').innerText = entryData ? entryData.date : new Date().toLocaleDateString('ko-KR');

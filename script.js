@@ -321,6 +321,18 @@ function setupListeners() {
             && !e.target.closest('.nav-add-btn')) {
             addMenu.classList.add('hidden');
         }
+        // 글자 크기 드롭다운: 콤보 바깥 터치 시 닫기
+        const fsDrop = document.getElementById('font-size-dropdown');
+        if (fsDrop && fsDrop.classList.contains('show') && !e.target.closest('#font-size-combo')) {
+            fsDrop.classList.remove('show');
+        }
+        // TTS 설정 확장 패널: 설정 영역/설정 버튼 바깥 터치 시 닫기
+        const ttsSettings = document.getElementById('tts-settings');
+        if (ttsSettings && !ttsSettings.classList.contains('hidden')
+            && !e.target.closest('#tts-settings')
+            && !e.target.closest('#tts-settings-btn')) {
+            ttsSettings.classList.add('hidden');
+        }
     }, true);
 
     setupAuthListeners();
