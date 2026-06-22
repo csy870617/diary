@@ -608,6 +608,8 @@ function positionFolderPopup() {
 function showAddMenu(anchor) {
     const menu = getEl('add-menu-popup');
     if (!menu) return;
+    // 이미 열려 있으면 같은 버튼을 다시 눌렀을 때 닫기 (토글)
+    if (!menu.classList.contains('hidden')) { menu.classList.add('hidden'); return; }
     closeFolderPopup();
     getEl('context-menu')?.classList.add('hidden');
     getEl('category-context-menu')?.classList.add('hidden');
