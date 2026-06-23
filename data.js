@@ -3,6 +3,11 @@ import { renderEntries, renderTrash, renderFolders, renderTabs } from './ui.js';
 import { saveToDrive } from './drive.js';
 import { getCleanBodyHtml } from './editor.js';
 
+// 같은 밀리초에 여러 번 호출돼도 충돌하지 않도록 임의 접미사를 붙인 ID 생성
+function genEntryId() {
+    return Date.now().toString() + '_' + Math.random().toString(36).slice(2, 7);
+}
+
 function safeLocalSave() {
     try {
         localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
@@ -41,10 +46,10 @@ export async function saveEntry() {
     const subtitle = subtitleEl ? subtitleEl.value : '';
     const nowISO = new Date().toISOString(); 
 
-    // 이미지·표·스티커만 있는 글도 저장되도록 텍스트 외 콘텐츠 존재 여부도 확인
-    if(!title.trim() && !bodyEl.innerText.trim() && !bodyEl.querySelector('img, table')) return;
+    // 이미지·표·스티커만 있는 글도 저장되도록 텍스트 외 콘텐츠 존재 여부도 확인 (소제목만 있어도 저장)
+    if(!title.trim() && !subtitle.trim() && !bodyEl.innerText.trim() && !bodyEl.querySelector('img, table')) return;
 
-    if (!state.editingId) state.editingId = Date.now().toString();
+    if (!state.editingId) state.editingId = genEntryId();
     const index = state.entries.findIndex(e => e.id === state.editingId);
 
     // 핵심 수정: 현재 에디터에 적용된 폰트 정보를 metadata로 명확히 저장
@@ -234,7 +239,7 @@ export async function duplicateEntry(id) {
     if (!original) return;
     const nowISO = new Date().toISOString();
     const newEntry = {
-        ...original, id: Date.now().toString(),
+        ...original, id: genEntryId(),
         title: original.title + " (복사본)",
         timestamp: nowISO, modifiedAt: nowISO, isDeleted: false, isPurged: false
     };

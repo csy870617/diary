@@ -1384,6 +1384,8 @@ export function reloadEntryIntoEditor(entry) {
     state.editingId = entry.id;
     state.editBaseModifiedAt = new Date(entry.modifiedAt || entry.timestamp || 0).getTime();
     lastLocalEditTime = 0; // 외부 내용으로 교체했으므로 로컬 편집 보호창 해제
+    // 대기 중이던 자동저장이 방금 불러온 내용을 새 타임스탬프로 되올리지 않도록 취소
+    if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null; }
     // 본문을 통째로 교체했으므로 실행취소 히스토리를 새로 시작 (이전 로컬 편집 복원 방지)
     saveInitialState();
     // 책 모드였다면 레이아웃·페이지 내비를 다시 계산

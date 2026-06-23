@@ -575,6 +575,16 @@ export function seekTTSByPercent(percent) {
 
 function splitChunks(text, max) {
     const chunks = [];
+    // 구두점으로도 나눌 수 없는 긴 조각은 max 길이로 강제 분할해 Chrome ~15초 컷오프 방지
+    const pushHardSliced = (txt, dots) => {
+        let t = (txt || '').trim();
+        if (!t) return;
+        while (t.length > max) {
+            chunks.push({ text: t.slice(0, max), dots: 0 });
+            t = t.slice(max).trim();
+        }
+        if (t) chunks.push({ text: t, dots });
+    };
     // 문장 단위로 분리: "내용 + 종결부호(.!?。 연속 허용) 또는 줄바꿈"
     // 연속 마침표(예: "...")는 하나의 청크 끝에 그대로 유지되어 쉼 길이 계산에 사용된다.
     const sentences = text.match(/[^.!?。\n]*(?:[.!?。]+|\n+|$)/g) || [];
@@ -591,13 +601,13 @@ function splitChunks(text, max) {
             let cur = '';
             for (const part of sub) {
                 if ((cur + ' ' + part).length > max && cur) {
-                    chunks.push({ text: cur.trim(), dots: 0 });
+                    pushHardSliced(cur, 0);
                     cur = part;
                 } else {
                     cur += (cur ? ' ' : '') + part;
                 }
             }
-            if (cur.trim()) chunks.push({ text: cur.trim(), dots });
+            if (cur.trim()) pushHardSliced(cur, dots);
         } else {
             chunks.push({ text: trimmed, dots });
         }
