@@ -84,7 +84,8 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .nav-item.folder-nav { color: var(--gray-800); }
 .nav-item.folder-nav.popup-open { background: var(--gray-100); color: var(--gray-900); }
 .nav-item.topic-nav.active { color: var(--gray-900); font-weight: 700; background: var(--active-bg); }
-.nav-item.has-active::after { content: ''; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--active-text, var(--gray-900)); margin-left: 4px; }
+/* 활성 주제를 포함한 폴더: 옆 점 대신 선택된 주제와 동일한 강조(배경+굵게) */
+.nav-item.folder-nav.has-active { color: var(--gray-900); font-weight: 700; background: var(--active-bg); }
 .nav-item.nav-add-btn { color: var(--gray-400); border-style: dashed; border-color: var(--gray-200); padding: 4px 8px; }
 .nav-item.nav-add-btn:hover { color: var(--gray-900); border-color: var(--gray-400); background: transparent; }
 .folder-tab { background: none; border: 1px solid var(--gray-200); border-radius: 20px; padding: 3px 12px; font-size: 12px; font-family: var(--text-sans); color: var(--gray-500); cursor: pointer; display: flex; align-items: center; gap: 4px; white-space: nowrap; flex-shrink: 0; transition: all 0.15s; user-select: none; }
