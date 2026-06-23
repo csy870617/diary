@@ -528,7 +528,10 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
                 const baseTime = state.editBaseModifiedAt || 0;
                 const differs = cloudItem.body !== localItem.body
                     || cloudItem.title !== localItem.title
-                    || cloudItem.subtitle !== localItem.subtitle;
+                    || cloudItem.subtitle !== localItem.subtitle
+                    || !!cloudItem.isDeleted !== !!localItem.isDeleted
+                    || !!cloudItem.isPurged !== !!localItem.isPurged
+                    || cloudItem.category !== localItem.category;
                 // 내가 편집을 시작한 버전보다 클라우드가 더 최신이고 내용도 다르면 충돌
                 if (cloudTime > baseTime && differs) {
                     if (promptOnConflict) {
@@ -543,8 +546,10 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
                             // confirm 동안 다른 실행이 점유 → 이번 업로드는 포기 (중복 업로드 방지)
                             skipUpload = true;
                         } else if (overwrite) {
-                            // 내 버전이 병합에서 이기도록 수정 시각만 최신으로 (기준시각은 업로드 성공 후 갱신)
+                            // 내 버전이 병합에서 이기도록 수정 시각을 최신으로, 기준 시각도 함께 맞춤
+                            // (업로드가 실패해도 로컬과 기준이 어긋나 충돌을 놓치는 일이 없도록)
                             localItem.modifiedAt = new Date().toISOString();
+                            state.editBaseModifiedAt = new Date(localItem.modifiedAt).getTime();
                         } else {
                             // 다른 기기 내용 채택 → 로컬을 클라우드 버전으로 교체하고 이번엔 업로드 생략
                             const idx = state.entries.findIndex(e => e && e.id === editId);

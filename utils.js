@@ -906,7 +906,7 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
                 const table = currentCell.closest('table');
                 if (table) {
                     const parser = new DOMParser();
-                    const doc = parser.parseFromString(html, 'text/html');
+                    const doc = parser.parseFromString(sanitizeExternalHtml(html), 'text/html');
                     const pastedTable = doc.querySelector('table');
 
                     if (pastedTable) {
@@ -934,7 +934,7 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
             // 외부에서 복사한 테이블이 있고 표 밖인 경우 → 새 표로 삽입
             if (html && html.includes('<table') && !currentCell) {
                 const parser = new DOMParser();
-                const doc = parser.parseFromString(html, 'text/html');
+                const doc = parser.parseFromString(sanitizeExternalHtml(html), 'text/html');
                 const pastedTable = doc.querySelector('table');
 
                 if (pastedTable) {

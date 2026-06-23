@@ -304,10 +304,18 @@ function setupListeners() {
         const sliderContainer = document.getElementById('book-slider-container');
         if (sliderContainer && !sliderContainer.classList.contains('hidden') && !sliderContainer.contains(e.target) && !e.target.closest('#page-indicator')) sliderContainer.classList.add('hidden');
 
-        ['context-menu', 'category-context-menu', 'folder-context-menu', 'color-palette-popup', 'sticker-palette', 'table-modal'].forEach(id => {
+        // 컨텍스트 메뉴: 메뉴 바깥 클릭 시 닫기
+        ['context-menu', 'category-context-menu', 'folder-context-menu'].forEach(id => {
             const el = document.getElementById(id);
-            if (el && !el.contains(e.target) && !e.target.closest('.tool-btn') && !e.target.closest('#font-size-input')) el.classList.add('hidden');
+            if (el && !el.contains(e.target)) el.classList.add('hidden');
         });
+        // 색상/스티커/표 팝업: 각자의 트리거 버튼 바깥을 클릭하면 닫기 (다른 도구 버튼 클릭 시에도 닫히도록)
+        const colorPop = document.getElementById('color-palette-popup');
+        if (colorPop && !colorPop.contains(e.target) && !e.target.closest('#toolbar-color-btn') && !e.target.closest('#toolbar-hilite-btn')) colorPop.classList.add('hidden');
+        const stickerPop = document.getElementById('sticker-palette');
+        if (stickerPop && !stickerPop.contains(e.target) && !e.target.closest('#sticker-btn')) stickerPop.classList.add('hidden');
+        const tableModalEl = document.getElementById('table-modal');
+        if (tableModalEl && !tableModalEl.contains(e.target) && !e.target.closest('#toolbar-table-btn') && !e.target.closest('#toolbar-table-edit-btn')) tableModalEl.classList.add('hidden');
 
         const folderPopup = document.getElementById('folder-popup');
         if (folderPopup && !folderPopup.classList.contains('hidden')
