@@ -208,13 +208,18 @@ function attachLongPress(element, onLongPress) {
         state.longPressTimer = setTimeout(() => {
             longPressFired = true;
             const touch = e.touches[0];
-            onLongPress(touch.clientX, touch.clientY);
+            if (touch) onLongPress(touch.clientX, touch.clientY);
         }, 600);
     }, { passive: true });
     const cancelTimer = () => clearTimeout(state.longPressTimer);
     element.addEventListener('touchmove', cancelTimer, { passive: true });
     element.addEventListener('touchcancel', cancelTimer, { passive: true });
-    element.ontouchend = cancelTimer;
+    element.ontouchend = () => {
+        cancelTimer();
+        // 길게 누르기가 발동했다면 뒤따르는 합성 click만 무시하고, click이 안 와도 곧 플래그 해제
+        // (해제하지 않으면 이후 정상 탭이 한 번 먹힐 수 있음)
+        if (longPressFired) setTimeout(() => { longPressFired = false; }, 400);
+    };
     element.addEventListener('click', (e) => {
         if (longPressFired) {
             longPressFired = false;
