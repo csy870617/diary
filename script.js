@@ -1,6 +1,6 @@
 import { state, loadCategoriesFromLocal, saveCategoriesToLocal, isReadOnlyView, loadCategorySortsFromLocal, setCategorySort } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
-import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, renameFolderAction, deleteFolderAction, openFolderAssignModal, createFolderFromAssignModal, addSubfolderAction, closeFolderPopup, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort } from './ui.js';
+import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, renameFolderAction, deleteFolderAction, openFolderAssignModal, createFolderFromAssignModal, addSubfolderAction, closeFolderPopup, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort, bulkDownloadPdf } from './ui.js';
 import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, flushCloudSync, ensureTokenOnResume, startKeepAlive } from './drive.js';
@@ -672,6 +672,7 @@ function setupUIListeners() {
     document.getElementById('select-mode-btn')?.addEventListener('click', toggleSelectMode);
     document.getElementById('bulk-select-all-btn')?.addEventListener('click', selectAllEntries);
     document.getElementById('bulk-move-btn')?.addEventListener('click', openMoveModal);
+    document.getElementById('bulk-pdf-btn')?.addEventListener('click', bulkDownloadPdf);
     document.getElementById('bulk-cancel-btn')?.addEventListener('click', exitSelectMode);
     document.getElementById('close-move-btn')?.addEventListener('click', () => closeAllModals(true));
     document.getElementById('ctx-rename')?.addEventListener('click', renameEntryAction);
