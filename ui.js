@@ -1032,4 +1032,98 @@ function updateBulkBar() {
     if (countEl) countEl.textContent = `${count}개 선택`;
     const moveBtn = getEl('bulk-move-btn');
     if (moveBtn) moveBtn.disabled = count === 0;
+    const pdfBtn = getEl('bulk-pdf-btn');
+    // PDF 생성 중에는 updateBulkBar가 버튼을 다시 활성화하지 않도록 보호
+    if (pdfBtn && !pdfBtn.dataset.busy) pdfBtn.disabled = count === 0;
+}
+
+// 표시 순서와 동일하게 선택된 글들을 정렬해 반환
+function getSelectedEntriesInOrder() {
+    const selected = state.entries.filter(e =>
+        state.selectedEntries.includes(e.id) && !e.isPurged && !e.isDeleted
+    );
+    selected.sort((a, b) => {
+        if (state.currentSortBy === 'title') {
+            const valA = (a.title || '').toLowerCase();
+            const valB = (b.title || '').toLowerCase();
+            if (valA < valB) return state.currentSortOrder === 'asc' ? -1 : 1;
+            if (valA > valB) return state.currentSortOrder === 'asc' ? 1 : -1;
+            return 0;
+        }
+        const timeA = new Date(state.currentSortBy === 'modified' ? (a.modifiedAt || a.timestamp) : a.timestamp).getTime() || 0;
+        const timeB = new Date(state.currentSortBy === 'modified' ? (b.modifiedAt || b.timestamp) : b.timestamp).getTime() || 0;
+        return state.currentSortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+    });
+    return selected;
+}
+
+// 선택한 여러 글을 하나의 PDF로 다운로드 (글마다 새 페이지로 구분)
+export async function bulkDownloadPdf() {
+    if (typeof html2pdf === 'undefined') {
+        alert('PDF 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해주세요.');
+        return;
+    }
+    const selected = getSelectedEntriesInOrder();
+    if (selected.length === 0) return;
+
+    const pdfBtn = getEl('bulk-pdf-btn');
+    if (pdfBtn) {
+        pdfBtn.dataset.busy = '1';
+        pdfBtn.disabled = true;
+        pdfBtn.innerHTML = `<i class="ph ph-spinner" style="animation:spin 1s linear infinite;"></i> 생성 중...`;
+    }
+
+    // 화면 밖에 PDF용 컨테이너를 구성 (A4 폭 기준 794px)
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'position:absolute; left:-9999px; top:0; width:794px; background:#ffffff;';
+
+    selected.forEach((entry, i) => {
+        const page = document.createElement('div');
+        const font = entry.fontFamily || 'Pretendard';
+        // 첫 글을 제외하고 매 글마다 페이지 분리
+        page.style.cssText = `padding:24px 32px; box-sizing:border-box;${i > 0 ? ' page-break-before:always;' : ''}`;
+        page.innerHTML =
+            `<h1 style="font-family:${font}; font-size:26px; font-weight:600; margin:0 0 10px; color:#1a1a1a; word-break:break-all;">${escapeHtml(entry.title)}</h1>`
+            + (entry.subtitle ? `<p style="font-family:${font}; font-size:16px; color:#666; margin:0 0 8px; word-break:break-all;">${escapeHtml(entry.subtitle)}</p>` : '')
+            + `<div style="font-size:13px; color:#999; margin:0 0 18px;">${escapeHtml(entry.date || '')}</div>`
+            + `<div style="font-family:${font}; font-size:16px; line-height:1.8; white-space:pre-wrap; word-break:break-all; overflow-wrap:break-word; color:#1a1a1a;">${entry.body || ''}</div>`;
+        wrapper.appendChild(page);
+    });
+
+    document.body.appendChild(wrapper);
+
+    // html2canvas가 밑줄(text-decoration) 위치를 잘못 그리므로 링크는 border-bottom으로 대체
+    wrapper.querySelectorAll('a').forEach(link => {
+        link.style.textDecoration = 'none';
+        link.style.borderBottom = '1px solid #2563EB';
+        link.style.paddingBottom = '1px';
+    });
+
+    const filename = selected.length === 1
+        ? `${(selected[0].title || '신앙일지').replace(/[\\/:*?"<>|]/g, '_')}.pdf`
+        : `신앙일지_${selected.length}개.pdf`;
+
+    const opt = {
+        margin: 10,
+        filename,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['css', 'legacy'] }
+    };
+
+    try {
+        await html2pdf().set(opt).from(wrapper).save();
+        exitSelectMode();
+    } catch (err) {
+        console.error('PDF 저장 실패', err);
+        alert('PDF 저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
+    } finally {
+        wrapper.remove();
+        if (pdfBtn) {
+            delete pdfBtn.dataset.busy;
+            pdfBtn.innerHTML = `<i class="ph ph-file-pdf"></i> PDF 저장`;
+            updateBulkBar();
+        }
+    }
 }
