@@ -172,17 +172,19 @@ function getMaxOffset(node) {
  */
 function pushToHistory(snapshot) {
     if (!snapshot) return;
-    
+
     // 마지막 스냅샷과 동일하면 추가하지 않음
+    // (대용량 본문은 길이부터 비교해, 타이핑으로 길이가 달라진 일반적인 경우 전체 문자열 비교를 건너뜀)
     if (undoStack.length > 0) {
         const last = undoStack[undoStack.length - 1];
-        if (last.body === snapshot.body && 
-            last.title === snapshot.title && 
-            last.subtitle === snapshot.subtitle) {
+        if (last.title === snapshot.title &&
+            last.subtitle === snapshot.subtitle &&
+            (last.body || '').length === (snapshot.body || '').length &&
+            last.body === snapshot.body) {
             return;
         }
     }
-    
+
     undoStack.push(snapshot);
     if (undoStack.length > MAX_HISTORY) {
         undoStack.shift();
@@ -191,7 +193,7 @@ function pushToHistory(snapshot) {
     while (totalChars > MAX_HISTORY_CHARS && undoStack.length > 1) {
         totalChars -= (undoStack.shift().body || '').length;
     }
-    
+
     // 새로운 변경이 발생하면 redo 스택 초기화
     redoStack = [];
 }
@@ -1312,6 +1314,12 @@ function sanitizeEntryHtml(html) {
  */
 export function getCleanBodyHtml(bodyEl) {
     if (!bodyEl) return '';
+    // 책 모드 흔적(data-book-*)이 없으면 전체 복제 없이 innerHTML을 그대로 사용
+    // (일반 편집 중 매 저장마다 대용량 본문을 깊은 복제하던 비용 제거 → 타이핑 끊김 완화)
+    const hasBookArtifacts = state.currentViewMode === 'book'
+        || state.currentViewMode === 'book-edit'
+        || !!bodyEl.querySelector('[data-book-orig-width]');
+    if (!hasBookArtifacts) return bodyEl.innerHTML;
     const clone = bodyEl.cloneNode(true);
     clone.querySelectorAll('img').forEach(img => {
         if (img.dataset.bookOrigWidth !== undefined) {
