@@ -10,6 +10,7 @@ let selectionBox = null;
 let resizeHandle = null;
 let deleteBtn = null;
 let resizeBtnGroup = null;
+let cropBtn = null;
 let autoSaveTimer = null;
 let isTurningPage = false;    
 let currentBookPageIndex = 0; 
@@ -1725,11 +1726,32 @@ function createSelectionUI() {
                     triggerAutoSave(); 
                 } 
             }; 
-            resizeBtnGroup.appendChild(btn); 
+            resizeBtnGroup.appendChild(btn);
         });
+        // 자르기(다시 자르기) 버튼 — 이미지에서만 표시
+        cropBtn = document.createElement('button');
+        cropBtn.className = 'img-resize-btn img-crop-btn';
+        cropBtn.innerHTML = '<i class="ph ph-crop"></i> 자르기';
+        cropBtn.onclick = () => {
+            const img = currentSelectedElement;
+            if (!img || img.tagName !== 'IMG' || typeof window.openImageCropper !== 'function') return;
+            saveBeforeChange('crop');
+            window.openImageCropper(img.src, (result, wasCropped) => {
+                if (wasCropped && result) {
+                    img.style.height = 'auto'; // 비율이 바뀌었으므로 세로 자동
+                    img.addEventListener('load', () => updateSelectionBox(), { once: true });
+                    img.src = result;
+                    updateSelectionBox();
+                    triggerAutoSave();
+                }
+            });
+        };
+        resizeBtnGroup.appendChild(cropBtn);
         document.body.appendChild(resizeBtnGroup);
     }
     selectionBox.style.display = 'block'; resizeHandle.style.display = 'block'; deleteBtn.style.display = 'flex'; resizeBtnGroup.style.display = 'flex';
+    // 자르기 버튼은 이미지일 때만 노출
+    if (cropBtn) cropBtn.style.display = (currentSelectedElement && currentSelectedElement.tagName === 'IMG') ? 'flex' : 'none';
     
     // 툴바의 표 편집 버튼 표시/숨김
     const toolbarTableEditBtn = document.getElementById('toolbar-table-edit-btn');
@@ -1741,7 +1763,7 @@ function updateSelectionBox() {
     if (!currentSelectedElement || !selectionBox) return;
     const rect = currentSelectedElement.getBoundingClientRect(), scrollTop = window.scrollY, scrollLeft = window.scrollX;
     selectionBox.style.top = (rect.top + scrollTop) + 'px'; selectionBox.style.left = (rect.left + scrollLeft) + 'px'; selectionBox.style.width = rect.width + 'px'; selectionBox.style.height = rect.height + 'px';
-    resizeHandle.style.top = (rect.bottom + scrollTop - 10) + 'px'; resizeHandle.style.left = (rect.right + scrollLeft - 10) + 'px';
+    resizeHandle.style.top = (rect.bottom + scrollTop - 11) + 'px'; resizeHandle.style.left = (rect.right + scrollLeft - 11) + 'px';
     const centerX = rect.left + scrollLeft + rect.width / 2;
     if (currentSelectedElement.tagName === 'TABLE') {
         resizeBtnGroup.style.top = (rect.bottom + scrollTop + 15) + 'px'; resizeBtnGroup.style.left = centerX + 'px';
@@ -1787,17 +1809,23 @@ function startResizeTouch(e) {
     document.addEventListener('touchend', stopResizeTouch);
 }
 
-function resizing(e) { 
-    if (!isResizing || !currentSelectedElement) return; 
-    const deltaX = e.clientX - startX2, newWidth = startWidth2 + deltaX, scaleRatio = newWidth / startWidth2, newHeight = startHeight2 + (e.clientY - startY2); 
-    if (newWidth > 50) { 
-        currentSelectedElement.style.width = newWidth + 'px'; 
-        if (currentSelectedElement.tagName === 'TABLE') { 
-            currentSelectedElement.style.fontSize = (startTableFontSize * scaleRatio) + 'px'; 
-        } 
-    } 
-    if (newHeight > 30) currentSelectedElement.style.height = newHeight + 'px'; 
-    updateSelectionBox(); 
+function resizing(e) {
+    if (!isResizing || !currentSelectedElement) return;
+    const deltaX = e.clientX - startX2, newWidth = startWidth2 + deltaX, scaleRatio = newWidth / startWidth2, newHeight = startHeight2 + (e.clientY - startY2);
+    if (currentSelectedElement.tagName === 'IMG') {
+        // 이미지는 가로만 조절하고 세로는 자동(원본 비율 유지) → 찌그러짐 방지
+        if (newWidth > 40) { currentSelectedElement.style.width = newWidth + 'px'; currentSelectedElement.style.height = 'auto'; }
+        updateSelectionBox();
+        return;
+    }
+    if (newWidth > 50) {
+        currentSelectedElement.style.width = newWidth + 'px';
+        if (currentSelectedElement.tagName === 'TABLE') {
+            currentSelectedElement.style.fontSize = (startTableFontSize * scaleRatio) + 'px';
+        }
+    }
+    if (newHeight > 30) currentSelectedElement.style.height = newHeight + 'px';
+    updateSelectionBox();
 }
 
 function resizingTouch(e) {
@@ -1805,6 +1833,12 @@ function resizingTouch(e) {
     e.preventDefault();
     const touch = e.touches[0];
     const deltaX = touch.clientX - startX2, newWidth = startWidth2 + deltaX, scaleRatio = newWidth / startWidth2, newHeight = startHeight2 + (touch.clientY - startY2);
+    if (currentSelectedElement.tagName === 'IMG') {
+        // 이미지는 가로만 조절하고 세로는 자동(원본 비율 유지)
+        if (newWidth > 40) { currentSelectedElement.style.width = newWidth + 'px'; currentSelectedElement.style.height = 'auto'; }
+        updateSelectionBox();
+        return;
+    }
     if (newWidth > 50) {
         currentSelectedElement.style.width = newWidth + 'px';
         if (currentSelectedElement.tagName === 'TABLE') {
