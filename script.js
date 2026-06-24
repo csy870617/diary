@@ -1,7 +1,7 @@
 import { state, loadCategoriesFromLocal, saveCategoriesToLocal, isReadOnlyView, loadCategorySortsFromLocal, setCategorySort } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
-import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, renameFolderAction, deleteFolderAction, openFolderAssignModal, createFolderFromAssignModal, addSubfolderAction, closeFolderPopup, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort, bulkDownloadPdf } from './ui.js';
-import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize } from './editor.js';
+import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, renameFolderAction, deleteFolderAction, openFolderAssignModal, createFolderFromAssignModal, addSubfolderAction, closeFolderPopup, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort, bulkDownloadPdf, downloadEntryPdf } from './ui.js';
+import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize, getCleanBodyHtml } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, flushCloudSync, ensureTokenOnResume, startKeepAlive } from './drive.js';
 import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, setTTSStart, setTTSEnd, resetTTSRange, playSelection, updateSpeedDisplay, updatePitchDisplay, updateGapDisplay, initTTS, updateTTSRange, seekTTSByPercent, saveTTSVoice } from './tts.js';
@@ -490,44 +490,17 @@ function setupUIListeners() {
     });
 
     document.getElementById('btn-download')?.addEventListener('click', () => {
-        const element = document.getElementById('editor-container');
-        const title = document.getElementById('edit-title').value || '신앙일지';
-
-        // PDF 렌더링 시 html2canvas가 text-decoration:underline 위치를 잘못 그리므로
-        // 임시로 border-bottom으로 대체 후 복원
-        const links = element.querySelectorAll('a');
-        const originalStyles = [];
-        links.forEach(link => {
-            originalStyles.push(link.getAttribute('style'));
-            link.style.textDecoration = 'none';
-            link.style.borderBottom = '1px solid #2563EB';
-            link.style.paddingBottom = '1px';
-        });
-
-        const opt = {
-            margin: 10,
-            filename: `${title}.pdf`,
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: {
-                scale: 2,
-                useCORS: true,
-                // 다크모드에서도 항상 라이트모드 스타일로 저장 (캡처용 복제본에서만 테마 제거 → 화면 깜빡임 없음)
-                onclone: (clonedDoc) => { clonedDoc.documentElement.removeAttribute('data-theme'); }
-            },
-            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        // 선택 모드의 PDF 저장과 동일한 스타일로 출력하기 위해, 에디터의 현재 내용을
+        // entry 객체로 만들어 공용 downloadEntryPdf()에 넘긴다.
+        const bodyEl = document.getElementById('editor-body');
+        const entry = {
+            title: document.getElementById('edit-title').value || '신앙일지',
+            subtitle: document.getElementById('edit-subtitle').value || '',
+            body: bodyEl ? getCleanBodyHtml(bodyEl) : '',
+            date: document.getElementById('display-date')?.textContent || '',
+            fontFamily: state.currentFontFamily
         };
-        // 성공/실패와 무관하게 원래 스타일 복원 (복원 안 하면 자동저장으로 임시 스타일이 영구 저장됨)
-        const restoreLinkStyles = () => {
-            links.forEach((link, i) => {
-                if (originalStyles[i]) link.setAttribute('style', originalStyles[i]);
-                else link.removeAttribute('style');
-            });
-        };
-        html2pdf().set(opt).from(element).save().then(restoreLinkStyles, (err) => {
-            restoreLinkStyles();
-            console.error('PDF 저장 실패', err);
-            alert('PDF 저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
-        });
+        downloadEntryPdf(entry);
     });
 
     // --- TTS 기능 ---
