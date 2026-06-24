@@ -508,7 +508,12 @@ function setupUIListeners() {
             margin: 10,
             filename: `${title}.pdf`,
             image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true },
+            html2canvas: {
+                scale: 2,
+                useCORS: true,
+                // 다크모드에서도 항상 라이트모드 스타일로 저장 (캡처용 복제본에서만 테마 제거 → 화면 깜빡임 없음)
+                onclone: (clonedDoc) => { clonedDoc.documentElement.removeAttribute('data-theme'); }
+            },
             jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
         };
         // 성공/실패와 무관하게 원래 스타일 복원 (복원 안 하면 자동저장으로 임시 스타일이 영구 저장됨)

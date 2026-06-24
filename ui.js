@@ -1057,46 +1057,22 @@ function getSelectedEntriesInOrder() {
     return selected;
 }
 
-// 선택한 여러 글을 하나의 PDF로 다운로드 (글마다 새 페이지로 구분)
-export async function bulkDownloadPdf() {
-    if (typeof html2pdf === 'undefined') {
-        alert('PDF 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해주세요.');
-        return;
-    }
-    const selected = getSelectedEntriesInOrder();
-    if (selected.length === 0) return;
-
-    const pdfBtn = getEl('bulk-pdf-btn');
-    if (pdfBtn) {
-        pdfBtn.dataset.busy = '1';
-        pdfBtn.disabled = true;
-        pdfBtn.innerHTML = `<i class="ph ph-spinner" style="animation:spin 1s linear infinite;"></i> 생성 중...`;
-    }
-
-    // 화면 밖 위치 지정은 바깥 래퍼(offscreen)에만 적용한다.
-    // html2pdf는 from()에 넘긴 요소를 그대로 복제해 캡처하므로, 그 요소에
-    // left:-9999px 같은 스타일이 있으면 복제본도 화면 밖으로 밀려나 백지가 된다.
-    // 따라서 위치 스타일이 없는 안쪽 content 요소를 from()에 넘긴다.
+// 글 하나를 PDF 캡처용 오프스크린 요소로 렌더링해 from()에 넘길 content를 반환
+// 화면 밖 위치 지정은 바깥 래퍼(offscreen)에만 적용한다.
+// html2pdf는 from()에 넘긴 요소를 그대로 복제해 캡처하므로, 그 요소에
+// left:-9999px 같은 스타일이 있으면 복제본도 화면 밖으로 밀려나 백지가 된다.
+// 따라서 위치 스타일이 없는 안쪽 content 요소를 from()에 넘긴다.
+function buildPdfContent(entry) {
     const offscreen = document.createElement('div');
     offscreen.style.cssText = 'position:absolute; left:-9999px; top:0;';
     const content = document.createElement('div');
-    content.style.cssText = 'width:794px; background:#ffffff;';
-
-    selected.forEach((entry, i) => {
-        const page = document.createElement('div');
-        const font = entry.fontFamily || 'Pretendard';
-        // 첫 글을 제외하고 매 글마다 페이지 분리
-        page.style.cssText = `padding:24px 32px; box-sizing:border-box;${i > 0 ? ' page-break-before:always;' : ''}`;
-        page.innerHTML =
-            `<h1 style="font-family:${font}; font-size:26px; font-weight:600; margin:0 0 10px; color:#1a1a1a; word-break:break-all;">${escapeHtml(entry.title)}</h1>`
-            + (entry.subtitle ? `<p style="font-family:${font}; font-size:16px; color:#666; margin:0 0 8px; word-break:break-all;">${escapeHtml(entry.subtitle)}</p>` : '')
-            + `<div style="font-size:13px; color:#999; margin:0 0 18px;">${escapeHtml(entry.date || '')}</div>`
-            + `<div style="font-family:${font}; font-size:16px; line-height:1.8; white-space:pre-wrap; word-break:break-all; overflow-wrap:break-word; color:#1a1a1a;">${entry.body || ''}</div>`;
-        content.appendChild(page);
-    });
-
-    offscreen.appendChild(content);
-    document.body.appendChild(offscreen);
+    content.style.cssText = 'width:794px; background:#ffffff; padding:24px 32px; box-sizing:border-box;';
+    const font = entry.fontFamily || 'Pretendard';
+    content.innerHTML =
+        `<h1 style="font-family:${font}; font-size:26px; font-weight:600; margin:0 0 10px; color:#1a1a1a; word-break:break-all;">${escapeHtml(entry.title)}</h1>`
+        + (entry.subtitle ? `<p style="font-family:${font}; font-size:16px; color:#666; margin:0 0 8px; word-break:break-all;">${escapeHtml(entry.subtitle)}</p>` : '')
+        + `<div style="font-size:13px; color:#999; margin:0 0 18px;">${escapeHtml(entry.date || '')}</div>`
+        + `<div style="font-family:${font}; font-size:16px; line-height:1.8; white-space:pre-wrap; word-break:break-all; overflow-wrap:break-word; color:#1a1a1a;">${entry.body || ''}</div>`;
 
     // html2canvas가 밑줄(text-decoration) 위치를 잘못 그리므로 링크는 border-bottom으로 대체
     content.querySelectorAll('a').forEach(link => {
@@ -1105,27 +1081,103 @@ export async function bulkDownloadPdf() {
         link.style.paddingBottom = '1px';
     });
 
-    const filename = selected.length === 1
-        ? `${(selected[0].title || '신앙일지').replace(/[\\/:*?"<>|]/g, '_')}.pdf`
-        : `신앙일지_${selected.length}개.pdf`;
+    offscreen.appendChild(content);
+    document.body.appendChild(offscreen);
+    return { offscreen, content };
+}
 
-    const opt = {
+function pdfOptions(filename) {
+    return {
         margin: 10,
         filename,
         image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true },
+        html2canvas: {
+            scale: 2,
+            useCORS: true,
+            // 다크모드에서도 항상 라이트모드 스타일로 저장 (캡처용 복제본에서만 테마 제거 → 화면 깜빡임 없음)
+            onclone: (clonedDoc) => { clonedDoc.documentElement.removeAttribute('data-theme'); }
+        },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
         pagebreak: { mode: ['css', 'legacy'] }
     };
+}
+
+// 파일명에 쓸 수 없는 문자 제거
+function sanitizeFilename(name) {
+    return String(name || '신앙일지').replace(/[\\/:*?"<>|]/g, '_').trim() || '신앙일지';
+}
+
+// 선택한 글을 PDF로 다운로드.
+// - 1개: 단일 PDF 파일
+// - 여러 개: 각 글을 개별 PDF로 만들어 하나의 ZIP으로 압축 다운로드
+export async function bulkDownloadPdf() {
+    if (typeof html2pdf === 'undefined') {
+        alert('PDF 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해주세요.');
+        return;
+    }
+    const selected = getSelectedEntriesInOrder();
+    if (selected.length === 0) return;
+
+    if (selected.length > 1 && typeof JSZip === 'undefined') {
+        alert('압축(ZIP) 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해주세요.');
+        return;
+    }
+
+    const pdfBtn = getEl('bulk-pdf-btn');
+    if (pdfBtn) {
+        pdfBtn.dataset.busy = '1';
+        pdfBtn.disabled = true;
+        pdfBtn.innerHTML = `<i class="ph ph-spinner" style="animation:spin 1s linear infinite;"></i> 생성 중...`;
+    }
 
     try {
-        await html2pdf().set(opt).from(content).save();
+        if (selected.length === 1) {
+            // 단일 글: 그대로 PDF 다운로드
+            const entry = selected[0];
+            const { offscreen, content } = buildPdfContent(entry);
+            try {
+                await html2pdf().set(pdfOptions(`${sanitizeFilename(entry.title)}.pdf`)).from(content).save();
+            } finally {
+                offscreen.remove();
+            }
+        } else {
+            // 여러 글: 각각 개별 PDF 생성 → ZIP으로 압축
+            const zip = new JSZip();
+            const pad = String(selected.length).length; // 정렬 유지를 위한 자리수
+            const usedNames = new Set();
+            for (let i = 0; i < selected.length; i++) {
+                const entry = selected[i];
+                if (pdfBtn) pdfBtn.innerHTML = `<i class="ph ph-spinner" style="animation:spin 1s linear infinite;"></i> 생성 중... (${i + 1}/${selected.length})`;
+                const { offscreen, content } = buildPdfContent(entry);
+                let blob;
+                try {
+                    blob = await html2pdf().set(pdfOptions('entry.pdf')).from(content).outputPdf('blob');
+                } finally {
+                    offscreen.remove();
+                }
+                // 목록 순서를 보존하고 동일 제목 충돌을 피하기 위해 번호를 접두어로 사용
+                const prefix = String(i + 1).padStart(pad, '0');
+                let name = `${prefix}_${sanitizeFilename(entry.title)}.pdf`;
+                while (usedNames.has(name)) name = `${prefix}_${sanitizeFilename(entry.title)}_${Math.random().toString(36).slice(2, 5)}.pdf`;
+                usedNames.add(name);
+                zip.file(name, blob);
+            }
+            if (pdfBtn) pdfBtn.innerHTML = `<i class="ph ph-spinner" style="animation:spin 1s linear infinite;"></i> 압축 중...`;
+            const zipBlob = await zip.generateAsync({ type: 'blob' });
+            const url = URL.createObjectURL(zipBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `신앙일지_${selected.length}개.zip`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        }
         exitSelectMode();
     } catch (err) {
         console.error('PDF 저장 실패', err);
         alert('PDF 저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
     } finally {
-        offscreen.remove();
         if (pdfBtn) {
             delete pdfBtn.dataset.busy;
             pdfBtn.innerHTML = `<i class="ph ph-file-pdf"></i> PDF 저장`;
