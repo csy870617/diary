@@ -1260,16 +1260,16 @@ function setupBasicHandling() {
     window.addEventListener('resize', () => { updateSelectionBox(); if(state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') handleBookResize(); });
 
     // 가상 키보드 등으로 visualViewport가 변할 때 책 모드 레이아웃을 다시 맞춰 하단이 가려지지 않도록 한다.
+    // (scroll 이벤트에는 반응하지 않음 — 사용자가 스크롤할 때 커서로 화면이 튕기는 것을 방지)
     if (window.visualViewport) {
         const onViewportChange = () => {
             if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') handleBookResize();
             else if (state.currentViewMode === 'default') scrollCaretIntoDefaultView();
         };
         window.visualViewport.addEventListener('resize', onViewportChange);
-        window.visualViewport.addEventListener('scroll', onViewportChange);
     }
 
-    // 책 편집 모드에서 타이핑/포커스 시 커서가 보이는 페이지로 자동 이동
+    // 타이핑/방향키 이동 시에만 커서가 보이도록 스크롤 (focus·click 시에는 하지 않아 화면 튕김 방지)
     const editorBodyEl = document.getElementById('editor-body');
     if (editorBodyEl) {
         const ensureCaretVisible = () => {
@@ -1277,8 +1277,6 @@ function setupBasicHandling() {
             else if (state.currentViewMode === 'default') requestAnimationFrame(scrollCaretIntoDefaultView);
         };
         editorBodyEl.addEventListener('input', ensureCaretVisible);
-        editorBodyEl.addEventListener('focus', ensureCaretVisible);
-        editorBodyEl.addEventListener('click', ensureCaretVisible);
         editorBodyEl.addEventListener('keyup', (e) => {
             if (state.currentViewMode !== 'book-edit' && state.currentViewMode !== 'default') return;
             if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','PageUp','PageDown','Enter','Backspace','Delete'].includes(e.key)) {
