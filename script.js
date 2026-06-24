@@ -463,32 +463,6 @@ function setupUIListeners() {
         btn.addEventListener('click', (e) => { e.preventDefault(); const cmd = btn.dataset.cmd; if (cmd) formatDoc(cmd); });
     });
 
-    document.getElementById('btn-share')?.addEventListener('click', () => {
-        const bodyHtml = document.getElementById('editor-body').innerHTML;
-        if (bodyHtml.includes('src="data:image')) {
-            alert("이미지가 포함된 글은 URL 공유가 불가능합니다. 우측 하단의 다운로드 버튼(PDF)을 이용해 공유해주세요.");
-            return;
-        }
-
-        const title = document.getElementById('edit-title').value;
-        const entryData = {
-            t: title || '제목 없음',
-            s: document.getElementById('edit-subtitle').value || '',
-            b: bodyHtml,
-            d: new Date().toLocaleDateString('ko-KR'),
-            f: state.currentFontFamily,
-            z: state.currentFontSize
-        };
-
-        try {
-            const encodedData = btoa(unescape(encodeURIComponent(JSON.stringify(entryData))));
-            const shareUrl = `${window.location.origin}${window.location.pathname}?share=${encodedData}`;
-            if (shareUrl.length > 4000) { alert("내용이 너무 길어 공유 링크를 생성할 수 없습니다."); return; }
-            if (navigator.share) { navigator.share({ title: '신앙일지 공유', text: `${title}`, url: shareUrl }).catch(console.error); } 
-            else { navigator.clipboard.writeText(shareUrl).then(() => { alert('공유 링크가 클립보드에 복사되었습니다.'); }).catch((err) => { console.error('클립보드 복사 실패', err); alert('클립보드 복사에 실패했습니다. 브라우저 권한을 확인해주세요.'); }); }
-        } catch (e) { alert("공유 링크 생성 실패"); }
-    });
-
     document.getElementById('btn-download')?.addEventListener('click', () => {
         // 선택 모드의 PDF 저장과 동일한 스타일로 출력하기 위해, 에디터의 현재 내용을
         // entry 객체로 만들어 공용 downloadEntryPdf()에 넘긴다.
