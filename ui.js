@@ -1107,6 +1107,23 @@ function sanitizeFilename(name) {
     return String(name || '신앙일지').replace(/[\\/:*?"<>|]/g, '_').trim() || '신앙일지';
 }
 
+// 글 하나를 단일 PDF로 다운로드 (선택 모드의 1개 선택, 에디터 다운로드 버튼 공용)
+export async function downloadEntryPdf(entry) {
+    if (typeof html2pdf === 'undefined') {
+        alert('PDF 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해주세요.');
+        return;
+    }
+    const { offscreen, content } = buildPdfContent(entry);
+    try {
+        await html2pdf().set(pdfOptions(`${sanitizeFilename(entry.title)}.pdf`)).from(content).save();
+    } catch (err) {
+        console.error('PDF 저장 실패', err);
+        alert('PDF 저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
+    } finally {
+        offscreen.remove();
+    }
+}
+
 // 선택한 글을 PDF로 다운로드.
 // - 1개: 단일 PDF 파일
 // - 여러 개: 각 글을 개별 PDF로 만들어 하나의 ZIP으로 압축 다운로드
@@ -1132,14 +1149,8 @@ export async function bulkDownloadPdf() {
 
     try {
         if (selected.length === 1) {
-            // 단일 글: 그대로 PDF 다운로드
-            const entry = selected[0];
-            const { offscreen, content } = buildPdfContent(entry);
-            try {
-                await html2pdf().set(pdfOptions(`${sanitizeFilename(entry.title)}.pdf`)).from(content).save();
-            } finally {
-                offscreen.remove();
-            }
+            // 단일 글: 그대로 PDF 다운로드 (에디터 다운로드와 동일한 스타일)
+            await downloadEntryPdf(selected[0]);
         } else {
             // 여러 글: 각각 개별 PDF 생성 → ZIP으로 압축
             const zip = new JSZip();
