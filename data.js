@@ -81,7 +81,10 @@ export async function saveEntry() {
     }
     
     safeLocalSave();
-    renderEntries();
+    // 글쓰기 화면이 열려 있는 동안에는 뒤의 목록을 다시 그리지 않는다 (보이지 않으며, 매 자동저장마다
+    // 전체 목록을 재생성하면 타이핑이 끊김 → 목록은 닫을 때 closeAllModals에서 갱신됨)
+    const writeModal = document.getElementById('write-modal');
+    if (!writeModal || writeModal.classList.contains('hidden')) renderEntries();
 }
 
 export async function saveData() {
