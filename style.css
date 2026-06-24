@@ -278,7 +278,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 
 /* 선택 UI 요소 스타일 */
 .img-selection-box { position: absolute; border: 2px dashed var(--accent); pointer-events: none; z-index: 2005; display: none; }
-.resize-handle { position: absolute; width: 14px; height: 14px; background: var(--surface-color); border: 2px solid var(--accent); z-index: 2007; cursor: se-resize; display: none; border-radius: 50%; box-shadow: 0 2px 4px var(--shadow-color); }
+.resize-handle { position: absolute; width: 22px; height: 22px; background: var(--accent); border: 3px solid var(--surface-color); z-index: 2007; cursor: nwse-resize; display: none; border-radius: 50%; box-shadow: 0 2px 6px var(--shadow-color); touch-action: none; }
 .img-delete-btn { position: absolute; background: var(--danger); color: white; border: none; padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; z-index: 2008; transform: translateX(-50%); display: none; align-items: center; gap: 4px; box-shadow: 0 2px 6px var(--shadow-color); font-family: var(--text-sans); font-weight: 600; }
 .img-resize-group { position: absolute; background: var(--surface-color); border: 1px solid var(--gray-200); border-radius: 8px; display: none; gap: 4px; padding: 4px; z-index: 2008; transform: translateX(-50%); box-shadow: 0 4px 12px var(--shadow-light); }
 .img-resize-btn { background: none; border: none; padding: 6px 10px; font-size: 12px; color: var(--gray-900); cursor: pointer; border-radius: 6px; font-family: var(--text-sans); font-weight: 500; display: flex; align-items: center; gap: 4px; white-space: nowrap; }

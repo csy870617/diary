@@ -759,6 +759,9 @@ function openCropModal(dataUrl, onConfirm) {
     modal.classList.remove('hidden');
 }
 
+// 에디터(editor.js)에서 기존 이미지를 다시 자를 수 있도록 노출
+window.openImageCropper = openCropModal;
+
 function closeCropModal() {
     const modal = document.getElementById('crop-modal');
     if (modal) modal.classList.add('hidden');
