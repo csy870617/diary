@@ -1073,9 +1073,14 @@ export async function bulkDownloadPdf() {
         pdfBtn.innerHTML = `<i class="ph ph-spinner" style="animation:spin 1s linear infinite;"></i> 생성 중...`;
     }
 
-    // 화면 밖에 PDF용 컨테이너를 구성 (A4 폭 기준 794px)
-    const wrapper = document.createElement('div');
-    wrapper.style.cssText = 'position:absolute; left:-9999px; top:0; width:794px; background:#ffffff;';
+    // 화면 밖 위치 지정은 바깥 래퍼(offscreen)에만 적용한다.
+    // html2pdf는 from()에 넘긴 요소를 그대로 복제해 캡처하므로, 그 요소에
+    // left:-9999px 같은 스타일이 있으면 복제본도 화면 밖으로 밀려나 백지가 된다.
+    // 따라서 위치 스타일이 없는 안쪽 content 요소를 from()에 넘긴다.
+    const offscreen = document.createElement('div');
+    offscreen.style.cssText = 'position:absolute; left:-9999px; top:0;';
+    const content = document.createElement('div');
+    content.style.cssText = 'width:794px; background:#ffffff;';
 
     selected.forEach((entry, i) => {
         const page = document.createElement('div');
@@ -1087,13 +1092,14 @@ export async function bulkDownloadPdf() {
             + (entry.subtitle ? `<p style="font-family:${font}; font-size:16px; color:#666; margin:0 0 8px; word-break:break-all;">${escapeHtml(entry.subtitle)}</p>` : '')
             + `<div style="font-size:13px; color:#999; margin:0 0 18px;">${escapeHtml(entry.date || '')}</div>`
             + `<div style="font-family:${font}; font-size:16px; line-height:1.8; white-space:pre-wrap; word-break:break-all; overflow-wrap:break-word; color:#1a1a1a;">${entry.body || ''}</div>`;
-        wrapper.appendChild(page);
+        content.appendChild(page);
     });
 
-    document.body.appendChild(wrapper);
+    offscreen.appendChild(content);
+    document.body.appendChild(offscreen);
 
     // html2canvas가 밑줄(text-decoration) 위치를 잘못 그리므로 링크는 border-bottom으로 대체
-    wrapper.querySelectorAll('a').forEach(link => {
+    content.querySelectorAll('a').forEach(link => {
         link.style.textDecoration = 'none';
         link.style.borderBottom = '1px solid #2563EB';
         link.style.paddingBottom = '1px';
@@ -1113,13 +1119,13 @@ export async function bulkDownloadPdf() {
     };
 
     try {
-        await html2pdf().set(opt).from(wrapper).save();
+        await html2pdf().set(opt).from(content).save();
         exitSelectMode();
     } catch (err) {
         console.error('PDF 저장 실패', err);
         alert('PDF 저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
     } finally {
-        wrapper.remove();
+        offscreen.remove();
         if (pdfBtn) {
             delete pdfBtn.dataset.busy;
             pdfBtn.innerHTML = `<i class="ph ph-file-pdf"></i> PDF 저장`;
