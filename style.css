@@ -308,7 +308,9 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 /* 책 편집 모드: 편집 가능 커서 + 하단 편집 표시 바 */
 #write-modal.mode-book-edit .editor-body { cursor: text; caret-color: var(--primary-color, #4F46E5); }
 #write-modal.mode-book-edit .editor-title, #write-modal.mode-book-edit .editor-subtitle { cursor: text; }
-#write-modal.mode-book-edit::after { content: '✏️ 편집 중'; position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); font-size: 11px; color: var(--gray-400); background: rgba(255,255,255,0.85); padding: 3px 10px; border-radius: 20px; z-index: 2200; pointer-events: none; }
+/* 책 편집 모드 표시: 헤더의 동기화 버튼 왼쪽에 '편집 중' 배지 */
+.book-edit-badge { display: none; font-size: 11px; color: var(--gray-500); background: var(--gray-100); padding: 3px 10px; border-radius: 20px; white-space: nowrap; align-items: center; margin-right: 2px; }
+#write-modal.mode-book-edit .book-edit-badge { display: inline-flex; }
 .book-nav { display: none !important; }
 .page-indicator { position: fixed; bottom: 40px; right: 30px; left: auto; transform: none; font-family: var(--text-sans); font-size: 13px; color: var(--gray-400); z-index: 2050; background: transparent; padding: 4px 10px; pointer-events: auto !important; cursor: pointer; transition: bottom 0.2s ease; }
 .book-slider-container { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); width: 80%; max-width: 500px; background: var(--surface-color); backdrop-filter: blur(5px); padding: 12px 20px; border-radius: 30px; box-shadow: 0 4px 20px var(--shadow-light); z-index: 2100; display: flex; align-items: center; border: 1px solid var(--gray-100); opacity: 0.95; transition: bottom 0.2s ease; }
