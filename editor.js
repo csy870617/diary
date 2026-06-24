@@ -637,6 +637,20 @@ function fitImageToBookPage(img, container) {
     }
 }
 
+// 책 모드에서 사용자가 이미지 크기를 바꾸면, 그 크기를 책 기준값에도 반영해
+// 이후 레이아웃 재계산 시에도 조절한 크기가 그대로 유지되도록 한다.
+function markBookImageResized(img) {
+    if (!img || img.tagName !== 'IMG') return;
+    if (state.currentViewMode !== 'book' && state.currentViewMode !== 'book-edit') return;
+    const r = img.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) {
+        img.dataset.bookTargetW = String(Math.round(r.width));
+        img.dataset.bookTargetH = String(Math.round(r.height));
+    }
+    img.dataset.bookOrigWidth = img.style.width || '';
+    img.dataset.bookOrigHeight = img.style.height || '';
+}
+
 function updateBookLayout() {
     const container = document.getElementById('editor-container');
     if (!container) return;
@@ -1732,8 +1746,9 @@ function createSelectionUI() {
                     if (currentSelectedElement.tagName === 'TABLE') {
                         currentSelectedElement.style.tableLayout = 'fixed';
                     }
-                    updateSelectionBox(); 
-                    triggerAutoSave(); 
+                    markBookImageResized(currentSelectedElement);
+                    updateSelectionBox();
+                    triggerAutoSave();
                 } 
             }; 
             resizeBtnGroup.appendChild(btn);
@@ -1749,7 +1764,7 @@ function createSelectionUI() {
             window.openImageCropper(img.src, (result, wasCropped) => {
                 if (wasCropped && result) {
                     img.style.height = 'auto'; // 비율이 바뀌었으므로 세로 자동
-                    img.addEventListener('load', () => updateSelectionBox(), { once: true });
+                    img.addEventListener('load', () => { updateSelectionBox(); markBookImageResized(img); }, { once: true });
                     img.src = result;
                     updateSelectionBox();
                     triggerAutoSave();
@@ -1882,17 +1897,19 @@ function resizingTouch(e) {
     updateSelectionBox();
 }
 
-function stopResize() { 
-    isResizing = false; 
-    document.removeEventListener('mousemove', resizing); 
-    document.removeEventListener('mouseup', stopResize); 
-    triggerAutoSave(); 
+function stopResize() {
+    isResizing = false;
+    document.removeEventListener('mousemove', resizing);
+    document.removeEventListener('mouseup', stopResize);
+    markBookImageResized(currentSelectedElement);
+    triggerAutoSave();
 }
 
 function stopResizeTouch() {
     isResizing = false;
     document.removeEventListener('touchmove', resizingTouch);
     document.removeEventListener('touchend', stopResizeTouch);
+    markBookImageResized(currentSelectedElement);
     triggerAutoSave();
 }
 
