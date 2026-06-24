@@ -11,6 +11,7 @@ let resizeHandle = null;
 let deleteBtn = null;
 let resizeBtnGroup = null;
 let cropBtn = null;
+let imgFullscreenOverlay = null; // 이미지 전체화면 보기 오버레이
 let autoSaveTimer = null;
 let isTurningPage = false;    
 let currentBookPageIndex = 0; 
@@ -1012,12 +1013,21 @@ function setupBasicHandling() {
                 e.preventDefault(); 
                 selectElement(target); 
             } 
-        } else if (!cell) { 
+        } else if (!cell) {
             // 셀 외부를 클릭하면 선택 해제
-            hideSelection(); 
-            clearCellSelection(); 
+            hideSelection();
+            clearCellSelection();
         }
     };
+
+    // 읽기/책 모드에서 이미지를 탭하면 전체화면으로 보기 (편집 모드에선 선택 동작 유지)
+    editorBody.addEventListener('click', (e) => {
+        const img = e.target.closest('img');
+        if (!img) return;
+        if (state.currentViewMode === 'default' || state.currentViewMode === 'book-edit') return;
+        e.preventDefault();
+        openImageFullscreen(img.src);
+    });
 
     editorBody.onkeydown = (e) => {
         // Ctrl+Z / Cmd+Z: Undo
@@ -1774,6 +1784,29 @@ function updateSelectionBox() {
     }
 }
 function deleteSelectedElement() { if (currentSelectedElement) { currentSelectedElement.remove(); hideSelection(); triggerAutoSave(); } }
+
+// 이미지 전체화면 보기 (읽기/책 모드에서 이미지 탭 시) — 다시 탭하면 닫힘
+function fullscreenEscHandler(e) { if (e.key === 'Escape') closeImageFullscreen(); }
+function openImageFullscreen(src) {
+    if (!src) return;
+    if (!imgFullscreenOverlay) {
+        imgFullscreenOverlay = document.createElement('div');
+        imgFullscreenOverlay.className = 'img-fullscreen-overlay';
+        const im = document.createElement('img');
+        im.className = 'img-fullscreen-img';
+        im.alt = '';
+        imgFullscreenOverlay.appendChild(im);
+        imgFullscreenOverlay.addEventListener('click', closeImageFullscreen);
+        document.body.appendChild(imgFullscreenOverlay);
+    }
+    imgFullscreenOverlay.querySelector('img').src = src;
+    imgFullscreenOverlay.classList.add('show');
+    document.addEventListener('keydown', fullscreenEscHandler);
+}
+function closeImageFullscreen() {
+    if (imgFullscreenOverlay) imgFullscreenOverlay.classList.remove('show');
+    document.removeEventListener('keydown', fullscreenEscHandler);
+}
 let isResizing = false, startX2, startY2, startWidth2, startHeight2;
 
 function startResize(e) { 
