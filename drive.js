@@ -389,6 +389,8 @@ export async function handleSignoutClick(callback) {
     localStorage.removeItem('faith_user_email');
     localStorage.removeItem('faithLogDB');
     localStorage.removeItem('faithCatData');
+    localStorage.removeItem('faithSyncBase');
+    syncBaseMap = {};
     state.currentUser = null;
     state.entries = [];
     if (refreshTimer) clearTimeout(refreshTimer);
@@ -569,7 +571,15 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
         if (cloudData) {
             // 편집 중인 글은 병합으로 덮어쓰지 않도록 보호 (충돌은 확인창으로만 해소)
             const protectedId = editingActive ? state.editingId : null;
-            state.entries = mergeEntries(state.entries, cloudData.entries || [], protectedId);
+            const baseMap = loadSyncBase();
+            const conflictBox = [];
+            state.entries = mergeEntries(state.entries, cloudData.entries || [], protectedId, baseMap, conflictBox);
+            saveSyncBase();
+            if (conflictBox.length > 0) {
+                // 충돌 사본이 생겼으면 다른 기기에도 전파되도록 업로드를 강제
+                skipUpload = false;
+                showSyncWarning(`다른 기기와 내용이 충돌해 ${conflictBox.length}개의 '충돌 사본'을 보관했습니다.`);
+            }
             const mergedCats = mergeCategories(state, cloudData);
             state.allCategories = mergedCats.categories;
             state.categoryOrder = mergedCats.order;
@@ -605,6 +615,10 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
                 const cur = state.entries.find(e => e && e.id === state.editingId);
                 if (cur) state.editBaseModifiedAt = new Date(cur.modifiedAt || cur.timestamp || 0).getTime();
             }
+            // 업로드 성공 → 이제 클라우드 = 로컬이므로 모든 글의 동기화 기준을 현재 수정시각으로 갱신
+            const bMap = loadSyncBase();
+            state.entries.forEach(e => { if (e && e.id) bMap[e.id] = e.modifiedAt || e.timestamp || ''; });
+            saveSyncBase();
         }
     };
 
@@ -700,22 +714,75 @@ async function uploadToDrive(folderId, fileId) {
     });
 }
 
-function mergeEntries(localList, cloudList, protectedId = null) {
-    const entryMap = new Map();
-    cloudList.forEach(item => { if(item && item.id) entryMap.set(item.id, item); });
-    localList.forEach(localItem => {
-        if(!localItem || !localItem.id) return;
-        const cloudItem = entryMap.get(localItem.id);
-        if (!cloudItem) { entryMap.set(localItem.id, localItem); }
-        else if (localItem.id === protectedId) { entryMap.set(localItem.id, localItem); } // 편집 중인 글은 항상 로컬 유지
-        else {
-            const localTime = new Date(localItem.modifiedAt || localItem.timestamp || 0).getTime();
-            const cloudTime = new Date(cloudItem.modifiedAt || cloudItem.timestamp || 0).getTime();
-            if (localTime >= cloudTime) entryMap.set(localItem.id, localItem);
+// 동기화 기준값(syncBase): 글마다 "마지막으로 클라우드와 일치했던 수정시각"을 기기-로컬에 보관.
+// 클라우드에 올리지 않음(기기별 상태). 양쪽이 각자 수정한 '진짜 충돌'을 구분하는 데 사용.
+let syncBaseMap = null;
+function loadSyncBase() {
+    if (syncBaseMap) return syncBaseMap;
+    try { syncBaseMap = JSON.parse(localStorage.getItem('faithSyncBase') || '{}') || {}; }
+    catch (e) { syncBaseMap = {}; }
+    return syncBaseMap;
+}
+function saveSyncBase() {
+    try { localStorage.setItem('faithSyncBase', JSON.stringify(syncBaseMap || {})); } catch (e) {}
+}
+
+function mergeEntries(localList, cloudList, protectedId, baseMap, conflictBox) {
+    baseMap = baseMap || {};
+    const cloudMap = new Map(); cloudList.forEach(it => { if (it && it.id) cloudMap.set(it.id, it); });
+    const localMap = new Map(); localList.forEach(it => { if (it && it.id) localMap.set(it.id, it); });
+    const resultMap = new Map();
+    const tOf = it => new Date((it && (it.modifiedAt || it.timestamp)) || 0).getTime();
+    const ids = new Set([...cloudMap.keys(), ...localMap.keys()]);
+
+    ids.forEach(id => {
+        const loc = localMap.get(id);
+        const cld = cloudMap.get(id);
+        if (loc && !cld) { resultMap.set(id, loc); return; }            // 로컬에만 있음(새 글)
+        if (!loc && cld) { resultMap.set(id, cld); baseMap[id] = cld.modifiedAt || cld.timestamp || ''; return; } // 클라우드에만 → 채택
+        if (id === protectedId) { resultMap.set(id, loc); return; }     // 편집 중인 글은 로컬 유지(확인창이 처리)
+
+        const sameContent = loc.body === cld.body && loc.title === cld.title && loc.subtitle === cld.subtitle
+            && !!loc.isDeleted === !!cld.isDeleted && !!loc.isPurged === !!cld.isPurged;
+        if (sameContent) {
+            const winner = tOf(loc) >= tOf(cld) ? loc : cld;
+            resultMap.set(id, winner);
+            baseMap[id] = winner.modifiedAt || winner.timestamp || '';
+            return;
+        }
+
+        // 내용이 다름 → 마지막 동기화 기준으로 양쪽 변경 여부 판단
+        const base = baseMap[id];
+        const baseT = base ? new Date(base).getTime() : null;
+        const localChanged = baseT !== null && tOf(loc) !== baseT;
+        const cloudChanged = baseT !== null && tOf(cld) !== baseT;
+
+        if (baseT !== null && localChanged && cloudChanged) {
+            // 진짜 충돌: 양쪽이 각자 수정 → 최신본을 채택하되 진 버전을 사본으로 보존(어느 내용도 잃지 않음)
+            const localWins = tOf(loc) >= tOf(cld);
+            const winner = localWins ? loc : cld;
+            const loser = localWins ? cld : loc;
+            resultMap.set(id, winner);
+            baseMap[id] = winner.modifiedAt || winner.timestamp || '';
+            const nowISO = new Date().toISOString();
+            const copy = {
+                ...loser,
+                id: Date.now().toString() + '_' + Math.random().toString(36).slice(2, 7),
+                title: (loser.title || '제목 없음') + ' (동기화 충돌 사본)',
+                timestamp: nowISO, modifiedAt: nowISO, isDeleted: false, isPurged: false
+            };
+            resultMap.set(copy.id, copy);
+            if (conflictBox) conflictBox.push(copy);
+        } else {
+            // 한쪽만 변경(또는 기준값 없음) → 최신본 채택(LWW)
+            const winner = tOf(loc) >= tOf(cld) ? loc : cld;
+            resultMap.set(id, winner);
+            if (winner === cld) baseMap[id] = cld.modifiedAt || cld.timestamp || '';
         }
     });
+
     // timestamp 누락 항목에서 NaN 정렬이 깨지지 않도록 modifiedAt·0으로 폴백
-    return Array.from(entryMap.values()).sort((a, b) =>
+    return Array.from(resultMap.values()).sort((a, b) =>
         (new Date(b.timestamp || b.modifiedAt || 0).getTime() || 0) - (new Date(a.timestamp || a.modifiedAt || 0).getTime() || 0));
 }
 
