@@ -51,17 +51,20 @@ function toggleTheme() {
 }
 
 function updateThemeIcon(pref) {
-    const btn = document.getElementById('theme-toggle-btn');
-    if (!btn) return;
-    const icon = btn.querySelector('i');
-    if (icon) {
-        icon.className = pref === 'light' ? 'ph ph-sun'
-                       : pref === 'dark' ? 'ph ph-moon'
-                       : 'ph ph-monitor';
-    }
-    btn.title = pref === 'light' ? '라이트모드 (클릭: 다크)'
-              : pref === 'dark' ? '다크모드 (클릭: 시스템)'
-              : '시스템 설정 따름 (클릭: 라이트)';
+    const iconClass = pref === 'light' ? 'ph ph-sun'
+                    : pref === 'dark' ? 'ph ph-moon'
+                    : 'ph ph-monitor';
+    const title = pref === 'light' ? '라이트모드 (클릭: 다크)'
+                : pref === 'dark' ? '다크모드 (클릭: 시스템)'
+                : '시스템 설정 따름 (클릭: 라이트)';
+    // 메인 헤더와 글쓰기 화면의 테마 버튼을 함께 갱신
+    ['theme-toggle-btn', 'write-theme-toggle-btn'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        const icon = btn.querySelector('i');
+        if (icon) icon.className = iconClass;
+        btn.title = title;
+    });
 }
 
 // 공유 링크(?share=)로 들어온 외부 HTML 정화 (XSS 방지)
@@ -359,6 +362,7 @@ function setupUIListeners() {
     scrollTopBtn?.addEventListener('click', () => { editorContainer.scrollTo({ top: 0, behavior: 'smooth' }); });
 
     document.getElementById('theme-toggle-btn')?.addEventListener('click', toggleTheme);
+    document.getElementById('write-theme-toggle-btn')?.addEventListener('click', toggleTheme);
     document.getElementById('sort-criteria')?.addEventListener('change', (e) => {
         state.currentSortBy = e.target.value;
         setCategorySort(state.currentCategory, state.currentSortBy, state.currentSortOrder);
