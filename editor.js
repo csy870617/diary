@@ -403,7 +403,11 @@ function handleBookResize() {
     // 단, 폭이 바뀌면(회전/화면 변화) 반드시 재배치해야 컬럼 폭과 스크롤 보폭이 어긋나 화면이 한쪽으로 치우치지 않는다.
     const widthChanged = !container || container.clientWidth !== lastBookColWidth;
     if (state.currentViewMode === 'book-edit' && !widthChanged) {
-        if (container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
+        // 키보드 등 높이만 변함: 재배치 없이 커서가 있는 페이지로 정렬(없으면 현재 페이지 유지)
+        if (!scrollCursorIntoBookView()) {
+            if (container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
+        }
+        updateBookNav();
         return;
     }
     updateBookLayout();
@@ -532,12 +536,13 @@ function handleBookScrollSnap(e) {
     const stride = Math.floor(container.clientWidth);
     if (stride <= 0) return;
     const nearest = Math.round(container.scrollLeft / stride);
-    const target = nearest * stride;
-    if (Math.abs(container.scrollLeft - target) > 1) {
-        currentBookPageIndex = nearest;
-        container.scrollLeft = target; // 페이지 경계로 정렬 (재진입은 위 임계값으로 1~2회 내 수렴)
-        updateBookNav();
-    }
+    // 이미 페이지 경계에 정렬돼 있으면 그대로 둔다 (스와이프/휠로 넘긴 페이지를 커서 페이지로 되돌리지 않도록)
+    if (Math.abs(container.scrollLeft - nearest * stride) <= 1) return;
+    // 비정렬(브라우저가 캐럿을 보이려 가로 스크롤한 경우 등): 책 편집 모드면 커서가 있는 페이지로 정렬
+    if (state.currentViewMode === 'book-edit' && scrollCursorIntoBookView()) { updateBookNav(); return; }
+    currentBookPageIndex = nearest;
+    container.scrollLeft = nearest * stride;
+    updateBookNav();
 }
 function toggleBookEventListeners(enable) {
     const container = document.getElementById('editor-container');
@@ -1361,6 +1366,10 @@ function setupBasicHandling() {
             else if (state.currentViewMode === 'default') requestAnimationFrame(scrollCaretIntoDefaultView);
         };
         editorBodyEl.addEventListener('input', ensureCaretVisible);
+        // 책 편집 모드에서 탭/포커스로 커서를 띄울 때: 커서가 있는 페이지로 정렬해 그 자리가 보이게 한다.
+        // (기본 모드에서는 화면 튕김을 막기 위해 click/focus에는 반응하지 않음)
+        editorBodyEl.addEventListener('click', () => { if (state.currentViewMode === 'book-edit') ensureCaretVisible(); });
+        editorBodyEl.addEventListener('focus', () => { if (state.currentViewMode === 'book-edit') ensureCaretVisible(); });
         editorBodyEl.addEventListener('keyup', (e) => {
             if (state.currentViewMode !== 'book-edit' && state.currentViewMode !== 'default') return;
             if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','PageUp','PageDown','Enter','Backspace','Delete'].includes(e.key)) {
