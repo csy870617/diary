@@ -19,8 +19,9 @@ let touchStartX = 0;
 let touchStartY = 0;
 let bookSwiping = false; // 책 편집 모드에서 가로 스와이프 판정 중
 let lastBookColWidth = 0; // 마지막 책 레이아웃 시 컨테이너 폭 (키보드로 높이만 변한 경우 재배치 생략용)
-let bookPinPage = -1;     // 탭한 시점에 보이던 페이지 (캐럿 좌표 대신 이 페이지를 고정)
-let bookPinUntil = 0;     // 탭 페이지 고정 만료 시각(ms). 그 전까지는 브라우저 자동 스크롤을 이 페이지로 되돌림
+let bookPinPage = -1;       // 탭한 시점에 보이던 페이지 (캐럿 좌표 대신 이 페이지를 고정)
+let bookPinActive = false;  // 탭/페이지이동 후 현재 페이지를 고정(브라우저 자동 스크롤 무시). 타이핑 시작 시 해제
+let lastBookTouchTime = 0;  // 마지막 책 모드 터치 시각 (터치로 발생하는 에뮬레이트 mousedown 무시용)
 let wheelLockTimer = null;    
 
 let selectionStartCell = null;
@@ -401,16 +402,18 @@ function handleBookTouchEnd(e) {
         turnPage(diffX > 0 ? 1 : -1);
         isTurningPage = true; setTimeout(() => isTurningPage = false, 300);
         bookSwiping = false;
+        lastBookTouchTime = Date.now();
         return;
     }
     bookSwiping = false;
-    // 탭(스와이프 아님): 탭한 시점에 보이던 페이지를 잠시 고정 → 브라우저가 캐럿을 보이려 다른 페이지로
-    // 스크롤해도 그 자리(탭한 화면)를 유지. (특정 페이지에서 캐럿 좌표가 부정확해도 안전)
+    lastBookTouchTime = Date.now();
+    // 탭(스와이프 아님): 탭한 시점에 보이던 페이지를 고정 → 브라우저가 캐럿을 보이려 다른 페이지로(또는
+    // 세로로) 스크롤해도 그 자리(탭한 화면)를 유지. 타이핑을 시작하면 해제된다. (캐럿 좌표 부정확해도 안전)
     if (state.currentViewMode === 'book-edit' && bookPinPage >= 0) {
         currentBookPageIndex = bookPinPage;
-        bookPinUntil = Date.now() + 700;
+        bookPinActive = true;
         const container = document.getElementById('editor-container');
-        if (container) container.scrollLeft = bookPinPage * Math.floor(container.clientWidth);
+        if (container) { container.scrollLeft = bookPinPage * Math.floor(container.clientWidth); container.scrollTop = 0; }
         updateBookNav();
     }
 }
@@ -422,8 +425,8 @@ function handleBookResize() {
     // 단, 폭이 바뀌면(회전/화면 변화) 반드시 재배치해야 컬럼 폭과 스크롤 보폭이 어긋나 화면이 한쪽으로 치우치지 않는다.
     const widthChanged = !container || container.clientWidth !== lastBookColWidth;
     if (state.currentViewMode === 'book-edit' && !widthChanged) {
-        // 키보드 등 높이만 변함: 재배치 없이 현재(탭한) 페이지를 그대로 유지
-        if (container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
+        // 키보드 등 높이만 변함: 재배치 없이 현재(탭한) 페이지를 그대로 유지, 세로 스크롤도 0
+        if (container) { container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth); container.scrollTop = 0; }
         updateBookNav();
         return;
     }
@@ -548,20 +551,22 @@ function scrollCursorIntoBookView() {
 // 책 모드에서 스크롤이 페이지 경계가 아니면(브라우저가 캐럿을 보이려 가로 스크롤한 경우 등)
 // 가장 가까운 페이지로 즉시 스냅해 화면이 한쪽으로 치우치지 않게 한다.
 function handleBookScrollSnap(e) {
-    if (!isBookNavMode() || isTurningPage) return;
+    if (!isBookNavMode()) return;
     const container = e.currentTarget;
+    // 책 모드는 세로 스크롤이 없어야 한다. 브라우저가 캐럿을 보이려 세로로 민 경우 항상 0으로 되돌림
+    if (container.scrollTop !== 0) container.scrollTop = 0;
+    if (isTurningPage) return;
     const stride = Math.floor(container.clientWidth);
     if (stride <= 0) return;
-    // 탭 직후 고정 구간: 브라우저가 캐럿을 보이려 스크롤해도 탭한 페이지로 되돌린다
-    if (state.currentViewMode === 'book-edit' && bookPinPage >= 0 && Date.now() < bookPinUntil) {
-        if (Math.abs(container.scrollLeft - bookPinPage * stride) > 1) {
-            currentBookPageIndex = bookPinPage;
-            container.scrollLeft = bookPinPage * stride;
+    // 고정 중(탭/페이지이동 후): 브라우저가 캐럿을 보이려 스크롤해도 현재 페이지로 되돌린다 (타이핑 시작 전까지)
+    if (state.currentViewMode === 'book-edit' && bookPinActive) {
+        if (Math.abs(container.scrollLeft - currentBookPageIndex * stride) > 1) {
+            container.scrollLeft = currentBookPageIndex * stride;
             updateBookNav();
         }
         return;
     }
-    // 평소: 페이지 경계에 정렬돼 있으면 그대로(스와이프 페이지 보존), 어긋났을 때만 가장 가까운 페이지로
+    // 평소(타이핑 중 등): 페이지 경계에 정렬돼 있으면 그대로, 어긋났을 때만 가장 가까운 페이지로 정렬
     const nearest = Math.round(container.scrollLeft / stride);
     if (Math.abs(container.scrollLeft - nearest * stride) <= 1) return;
     currentBookPageIndex = nearest;
@@ -595,6 +600,8 @@ export function turnPage(direction) {
     if (nextIndex === currentBookPageIndex) return;
     currentBookPageIndex = nextIndex;
     container.scrollLeft = currentBookPageIndex * stride;
+    container.scrollTop = 0;
+    bookPinActive = true; // 넘긴 페이지를 고정 유지 (브라우저 자동 스크롤 방지)
     updateBookNav();
 }
 
@@ -1386,9 +1393,9 @@ function setupBasicHandling() {
     const editorBodyEl = document.getElementById('editor-body');
     if (editorBodyEl) {
         const ensureCaretVisible = () => {
-            // 실제 편집(타이핑/방향키)이 시작되면 탭-페이지 고정을 풀고 커서를 따라간다
-            bookPinUntil = 0;
-            if (state.currentViewMode === 'book-edit') requestAnimationFrame(() => { scrollCursorIntoBookView(); updateBookNav(); });
+            // 실제 편집(타이핑/방향키)이 시작되면 탭-페이지 고정을 풀어, 글이 다음 페이지로 넘어갈 때
+            // 브라우저 스크롤 + 페이지 스냅으로 커서를 따라가게 한다 (캐럿 좌표에 의존하지 않음)
+            if (state.currentViewMode === 'book-edit') { bookPinActive = false; }
             else if (state.currentViewMode === 'default') requestAnimationFrame(scrollCaretIntoDefaultView);
         };
         editorBodyEl.addEventListener('input', ensureCaretVisible);
@@ -1402,14 +1409,13 @@ function setupBasicHandling() {
         // 브라우저 자동 스크롤로 페이지가 바뀌지 않게 한다 (터치는 touchend에서 처리)
         editorBodyEl.addEventListener('mousedown', () => {
             if (state.currentViewMode !== 'book-edit') return;
-            if (Date.now() < bookPinUntil) return; // 터치로 이미 고정된 경우(에뮬레이트 mousedown) 무시
+            if (Date.now() - lastBookTouchTime < 800) return; // 터치로 발생한 에뮬레이트 mousedown 무시
             const container = document.getElementById('editor-container');
             if (!container) return;
             const stride = Math.floor(container.clientWidth);
             if (stride <= 0) return;
-            bookPinPage = Math.round(container.scrollLeft / stride);
-            currentBookPageIndex = bookPinPage;
-            bookPinUntil = Date.now() + 700;
+            currentBookPageIndex = Math.round(container.scrollLeft / stride);
+            bookPinActive = true;
         });
     }
 }
