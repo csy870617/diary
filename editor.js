@@ -524,6 +524,21 @@ function scrollCursorIntoBookView() {
     return true;
 }
 
+// 책 모드에서 스크롤이 페이지 경계가 아니면(브라우저가 캐럿을 보이려 가로 스크롤한 경우 등)
+// 가장 가까운 페이지로 즉시 스냅해 화면이 한쪽으로 치우치지 않게 한다.
+function handleBookScrollSnap(e) {
+    if (!isBookNavMode() || isTurningPage) return;
+    const container = e.currentTarget;
+    const stride = Math.floor(container.clientWidth);
+    if (stride <= 0) return;
+    const nearest = Math.round(container.scrollLeft / stride);
+    const target = nearest * stride;
+    if (Math.abs(container.scrollLeft - target) > 1) {
+        currentBookPageIndex = nearest;
+        container.scrollLeft = target; // 페이지 경계로 정렬 (재진입은 위 임계값으로 1~2회 내 수렴)
+        updateBookNav();
+    }
+}
 function toggleBookEventListeners(enable) {
     const container = document.getElementById('editor-container');
     if (!container) return;
@@ -531,11 +546,13 @@ function toggleBookEventListeners(enable) {
     container.removeEventListener('touchstart', handleBookTouchStart);
     container.removeEventListener('touchmove', handleBookTouchMove);
     container.removeEventListener('touchend', handleBookTouchEnd);
+    container.removeEventListener('scroll', handleBookScrollSnap);
     if (enable) {
         container.addEventListener('wheel', handleBookWheel, { passive: false });
         container.addEventListener('touchstart', handleBookTouchStart, { passive: true });
         container.addEventListener('touchmove', handleBookTouchMove, { passive: false });
         container.addEventListener('touchend', handleBookTouchEnd, { passive: true });
+        container.addEventListener('scroll', handleBookScrollSnap, { passive: true });
     }
 }
 
