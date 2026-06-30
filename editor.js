@@ -15,7 +15,9 @@ let imgFullscreenOverlay = null; // 이미지 전체화면 보기 오버레이
 let autoSaveTimer = null;
 let isTurningPage = false;    
 let currentBookPageIndex = 0; 
-let touchStartX = 0;          
+let touchStartX = 0;
+let touchStartY = 0;
+let bookSwiping = false; // 책 편집 모드에서 가로 스와이프 판정 중
 let wheelLockTimer = null;    
 
 let selectionStartCell = null;
@@ -340,25 +342,45 @@ export async function triggerAutoSave() {
 }
 
 /* --- 책 모드 관련 핸들러 --- */
+function isBookNavMode() { return state.currentViewMode === 'book' || state.currentViewMode === 'book-edit'; }
 function handleBookWheel(e) {
-    if (state.currentViewMode !== 'book') return;
+    if (!isBookNavMode()) return;
+    // 가로 스크롤 의도면 그대로, 세로 휠도 페이지 이동으로 변환 (페이지뷰는 세로 스크롤이 없음)
+    const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
     e.preventDefault(); e.stopPropagation();
     if (wheelLockTimer) clearTimeout(wheelLockTimer);
-    if (!isTurningPage && Math.abs(e.deltaY) > 20) {
-        turnPage(e.deltaY > 0 ? 1 : -1);
-        isTurningPage = true; 
+    if (!isTurningPage && Math.abs(delta) > 20) {
+        turnPage(delta > 0 ? 1 : -1);
+        isTurningPage = true;
     }
     wheelLockTimer = setTimeout(() => { isTurningPage = false; wheelLockTimer = null; }, 500);
 }
-function handleBookTouchStart(e) { if (state.currentViewMode === 'book') touchStartX = e.changedTouches[0].screenX; }
-function handleBookTouchMove(e) { if (state.currentViewMode === 'book') e.preventDefault(); }
+function handleBookTouchStart(e) {
+    if (!isBookNavMode()) return;
+    touchStartX = e.changedTouches[0].screenX;
+    touchStartY = e.changedTouches[0].screenY;
+    bookSwiping = false;
+}
+function handleBookTouchMove(e) {
+    if (!isBookNavMode()) return;
+    if (state.currentViewMode === 'book') { e.preventDefault(); return; } // 읽기 책 모드: 항상 페이지 제스처
+    // 책 편집 모드: 가로 이동이 뚜렷할 때만 스와이프로 간주(편집/텍스트 선택 방해 방지)
+    const dx = e.changedTouches[0].screenX - touchStartX;
+    const dy = e.changedTouches[0].screenY - touchStartY;
+    if (!bookSwiping && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.3) bookSwiping = true;
+    if (bookSwiping) e.preventDefault(); // 스와이프 중 캐럿 이동/선택 억제
+}
 function handleBookTouchEnd(e) {
-    if (state.currentViewMode !== 'book' || isTurningPage) return;
-    const diff = touchStartX - e.changedTouches[0].screenX;
-    if (Math.abs(diff) > 50) {
-        turnPage(diff > 0 ? 1 : -1);
+    if (!isBookNavMode() || isTurningPage) return;
+    const diffX = touchStartX - e.changedTouches[0].screenX;
+    const diffY = touchStartY - e.changedTouches[0].screenY;
+    // 책 편집 모드에서는 가로 우세 스와이프만 페이지 이동 (탭/세로 이동은 편집으로 둠)
+    const horizontalDominant = Math.abs(diffX) > Math.abs(diffY);
+    if (Math.abs(diffX) > 50 && (state.currentViewMode === 'book' || horizontalDominant)) {
+        turnPage(diffX > 0 ? 1 : -1);
         isTurningPage = true; setTimeout(() => isTurningPage = false, 300);
     }
+    bookSwiping = false;
 }
 function handleBookResize() {
     if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') {
@@ -1483,7 +1505,7 @@ export function toggleViewMode(mode) {
     }
     document.querySelectorAll('.book-nav, #page-indicator, #book-slider-container, #btn-scroll-top').forEach(el => el.classList.add('hidden'));
     hideSelection();
-    toggleBookEventListeners(mode === 'book');
+    toggleBookEventListeners(mode === 'book' || mode === 'book-edit');
     if (mode === 'book') {
         editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false";
         linkifyContents(editBody);
