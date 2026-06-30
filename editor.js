@@ -18,7 +18,7 @@ let currentBookPageIndex = 0;
 let touchStartX = 0;
 let touchStartY = 0;
 let bookSwiping = false; // 책 편집 모드에서 가로 스와이프 판정 중
-let lastBookViewportW = 0; // 마지막 책 레이아웃 시 화면 너비 (키보드로 높이만 변한 경우 재배치 생략용)
+let lastBookColWidth = 0; // 마지막 책 레이아웃 시 컨테이너 폭 (키보드로 높이만 변한 경우 재배치 생략용)
 let wheelLockTimer = null;    
 
 let selectionStartCell = null;
@@ -398,9 +398,10 @@ function handleBookTouchEnd(e) {
 function handleBookResize() {
     if (state.currentViewMode !== 'book' && state.currentViewMode !== 'book-edit') return;
     const container = document.getElementById('editor-container');
-    // 책 편집 모드에서 너비는 그대로이고 높이만 변한 경우(가상 키보드 표시/숨김)는
+    // 책 편집 모드에서 컨테이너 폭(=컬럼 폭)이 그대로이고 높이만 변한 경우(가상 키보드 표시/숨김)는
     // 컬럼을 다시 계산하지 않는다. 재배치하면 내용이 흘러 현재 페이지가 어긋나며 화면이 튕긴다.
-    const widthChanged = window.innerWidth !== lastBookViewportW;
+    // 단, 폭이 바뀌면(회전/화면 변화) 반드시 재배치해야 컬럼 폭과 스크롤 보폭이 어긋나 화면이 한쪽으로 치우치지 않는다.
+    const widthChanged = !container || container.clientWidth !== lastBookColWidth;
     if (state.currentViewMode === 'book-edit' && !widthChanged) {
         if (container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
         return;
@@ -694,7 +695,7 @@ function markBookImageResized(img) {
 function updateBookLayout() {
     const container = document.getElementById('editor-container');
     if (!container) return;
-    lastBookViewportW = window.innerWidth; // 재배치 기준 너비 기록 (키보드로 높이만 변한 경우 구분)
+    lastBookColWidth = container.clientWidth; // 재배치 기준 컨테이너 폭 기록 (키보드로 높이만 변한 경우 구분)
     container.style.columnWidth = `${Math.floor(container.clientWidth)}px`;
     container.style.columnGap = '0px';
     container.style.height = `${getBookViewportHeight() - 120}px`;
