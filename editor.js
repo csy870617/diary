@@ -364,11 +364,20 @@ function handleBookTouchStart(e) {
 function handleBookTouchMove(e) {
     if (!isBookNavMode()) return;
     if (state.currentViewMode === 'book') { e.preventDefault(); return; } // 읽기 책 모드: 항상 페이지 제스처
-    // 책 편집 모드: 가로 이동이 뚜렷할 때만 스와이프로 간주(편집/텍스트 선택 방해 방지)
+    // 책 편집 모드: 가로 이동이 뚜렷하면 스와이프로 간주(편집/텍스트 선택 방해 방지)
     const dx = e.changedTouches[0].screenX - touchStartX;
     const dy = e.changedTouches[0].screenY - touchStartY;
-    if (!bookSwiping && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.3) bookSwiping = true;
-    if (bookSwiping) e.preventDefault(); // 스와이프 중 캐럿 이동/선택 억제
+    if (!bookSwiping && Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) {
+        bookSwiping = true;
+        // 모바일 contenteditable에서 가로 드래그로 시작된 텍스트 선택을 적극 해제
+        const sel = window.getSelection && window.getSelection();
+        if (sel && sel.removeAllRanges) sel.removeAllRanges();
+    }
+    if (bookSwiping) {
+        e.preventDefault(); // 스와이프 중 캐럿 이동/선택 억제
+        const sel = window.getSelection && window.getSelection();
+        if (sel && sel.removeAllRanges) sel.removeAllRanges();
+    }
 }
 function handleBookTouchEnd(e) {
     if (!isBookNavMode() || isTurningPage) return;
@@ -376,7 +385,10 @@ function handleBookTouchEnd(e) {
     const diffY = touchStartY - e.changedTouches[0].screenY;
     // 책 편집 모드에서는 가로 우세 스와이프만 페이지 이동 (탭/세로 이동은 편집으로 둠)
     const horizontalDominant = Math.abs(diffX) > Math.abs(diffY);
-    if (Math.abs(diffX) > 50 && (state.currentViewMode === 'book' || horizontalDominant)) {
+    if (Math.abs(diffX) > 40 && (state.currentViewMode === 'book' || (bookSwiping && horizontalDominant))) {
+        // 스와이프로 잡혔던 선택을 정리하고 페이지 이동
+        const sel = window.getSelection && window.getSelection();
+        if (sel && sel.removeAllRanges) sel.removeAllRanges();
         turnPage(diffX > 0 ? 1 : -1);
         isTurningPage = true; setTimeout(() => isTurningPage = false, 300);
     }
