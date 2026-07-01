@@ -7,7 +7,7 @@ import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, flushClou
 import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, setTTSStart, setTTSEnd, resetTTSRange, playSelection, updateSpeedDisplay, updatePitchDisplay, updateGapDisplay, initTTS, updateTTSRange, seekTTSByPercent, saveTTSVoice } from './tts.js';
 import { initFaithsSSO } from './faiths-sso.js';
 
-initFaithsSSO();
+const faithsSsoReady = initFaithsSSO();
 
 window.addNewCategory = addNewCategory;
 window.restoreEntry = restoreEntry;
@@ -88,7 +88,7 @@ function sanitizeSharedHtml(html) {
     return doc.body.innerHTML;
 }
 
-function init() {
+async function init() {
     if (!history.state) history.replaceState({ modal: 'main' }, null, '');
 
     initTheme();
@@ -123,10 +123,17 @@ function init() {
                     // 편집 가능한 모드로 작성 중일 때 동기화하면 작성 내용이 덮어써지므로 건너뜀
                     const writeModal = document.getElementById('write-modal');
                     if (writeModal && !writeModal.classList.contains('hidden')) return;
+                    // 네트워크 지연 시 이전 주기 동기화가 아직 끝나지 않았으면 겹쳐 실행하지 않음
+                    if (window.periodicSyncBusy) return;
                     if (!document.hidden && localStorage.getItem('is_faith_logged_in') === 'true') {
-                        const valid = await ensureTokenOnResume();
-                        // 주기 폴링은 다른 기기 변경분만 받아오는 pull 전용 (불필요한 전체 재업로드 방지)
-                        if (valid) syncFromDrive(true).catch(err => console.error('주기 동기화 실패:', err));
+                        window.periodicSyncBusy = true;
+                        try {
+                            const valid = await ensureTokenOnResume();
+                            // 주기 폴링은 다른 기기 변경분만 받아오는 pull 전용 (불필요한 전체 재업로드 방지)
+                            if (valid) await syncFromDrive(true).catch(err => console.error('주기 동기화 실패:', err));
+                        } finally {
+                            window.periodicSyncBusy = false;
+                        }
                     }
                 }, 20000);
             }
@@ -216,6 +223,10 @@ function init() {
     setupListeners();
     renderStickers();
 
+    // FAITHS SSO 응답(또는 타임아웃)을 먼저 기다려, 응답이 늦게 도착해
+    // 로그인 모달이 잠깐 떴다가 닫히는 깜빡임을 방지한다.
+    await faithsSsoReady;
+
     // 로그인 안 된 상태 + 처음 사용자(이메일 없음)만 로그인 모달 표시
     // 이전에 로그인한 적 있는 사용자는 일시적 토큰 만료일 수 있으므로 모달 없이 진행
     if (localStorage.getItem('is_faith_logged_in') !== 'true' && !localStorage.getItem('faith_user_email')) {
@@ -304,7 +315,7 @@ function setupListeners() {
 
     window.addEventListener('click', (e) => {
         const link = e.target.closest('#editor-body a');
-        if (link && link.href && document.getElementById('editor-body').getAttribute('contenteditable') === "false") {
+        if (link && link.href && document.getElementById('editor-body')?.getAttribute('contenteditable') === "false") {
             e.preventDefault(); e.stopPropagation(); window.open(link.href, '_blank')?.focus(); return;
         }
         const sliderContainer = document.getElementById('book-slider-container');
@@ -522,12 +533,12 @@ function setupUIListeners() {
         const r = parseInt(document.getElementById('table-rows').value) || 3;
         const c = parseInt(document.getElementById('table-cols').value) || 3;
         insertTable(r, c);
-        tableModal.classList.add('hidden');
+        tableModal?.classList.add('hidden');
     });
-    
+
     // 표 모달 닫기
-    document.getElementById('btn-cancel-table')?.addEventListener('click', () => { 
-        tableModal.classList.add('hidden'); 
+    document.getElementById('btn-cancel-table')?.addEventListener('click', () => {
+        tableModal?.classList.add('hidden');
     });
     
     // 표 편집 버튼들
@@ -636,8 +647,8 @@ function setupUIListeners() {
     document.getElementById('close-move-btn')?.addEventListener('click', () => closeAllModals(true));
     document.getElementById('ctx-rename')?.addEventListener('click', renameEntryAction);
     document.getElementById('ctx-move')?.addEventListener('click', openMoveModal);
-    document.getElementById('ctx-copy')?.addEventListener('click', () => { duplicateEntry(state.contextTargetId); document.getElementById('context-menu').classList.add('hidden'); });
-    document.getElementById('ctx-delete')?.addEventListener('click', () => { moveToTrash(state.contextTargetId); document.getElementById('context-menu').classList.add('hidden'); });
+    document.getElementById('ctx-copy')?.addEventListener('click', () => { duplicateEntry(state.contextTargetId); document.getElementById('context-menu')?.classList.add('hidden'); });
+    document.getElementById('ctx-delete')?.addEventListener('click', () => { moveToTrash(state.contextTargetId); document.getElementById('context-menu')?.classList.add('hidden'); });
     document.getElementById('ctx-cat-rename')?.addEventListener('click', renameCategoryAction);
     document.getElementById('ctx-cat-assign-folder')?.addEventListener('click', openFolderAssignModal);
     document.getElementById('ctx-cat-delete')?.addEventListener('click', deleteCategoryAction);

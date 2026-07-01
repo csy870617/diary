@@ -1303,7 +1303,7 @@ function setupBasicHandling() {
                 triggerAutoSave();
                 return;
             }
-            if (currentSelectedElement && currentSelectedElement.tagName !== 'TABLE' && document.activeElement.tagName !== 'TD') { 
+            if (currentSelectedElement && currentSelectedElement.tagName !== 'TABLE' && document.activeElement?.tagName !== 'TD') {
                 e.preventDefault(); 
                 saveBeforeChange('delete'); 
                 deleteSelectedElement(); 
@@ -1668,7 +1668,7 @@ export function formatDoc(cmd, value = null) {
             else { img.style.marginLeft = 'auto'; img.style.marginRight = 'auto'; }
             updateSelectionBox();
         }
-        else { const selection = window.getSelection(); const td = selection.anchorNode?.nodeType === 3 ? selection.anchorNode.parentElement.closest('td') : selection.anchorNode.closest('td'); if (td) td.style.textAlign = alignValue; else document.execCommand(cmd, false, value); }
+        else { const selection = window.getSelection(); const td = selection.anchorNode?.nodeType === 3 ? selection.anchorNode.parentElement?.closest('td') : selection.anchorNode?.closest('td'); if (td) td.style.textAlign = alignValue; else document.execCommand(cmd, false, value); }
     } else {
         const selectedCells = document.querySelectorAll('td.selected-cell');
         if (selectedCells.length > 0) {
@@ -2294,7 +2294,7 @@ export function insertTable(rows, cols) {
 
     triggerAutoSave();
 }
-export function createHyperlink() { const selection = window.getSelection(); if (selection.rangeCount > 0 && selection.toString().length > 0) { const url = prompt("연결할 주소(URL)를 입력하세요:", "https://"); if (url && url !== "https://") { let href = url.trim(); if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href)) href = 'https://' + href; if (!/^https?:\/\//i.test(href)) { alert("http(s) 주소만 링크로 사용할 수 있습니다."); return; } saveBeforeChange('link'); document.execCommand('createLink', false, href); const anchor = selection.anchorNode.parentElement; if (anchor && anchor.tagName === 'A') { anchor.target = '_blank'; anchor.rel = 'noopener noreferrer'; anchor.style.color = '#2563EB'; anchor.style.textDecoration = 'underline'; anchor.style.cursor = 'pointer'; } triggerAutoSave(); } } else { alert("링크를 걸 문구를 먼저 드래그하여 선택해주세요."); } }
+export function createHyperlink() { const selection = window.getSelection(); if (selection.rangeCount > 0 && selection.toString().length > 0) { const url = prompt("연결할 주소(URL)를 입력하세요:", "https://"); if (url && url !== "https://") { let href = url.trim(); if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href)) href = 'https://' + href; if (!/^https?:\/\//i.test(href)) { alert("http(s) 주소만 링크로 사용할 수 있습니다."); return; } saveBeforeChange('link'); document.execCommand('createLink', false, href); const anchor = selection.anchorNode?.parentElement; if (anchor && anchor.tagName === 'A') { anchor.target = '_blank'; anchor.rel = 'noopener noreferrer'; anchor.style.color = '#2563EB'; anchor.style.textDecoration = 'underline'; anchor.style.cursor = 'pointer'; } triggerAutoSave(); } } else { alert("링크를 걸 문구를 먼저 드래그하여 선택해주세요."); } }
 
 /**
  * 표 편집 모달 열기 (편집 모드)

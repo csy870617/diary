@@ -1,7 +1,13 @@
 import { handleAuthClick, handleSignoutClick } from './drive.js';
 import { openModal, closeAllModals } from './ui.js';
 
+let authListenersInitialized = false;
+
 export function setupAuthListeners() {
+    // 재호출 시 리스너/전역 콜백이 중복 등록되는 것을 방지
+    if (authListenersInitialized) return;
+    authListenersInitialized = true;
+
     // 헤더의 '동기화' 버튼 → 바로 구글 계정 선택 화면 호출
     const loginTriggerBtn = document.getElementById('login-trigger-btn');
     if(loginTriggerBtn) {

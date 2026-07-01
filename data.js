@@ -47,7 +47,7 @@ export async function saveEntry() {
     const nowISO = new Date().toISOString(); 
 
     // 이미지·표·스티커만 있는 글도 저장되도록 텍스트 외 콘텐츠 존재 여부도 확인 (소제목만 있어도 저장)
-    if(!title.trim() && !subtitle.trim() && !bodyEl.innerText.trim() && !bodyEl.querySelector('img, table')) return;
+    if(!(title || '').trim() && !(subtitle || '').trim() && !bodyEl.innerText.trim() && !bodyEl.querySelector('img, table')) return;
 
     if (!state.editingId) state.editingId = genEntryId();
     const index = state.entries.findIndex(e => e.id === state.editingId);

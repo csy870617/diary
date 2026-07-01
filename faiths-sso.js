@@ -14,20 +14,35 @@ function decodeIdTokenEmail(idToken) {
     }
 }
 
+// 반환된 Promise는 SSO 응답을 받았거나(성공/무응답 판별 후) 타임아웃되면 resolve된다.
+// 호출부(script.js)는 이 Promise를 기다린 뒤에 로그인 모달 표시 여부를 판단해,
+// 부모 창의 응답이 늦게 도착해 모달이 잠깐 떴다가 닫히는 깜빡임을 방지한다.
 export function initFaithsSSO() {
-    if (window.parent === window) return; // FAITHS iframe 안이 아니면 아무것도 하지 않음
-    if (localStorage.getItem('is_faith_logged_in') === 'true') return; // 이미 로그인됨
-    if (localStorage.getItem('faith_user_email')) return; // 이미 아는 사용자(로그인 모달 안 뜸)
+    if (window.parent === window) return Promise.resolve(); // FAITHS iframe 안이 아니면 아무것도 하지 않음
+    if (localStorage.getItem('is_faith_logged_in') === 'true') return Promise.resolve(); // 이미 로그인됨
+    if (localStorage.getItem('faith_user_email')) return Promise.resolve(); // 이미 아는 사용자(로그인 모달 안 뜸)
 
-    function onMsg(e) {
-        if (e.origin !== FAITHS_ORIGIN) return;
-        if (!e.data || e.data.type !== 'faiths-google-idtoken' || !e.data.idToken) return;
-        window.removeEventListener('message', onMsg);
-        const email = decodeIdTokenEmail(e.data.idToken);
-        if (email) localStorage.setItem('faith_user_email', email);
-        const loginModal = document.getElementById('login-modal');
-        if (loginModal) loginModal.classList.add('hidden');
-    }
-    window.addEventListener('message', onMsg);
-    window.parent.postMessage({ type: 'faiths-request-idtoken' }, FAITHS_ORIGIN);
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = () => {
+            if (settled) return;
+            settled = true;
+            window.removeEventListener('message', onMsg);
+            clearTimeout(timer);
+            resolve();
+        };
+        function onMsg(e) {
+            if (e.origin !== FAITHS_ORIGIN) return;
+            if (!e.data || e.data.type !== 'faiths-google-idtoken' || !e.data.idToken) return;
+            const email = decodeIdTokenEmail(e.data.idToken);
+            if (email) localStorage.setItem('faith_user_email', email);
+            const loginModal = document.getElementById('login-modal');
+            if (loginModal) loginModal.classList.add('hidden');
+            finish();
+        }
+        window.addEventListener('message', onMsg);
+        window.parent.postMessage({ type: 'faiths-request-idtoken' }, FAITHS_ORIGIN);
+        // 부모 창이 응답하지 않는 경우 무한 대기하지 않도록 타임아웃 후 리스너 정리
+        const timer = setTimeout(finish, 2000);
+    });
 }
