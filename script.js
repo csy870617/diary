@@ -240,8 +240,7 @@ function updateAuthUI(isLoggedIn) {
           loginTriggerBtn = document.getElementById('login-trigger-btn'), 
           loginModal = document.getElementById('login-modal'), 
           refreshBtn = document.getElementById('refresh-btn'),
-          writeSyncBtn = document.getElementById('write-sync-btn'),
-          loginMsgArea = document.getElementById('login-msg-area');
+          writeSyncBtn = document.getElementById('write-sync-btn');
 
     if (isLoggedIn) {
         if (logoutBtn) logoutBtn.classList.remove('hidden');
@@ -249,13 +248,11 @@ function updateAuthUI(isLoggedIn) {
         if (loginModal) loginModal.classList.add('hidden');
         if (refreshBtn) refreshBtn.classList.remove('hidden');
         if (writeSyncBtn) writeSyncBtn.classList.remove('hidden');
-        if (loginMsgArea) loginMsgArea.classList.add('hidden');
     } else {
         if (logoutBtn) logoutBtn.classList.add('hidden');
         if (loginTriggerBtn) loginTriggerBtn.classList.remove('hidden');
         if (refreshBtn) refreshBtn.classList.add('hidden');
         if (writeSyncBtn) writeSyncBtn.classList.add('hidden');
-        if (loginMsgArea) loginMsgArea.classList.remove('hidden');
     }
 }
 
