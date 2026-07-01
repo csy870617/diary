@@ -2,6 +2,7 @@ import { GOOGLE_CONFIG, APP_FOLDER_NAME, DB_FILE_NAME } from './config.js';
 import { state, saveCategoriesToLocal, isReadOnlyView, migrateRootOrder } from './state.js';
 import { renderEntries, renderTabs, renderFolders } from './ui.js';
 import { refreshEditorContent, reloadEntryIntoEditor } from './editor.js';
+import { sanitizeExternalHtml } from './utils.js';
 
 let tokenClient;
 let gapiInited = false;
@@ -499,18 +500,35 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
         const fileMeta = await findDBFileMeta(folderId);
 
         let cloudData = null;
+        let cloudParseFailed = false;
         if (fileMeta) {
             if (!lastCloudModifiedTime || fileMeta.modifiedTime !== lastCloudModifiedTime) {
                 const response = await gapi.client.drive.files.get({ fileId: fileMeta.id, alt: 'media' });
                 try {
                     cloudData = typeof response.result === 'string' ? JSON.parse(response.result) : response.result;
+                    // 다른 기기/외부에서 온 클라우드 데이터를 그대로 신뢰하지 않고,
+                    // 본문 HTML을 붙여넣기와 동일한 허용목록 기준으로 한 번 더 정제한다
+                    // (Drive 파일이 수동으로 조작된 경우의 스크립트 삽입을 방지하는 방어적 조치).
+                    if (cloudData && Array.isArray(cloudData.entries)) {
+                        cloudData.entries.forEach(e => {
+                            if (e && typeof e.body === 'string') e.body = sanitizeExternalHtml(e.body);
+                        });
+                    }
+                    lastCloudModifiedTime = fileMeta.modifiedTime;
                 } catch (parseErr) {
-                    // 클라우드 파일이 손상된 경우 → 병합 생략하고 로컬 데이터로 덮어씀
-                    console.error("클라우드 DB 파싱 실패 - 로컬 데이터로 덮어씁니다:", parseErr);
+                    // 클라우드 파일이 손상된 경우: 병합/업로드를 모두 건너뛰어 다른 기기의 정상 데이터를
+                    // 실수로 덮어쓰지 않도록 하고, lastCloudModifiedTime도 갱신하지 않아
+                    // 다음 동기화에서 다시 읽기를 시도하게 한다.
+                    console.error("클라우드 DB 파싱 실패:", parseErr);
                     cloudData = null;
+                    cloudParseFailed = true;
                 }
-                lastCloudModifiedTime = fileMeta.modifiedTime;
             }
+        }
+
+        if (cloudParseFailed) {
+            showSyncWarning("클라우드 데이터를 일시적으로 읽지 못했습니다. 다음 동기화에서 다시 시도합니다.");
+            return;
         }
 
         // 편집 중인 글이 편집 가능한 모드로 열려 있는지 (이 글은 동기화로 덮어쓰지 않도록 보호)

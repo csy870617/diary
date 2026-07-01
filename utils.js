@@ -44,7 +44,7 @@ let globalCellClipboard = { cellData: null, rows: 0, cols: 0 };
  * 서식(색상, 굵기, 기울임, 밑줄, 글꼴 등)은 보존하고
  * 위험한 요소(script, iframe 등)는 제거합니다.
  */
-function sanitizeExternalHtml(html) {
+export function sanitizeExternalHtml(html) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
 

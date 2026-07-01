@@ -47,7 +47,12 @@ export function saveCategoriesToLocal() {
         rootOrder: state.rootOrder,
         updatedAt: state.categoryUpdatedAt || new Date().toISOString()
     };
-    localStorage.setItem('faithCatData', JSON.stringify(data));
+    try {
+        localStorage.setItem('faithCatData', JSON.stringify(data));
+    } catch (e) {
+        // 저장공간 부족(quota) 등으로 저장이 실패해도 이후 로직(카테고리 변경 등)이 조용히 중단되지 않도록 방지
+        console.error("카테고리 로컬 저장 실패", e);
+    }
 }
 
 export function migrateRootOrder() {
@@ -101,11 +106,14 @@ export function loadCategoriesFromLocal() {
             const parsed = JSON.parse(localData);
             // 손상된 데이터로 비배열이 들어오면 이후 렌더링 전체가 깨지므로 배열 여부까지 검증
             if (Array.isArray(parsed.categories) && Array.isArray(parsed.order)) {
-                state.allCategories = parsed.categories;
-                state.categoryOrder = parsed.order;
-                state.allFolders = Array.isArray(parsed.folders) ? parsed.folders : [];
-                state.folderOrder = Array.isArray(parsed.folderOrder) ? parsed.folderOrder : [];
-                state.rootOrder = Array.isArray(parsed.rootOrder) ? parsed.rootOrder : [];
+                // 배열 안의 개별 항목도 id를 가진 객체인지 확인해, 손상된 항목이 섞여 있어도
+                // 이후 렌더링 단계(예: c.id/c.name 참조)에서 죽지 않도록 걸러낸다.
+                const isValidItem = (item) => item && typeof item === 'object' && typeof item.id === 'string';
+                state.allCategories = parsed.categories.filter(isValidItem);
+                state.categoryOrder = parsed.order.filter(id => typeof id === 'string');
+                state.allFolders = Array.isArray(parsed.folders) ? parsed.folders.filter(isValidItem) : [];
+                state.folderOrder = Array.isArray(parsed.folderOrder) ? parsed.folderOrder.filter(id => typeof id === 'string') : [];
+                state.rootOrder = Array.isArray(parsed.rootOrder) ? parsed.rootOrder.filter(id => typeof id === 'string') : [];
                 state.categoryUpdatedAt = parsed.updatedAt || new Date(0).toISOString();
                 migrateRootOrder();
                 const exists = state.allCategories.find(c => c.id === state.currentCategory && !c.isDeleted);

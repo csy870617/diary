@@ -529,7 +529,9 @@ export function playTTS() {
     updateTimeDisplay();
     startTimeTicker();
     startTTSHeartbeat();
-    speakNext();
+    // cancel() 직후 곧바로 speak()를 호출하면 일부 브라우저(Chrome)에서 새 발화가
+    // 무시되거나 엔진이 꼬이는 경우가 있어, 한 틱 미뤄서 cancel()이 먼저 처리되게 한다.
+    setTimeout(speakNext, 0);
 }
 
 export function seekTTSByPercent(percent) {
@@ -563,7 +565,9 @@ export function seekTTSByPercent(percent) {
         ttsPlayStartMs = Date.now();
         startTimeTicker();
         startTTSHeartbeat();
-        speakNext();
+        // cancel() 직후 곧바로 speak()를 호출하면 일부 브라우저(Chrome)에서 새 발화가
+        // 무시되거나 엔진이 꼬이는 경우가 있어, 한 틱 미뤄서 cancel()이 먼저 처리되게 한다.
+        setTimeout(speakNext, 0);
     } else if (wasPaused) {
         // cancel()로 발화가 사라졌으므로 재개 시 speakNext로 진입해야 함
         ttsGapInterrupted = true;
