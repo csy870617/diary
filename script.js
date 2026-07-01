@@ -5,6 +5,9 @@ import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlob
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, flushCloudSync, ensureTokenOnResume, startKeepAlive } from './drive.js';
 import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, setTTSStart, setTTSEnd, resetTTSRange, playSelection, updateSpeedDisplay, updatePitchDisplay, updateGapDisplay, initTTS, updateTTSRange, seekTTSByPercent, saveTTSVoice } from './tts.js';
+import { initFaithsSSO } from './faiths-sso.js';
+
+initFaithsSSO();
 
 window.addNewCategory = addNewCategory;
 window.restoreEntry = restoreEntry;
