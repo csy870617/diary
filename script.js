@@ -236,23 +236,17 @@ async function init() {
 }
 
 function updateAuthUI(isLoggedIn) {
-    const logoutBtn = document.getElementById('logout-btn'), 
-          loginTriggerBtn = document.getElementById('login-trigger-btn'), 
-          loginModal = document.getElementById('login-modal'), 
-          refreshBtn = document.getElementById('refresh-btn'),
-          writeSyncBtn = document.getElementById('write-sync-btn');
+    const logoutBtn = document.getElementById('logout-btn'),
+          loginTriggerBtn = document.getElementById('login-trigger-btn'),
+          loginModal = document.getElementById('login-modal');
 
     if (isLoggedIn) {
         if (logoutBtn) logoutBtn.classList.remove('hidden');
         if (loginTriggerBtn) loginTriggerBtn.classList.add('hidden');
         if (loginModal) loginModal.classList.add('hidden');
-        if (refreshBtn) refreshBtn.classList.remove('hidden');
-        if (writeSyncBtn) writeSyncBtn.classList.remove('hidden');
     } else {
         if (logoutBtn) logoutBtn.classList.add('hidden');
         if (loginTriggerBtn) loginTriggerBtn.classList.remove('hidden');
-        if (refreshBtn) refreshBtn.classList.add('hidden');
-        if (writeSyncBtn) writeSyncBtn.classList.add('hidden');
     }
 }
 
@@ -388,10 +382,6 @@ function setupUIListeners() {
     });
     
     document.getElementById('search-input')?.addEventListener('input', (e) => renderEntries(e.target.value));
-    // 수동 동기화는 사용자가 의도한 동작이므로 충돌 시 확인창을 띄움
-    document.getElementById('refresh-btn')?.addEventListener('click', () => syncFromDrive(false, true).catch(err => console.error('동기화 실패:', err)));
-    // 글 작성 화면에서도 수동 동기화 가능하도록
-    document.getElementById('write-sync-btn')?.addEventListener('click', () => syncFromDrive(false, true).catch(err => console.error('동기화 실패:', err)));
 
     // --- MS Word 스타일 글자 크기 컨트롤 ---
     const FONT_SIZE_PRESETS = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72];
