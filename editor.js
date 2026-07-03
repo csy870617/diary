@@ -336,6 +336,10 @@ export async function triggerAutoSave() {
         autoSaveTimer = null;
         const editBody = document.getElementById('editor-body');
         if (!editBody || (state.currentViewMode !== 'default' && state.currentViewMode !== 'book-edit')) return;
+        // 에디터가 이미 닫힌 뒤(뒤로가기 등)에는 뒤늦게 저장하지 않음
+        // (닫은 직후 삭제한 글이 자동저장으로 되살아나는 문제 방지)
+        const writeModal = document.getElementById('write-modal');
+        if (writeModal && writeModal.classList.contains('hidden')) return;
         try {
             await saveEntry(); // 로컬에는 즉시 저장
             if (window.gapi && gapi.client && gapi.client.getToken()) scheduleCloudSync(); // 클라우드 업로드는 묶어서 전송
@@ -1314,7 +1318,12 @@ function setupBasicHandling() {
         // 일반 타이핑 시 히스토리 기록 (단어 경계에서)
         if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1) {
             if (WORD_BREAK_CHARS.includes(e.key)) {
-                saveBeforeChange('typing');
+                // 매 단어 경계마다 전체 본문을 직렬화하면 이미지가 많은 긴 글에서
+                // 타이핑 렉의 원인이 되므로, beforeinput과 동일한 그룹핑 게이트를 적용
+                const now = Date.now();
+                if (lastInputType !== 'typing' || now - lastInputTime > TYPING_GROUP_DELAY) {
+                    saveBeforeChange('typing');
+                }
             }
         }
     }
@@ -1322,8 +1331,12 @@ function setupBasicHandling() {
     // IME 조합 이벤트 (한글 등)
     editorBody.addEventListener('compositionstart', () => {
         isComposing = true;
-        // 조합 시작 전 상태 저장
-        pendingSnapshot = createSnapshot();
+        // 조합 시작 전 상태 저장 — 단, 음절마다 조합이 반복되는 IME(안드로이드 등)에서
+        // 매 음절 전체 본문 직렬화가 일어나지 않도록 타이핑 그룹핑 게이트를 적용
+        const now = Date.now();
+        if (lastInputType !== 'typing' || now - lastInputTime > TYPING_GROUP_DELAY) {
+            pendingSnapshot = createSnapshot();
+        }
     });
     
     editorBody.addEventListener('compositionend', () => {
@@ -1422,10 +1435,10 @@ function setupBasicHandling() {
 
 /**
  * 저장된 본문을 innerHTML에 넣기 전에 위험 요소만 제거합니다.
- * (utils.js의 sanitizeExternalHtml은 export되지 않아 가벼운 로컬 버전 사용.
- * 서식은 그대로 보존하고 script/이벤트 핸들러/javascript: URL만 차단)
+ * 서식은 그대로 보존하고 script/이벤트 핸들러/javascript: URL만 차단.
+ * (PDF 내보내기 등 본문을 실제 DOM에 넣는 다른 경로에서도 공용으로 사용)
  */
-function sanitizeEntryHtml(html) {
+export function sanitizeEntryHtml(html) {
     if (!html) return '';
     const doc = new DOMParser().parseFromString(html, 'text/html');
     doc.querySelectorAll('script, iframe, object, embed, form, meta, link, style, base').forEach(el => el.remove());
@@ -1652,8 +1665,8 @@ export function formatDoc(cmd, value = null) {
         return;
     }
 
-    saveBeforeChange('format'); 
-    if (!document.activeElement.closest('#editor-body')) editor.focus();
+    saveBeforeChange('format');
+    if (!document.activeElement?.closest('#editor-body')) editor.focus();
 
     if (cmd.startsWith('justify')) {
         const selectedCells = document.querySelectorAll('td.selected-cell');
@@ -1928,7 +1941,12 @@ function openImageFullscreen(src) {
     document.addEventListener('keydown', fullscreenEscHandler);
 }
 function closeImageFullscreen() {
-    if (imgFullscreenOverlay) imgFullscreenOverlay.classList.remove('show');
+    if (imgFullscreenOverlay) {
+        imgFullscreenOverlay.classList.remove('show');
+        // 대용량 base64 이미지가 닫힌 뒤에도 DOM에 남아 메모리를 점유하지 않도록 해제
+        const im = imgFullscreenOverlay.querySelector('img');
+        if (im) im.src = '';
+    }
     document.removeEventListener('keydown', fullscreenEscHandler);
 }
 let isResizing = false, startX2, startY2, startWidth2, startHeight2;

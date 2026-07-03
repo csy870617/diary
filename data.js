@@ -4,7 +4,8 @@ import { saveToDrive } from './drive.js';
 import { getCleanBodyHtml } from './editor.js';
 
 // 같은 밀리초에 여러 번 호출돼도 충돌하지 않도록 임의 접미사를 붙인 ID 생성
-function genEntryId() {
+// (drive.js의 동기화 충돌 사본 생성에서도 같은 규칙을 쓰도록 export)
+export function genEntryId() {
     return Date.now().toString() + '_' + Math.random().toString(36).slice(2, 7);
 }
 

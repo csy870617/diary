@@ -3,6 +3,7 @@ import { state, saveCategoriesToLocal, isReadOnlyView, migrateRootOrder } from '
 import { renderEntries, renderTabs, renderFolders } from './ui.js';
 import { refreshEditorContent, reloadEntryIntoEditor } from './editor.js';
 import { sanitizeExternalHtml } from './utils.js';
+import { genEntryId } from './data.js';
 
 let tokenClient;
 let gapiInited = false;
@@ -360,6 +361,7 @@ export function handleAuthClick() {
 export async function handleSignoutClick(callback) {
     const hasGapi = () => typeof gapi !== 'undefined' && !!gapi.client;
     // 로그아웃 전 마지막 동기화 시도 (진행 중인 동기화는 최대 10초까지 완료 대기)
+    let finalSyncOk = false;
     try {
         // 대기 중인 디바운스 업로드가 있으면 먼저 즉시 전송
         if (cloudSyncTimer) { clearTimeout(cloudSyncTimer); cloudSyncTimer = null; }
@@ -368,14 +370,25 @@ export async function handleSignoutClick(callback) {
         }
         const token = hasGapi() ? gapi.client.getToken() : null;
         if (token) {
-            await saveToDrive();
-            // 진행 중이던 동기화 때문에 위 호출이 건너뛰어졌으면(pendingSync) 완료까지 한 번 더 대기
-            if (currentSyncPromise) {
+            finalSyncOk = await saveToDrive() === true;
+            // 진행 중이던 동기화 때문에 위 호출이 건너뛰어졌으면(pendingSync) 완료까지 대기 후 한 번 더 시도
+            if (!finalSyncOk && currentSyncPromise) {
                 await Promise.race([currentSyncPromise, new Promise(r => setTimeout(r, 10000))]);
+                finalSyncOk = await saveToDrive() === true;
             }
         }
     } catch(e) {
         console.warn("로그아웃 전 동기화 실패:", e);
+    }
+    // 마지막 동기화가 확인되지 않았다면(오프라인·토큰 만료 등) 로컬 데이터를 지우기 전에 확인
+    // — 클라우드에 올라가지 않은 글이 있으면 로그아웃 시 복구 불가하므로
+    if (!finalSyncOk) {
+        const proceed = confirm(
+            "클라우드 동기화를 완료하지 못했습니다.\n" +
+            "로그아웃하면 이 기기에만 저장된(아직 동기화되지 않은) 변경 내용이 삭제될 수 있습니다.\n\n" +
+            "그래도 로그아웃할까요?"
+        );
+        if (!proceed) return;
     }
     const token = hasGapi() ? gapi.client.getToken() : null;
     if (token !== null) {
@@ -446,6 +459,11 @@ async function checkAuthAndSync(callback, onReady) {
             }
         }
         // 다른 오류 (네트워크 등) → 로그인 상태 유지, 동기화만 실패
+        // 단, currentUser가 비면 이메일 표시 등에서 null 참조가 나므로 저장된 이메일로 폴백
+        if (!state.currentUser) {
+            const savedEmail = localStorage.getItem('faith_user_email') || '';
+            state.currentUser = { emailAddress: savedEmail, displayName: savedEmail };
+        }
     }
     // 로그인 성공으로 UI 업데이트 (동기화 실패와 무관하게)
     if(callback) callback(true);
@@ -467,15 +485,17 @@ function toggleSpinners(active) {
     });
 }
 
+// 반환값: 동기화가 실제로 완료되면 true, 실패/건너뜀이면 false
+// (로그아웃 전 마지막 동기화처럼 성공 여부 확인이 필요한 호출부에서 사용)
 export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
-    if (localStorage.getItem('is_faith_logged_in') !== 'true') return;
-    if (isSyncing) { if (!pullOnly) pendingSync = true; return; }
+    if (localStorage.getItem('is_faith_logged_in') !== 'true') return false;
+    if (isSyncing) { if (!pullOnly) pendingSync = true; return false; }
 
     const isValid = await ensureValidToken(true);
     if (!isValid) {
         console.warn("saveToDrive: 토큰이 유효하지 않아 동기화를 건너뜁니다.");
         showSyncWarning("클라우드 동기화 실패: 로그인이 필요합니다.");
-        return;
+        return false;
     }
 
     const runId = ++syncRunId;
@@ -528,7 +548,7 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
 
         if (cloudParseFailed) {
             showSyncWarning("클라우드 데이터를 일시적으로 읽지 못했습니다. 다음 동기화에서 다시 시도합니다.");
-            return;
+            return false; // 업로드까지 못 갔으므로 이번 동기화는 미완료로 보고
         }
 
         // 편집 중인 글이 편집 가능한 모드로 열려 있는지 (이 글은 동기화로 덮어쓰지 않도록 보호)
@@ -640,9 +660,10 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
         }
     };
 
+    let syncOk = false;
     try {
         try {
-            await doSync();
+            syncOk = (await doSync()) !== false;
         } catch (err) {
             // 서버에서 폐기된 토큰(401, authError 403) → 갱신 후 1회만 재시도
             const isAuthErr = err && (err.status === 401 ||
@@ -650,7 +671,7 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
             if (isAuthErr && tokenClient) {
                 const refreshed = await silentTokenRefreshWithRetry();
                 if (!refreshed) throw err;
-                await doSync();
+                syncOk = (await doSync()) !== false;
             } else {
                 throw err;
             }
@@ -673,6 +694,7 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
         if (currentSyncPromise === myPromise) currentSyncPromise = null;
         resolveRun();
     }
+    return syncOk;
 }
 
 export async function syncFromDrive(pullOnly = false, promptOnConflict = false) { await saveToDrive(pullOnly, promptOnConflict); }
@@ -785,7 +807,7 @@ function mergeEntries(localList, cloudList, protectedId, baseMap, conflictBox) {
             const nowISO = new Date().toISOString();
             const copy = {
                 ...loser,
-                id: Date.now().toString() + '_' + Math.random().toString(36).slice(2, 7),
+                id: genEntryId(),
                 title: (loser.title || '제목 없음') + ' (동기화 충돌 사본)',
                 timestamp: nowISO, modifiedAt: nowISO, isDeleted: false, isPurged: false
             };
@@ -828,8 +850,13 @@ function mergeCategories(localState, cloudData) {
     }
 }
 
+// Drive 검색 쿼리(q)의 작은따옴표 문자열 안에 이름을 안전하게 넣기 위한 이스케이프
+function escapeDriveQuery(value) {
+    return String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
 async function ensureAppFolder() {
-    const q = `mimeType='application/vnd.google-apps.folder' and name='${APP_FOLDER_NAME}' and trashed=false`;
+    const q = `mimeType='application/vnd.google-apps.folder' and name='${escapeDriveQuery(APP_FOLDER_NAME)}' and trashed=false`;
     const response = await gapi.client.drive.files.list({ q, fields: 'files(id, name)' });
     if (response.result.files.length > 0) return response.result.files[0].id;
     const res = await gapi.client.drive.files.create({ resource: { name: APP_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' }, fields: 'id' });
@@ -837,7 +864,7 @@ async function ensureAppFolder() {
 }
 
 async function findDBFileMeta(folderId) {
-    const q = `name='${DB_FILE_NAME}' and '${folderId}' in parents and trashed=false`;
+    const q = `name='${escapeDriveQuery(DB_FILE_NAME)}' and '${escapeDriveQuery(folderId)}' in parents and trashed=false`;
     const response = await gapi.client.drive.files.list({ q, orderBy: 'modifiedTime desc', fields: 'files(id, name, modifiedTime)' });
     return response.result.files.length > 0 ? response.result.files[0] : null;
 }

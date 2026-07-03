@@ -1,3 +1,15 @@
+// URL 끝에 붙은 문장부호(마침표·쉼표·닫는 괄호 등)는 링크에 포함하지 않도록 분리
+// 단, URL 안에 여는 괄호가 더 많으면(위키백과식 주소) 닫는 괄호는 URL로 되돌린다
+function splitTrailingPunctuation(rawUrl) {
+    let url = rawUrl, trail = '';
+    const m = url.match(/[.,:!?)\]}'"…]+$/);
+    if (m) { trail = m[0]; url = url.slice(0, url.length - trail.length); }
+    while (trail.startsWith(')') && (url.split('(').length - 1) > (url.split(')').length - 1)) {
+        url += ')'; trail = trail.slice(1);
+    }
+    return { url, trail };
+}
+
 export function autoLink(text) {
     const div = document.createElement('div');
     div.innerHTML = text;
@@ -15,9 +27,10 @@ export function autoLink(text) {
     
     nodesToReplace.forEach(node => {
         const span = document.createElement('span');
-        span.innerHTML = node.nodeValue.replace(/(https?:\/\/[^\s]+)/g, (url) => {
+        span.innerHTML = node.nodeValue.replace(/(https?:\/\/[^\s]+)/g, (match) => {
+            const { url, trail } = splitTrailingPunctuation(match);
             const safeUrl = url.replace(/"/g, '&quot;'); // 따옴표 이스케이프로 속성 주입 방지
-            return `<a href="${safeUrl}" target="_blank" style="color:#2563EB; text-decoration:underline; pointer-events: auto !important; cursor: pointer;">${safeUrl}</a>`;
+            return `<a href="${safeUrl}" target="_blank" style="color:#2563EB; text-decoration:underline; pointer-events: auto !important; cursor: pointer;">${safeUrl}</a>${trail}`;
         });
         node.parentElement.replaceChild(span, node);
         const parent = span.parentElement;
@@ -198,9 +211,10 @@ export function sanitizeExternalHtml(html) {
     }
     nodesToProcess.forEach(tn => {
         const span = document.createElement('span');
-        span.innerHTML = tn.nodeValue.replace(/(https?:\/\/[^\s]+)/g, (url) => {
+        span.innerHTML = tn.nodeValue.replace(/(https?:\/\/[^\s]+)/g, (match) => {
+            const { url, trail } = splitTrailingPunctuation(match);
             const safeUrl = url.replace(/"/g, '&quot;'); // 따옴표 이스케이프로 속성 주입 방지
-            return `<a href="${safeUrl}" target="_blank" style="color:#2563EB; text-decoration:underline; cursor:pointer;">${safeUrl}</a>`;
+            return `<a href="${safeUrl}" target="_blank" style="color:#2563EB; text-decoration:underline; cursor:pointer;">${safeUrl}</a>${trail}`;
         });
         tn.parentElement.replaceChild(span, tn);
         const parent = span.parentElement;
@@ -963,9 +977,10 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
                     .replace(/>/g, '&gt;')
                     .replace(/\n/g, '<br>');
 
-                cleanText = cleanText.replace(/(https?:\/\/[^\s<]+)/g, (url) => {
+                cleanText = cleanText.replace(/(https?:\/\/[^\s<]+)/g, (match) => {
+                    const { url, trail } = splitTrailingPunctuation(match);
                     const safeUrl = url.replace(/"/g, '&quot;'); // 따옴표 이스케이프로 속성 주입 방지
-                    return `<a href="${safeUrl}" target="_blank" style="color:#2563EB; text-decoration:underline; cursor:pointer;">${safeUrl}</a>`;
+                    return `<a href="${safeUrl}" target="_blank" style="color:#2563EB; text-decoration:underline; cursor:pointer;">${safeUrl}</a>${trail}`;
                 });
 
                 document.execCommand('insertHTML', false, cleanText);
@@ -1053,7 +1068,13 @@ function getClickOffset(textNode, event) {
         if (range && range.startContainer === textNode) {
             return range.startOffset;
         }
+    } else if (document.caretPositionFromPoint) {
+        // Firefox는 caretRangeFromPoint가 없고 표준 caretPositionFromPoint만 지원
+        const pos = document.caretPositionFromPoint(event.clientX, event.clientY);
+        if (pos && pos.offsetNode === textNode) {
+            return pos.offset;
+        }
     }
-    
+
     return Math.floor(textNode.textContent.length / 2);
 }
