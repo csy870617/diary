@@ -622,71 +622,9 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
             }
         }
 
-        // Ctrl+V / Cmd+V: 붙여넣기
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
-            // 대상 셀 찾기: 선택된 셀 중 첫 번째 또는 현재 커서 위치의 셀
-            let targetCell = null;
-
-            if (selectedCells.length > 0) {
-                // 선택된 셀 중 가장 왼쪽 위 셀 찾기
-                let minRow = Infinity, minCol = Infinity;
-                selectedCells.forEach(cell => {
-                    const row = cell.parentElement.rowIndex;
-                    const col = cell.cellIndex;
-                    if (row < minRow || (row === minRow && col < minCol)) {
-                        minRow = row;
-                        minCol = col;
-                        targetCell = cell;
-                    }
-                });
-            } else {
-                targetCell = getCurrentCell();
-            }
-
-            // 셀 클립보드에 데이터가 있으면 붙여넣기 처리
-            if (globalCellClipboard.cellData) {
-                e.preventDefault();
-                e.stopPropagation();
-
-                const doCellPaste = () => {
-                    if (callbacks.onBeforePaste) callbacks.onBeforePaste();
-
-                    if (targetCell) {
-                        // 기존 표의 셀에 붙여넣기
-                        if (pasteCellData(targetCell, globalCellClipboard)) {
-                            clearCellSelection();
-                            if (callbacks.onAfterPaste) callbacks.onAfterPaste();
-                            console.log('셀 붙여넣기 완료');
-                        }
-                    } else {
-                        // 표 밖 커서 위치에 새 표로 붙여넣기
-                        const tableHtml = buildTableHtml(globalCellClipboard);
-                        document.execCommand('insertHTML', false, tableHtml);
-                        if (callbacks.onAfterPaste) callbacks.onAfterPaste();
-                        console.log('새 표로 붙여넣기 완료');
-                    }
-                };
-
-                // 시스템 클립보드의 마커가 일치할 때만 셀 클립보드 사용
-                // (다른 앱에서 새로 복사한 경우 스테일 셀 데이터 방지)
-                if (navigator.clipboard?.readText) {
-                    navigator.clipboard.readText().then(clipText => {
-                        if (clipText && clipText !== globalCellClipboard.copyId) {
-                            globalCellClipboard = { cellData: null, rows: 0, cols: 0 };
-                            // 스테일 셀 클립보드 → 시스템 클립보드 텍스트를 그대로 붙여넣기
-                            if (callbacks.onBeforePaste) callbacks.onBeforePaste();
-                            document.execCommand('insertText', false, clipText);
-                            if (callbacks.onAfterPaste) callbacks.onAfterPaste();
-                        } else {
-                            doCellPaste();
-                        }
-                    }).catch(() => doCellPaste());
-                } else {
-                    doCellPaste();
-                }
-                return;
-            }
-        }
+        // Ctrl+V / Cmd+V: 여기서 가로채지 않고 브라우저의 paste 이벤트에 맡긴다.
+        // paste 핸들러는 clipboardData로 마커를 동기적으로 검사할 수 있어,
+        // readText() 권한 거부/미지원(Firefox) 시 오래된 셀 데이터가 붙던 문제가 없다.
     };
     
     // Document 레벨 키 이벤트 (캡처 단계에서 처리)

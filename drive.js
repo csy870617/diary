@@ -11,6 +11,7 @@ let gisInited = false;
 let isSyncing = false;
 let pendingSync = false;
 let lastCloudModifiedTime = null;
+let dbFileId = null; // 마지막으로 확인한 클라우드 DB 파일 id (pagehide 즉시 업로드용 캐시)
 let syncTimeoutTimer = null;
 let refreshTimer = null;
 let keepAliveTimer = null;
@@ -405,6 +406,7 @@ export async function handleSignoutClick(callback) {
     localStorage.removeItem('faithCatData');
     localStorage.removeItem('faithSyncBase');
     syncBaseMap = {};
+    dbFileId = null;
     state.currentUser = null;
     state.entries = [];
     if (refreshTimer) clearTimeout(refreshTimer);
@@ -518,6 +520,7 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
     const doSync = async () => {
         const folderId = await ensureAppFolder();
         const fileMeta = await findDBFileMeta(folderId);
+        if (fileMeta) dbFileId = fileMeta.id;
 
         let cloudData = null;
         let cloudParseFailed = false;
@@ -647,6 +650,7 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
             const uploadRes = await uploadToDrive(folderId, fileMeta ? fileMeta.id : null);
             if (uploadRes && uploadRes.result) {
                 lastCloudModifiedTime = uploadRes.result.modifiedTime;
+                if (uploadRes.result.id) dbFileId = uploadRes.result.id;
             }
             // 편집 중인 글의 충돌 기준 시각을 방금 올린 버전으로 갱신 (다음 저장에서 오탐 방지)
             if (state.editingId != null) {
@@ -724,8 +728,40 @@ export function flushCloudSync(promptOnConflict = false) {
     return saveToDrive(false, promptOnConflict).catch(err => console.error('동기화 실패:', err));
 }
 
-async function uploadToDrive(folderId, fileId) {
-    const finalData = {
+// 페이지를 떠나는 순간(pagehide) 대기 중인 업로드를 keepalive fetch로 전송.
+// 일반 flushCloudSync는 gapi 비동기 요청이라 언로드 시 브라우저가 중단시켜
+// 마지막 몇 초의 편집분이 클라우드에 못 갈 수 있다. keepalive 요청은 언로드 후에도 전송이 보장된다.
+// 전송했으면 true, 조건이 안 되면(변경 없음/파일 id 미확인/본문이 keepalive 한도 64KB 초과) false를
+// 반환해 호출부가 기존 flushCloudSync로 폴백하게 한다.
+export function flushCloudSyncBeacon() {
+    if (!cloudSyncTimer) return false; // 보낼 변경 없음
+    if (localStorage.getItem('is_faith_logged_in') !== 'true') return false;
+    if (!dbFileId) return false; // 첫 동기화 전이라 파일 id를 모름
+    const token = (typeof gapi !== 'undefined' && gapi.client?.getToken?.()?.access_token)
+        || localStorage.getItem('faith_token');
+    if (!token) return false;
+    const body = JSON.stringify(buildDbPayload());
+    if (body.length > 60000) return false; // keepalive 본문 한도 초과 → 일반 flush에 맡김
+    try {
+        fetch(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(dbFileId)}?uploadType=media`, {
+            method: 'PATCH',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body,
+            keepalive: true
+        }).catch(() => {});
+    } catch (e) {
+        return false; // 전송 시작 실패 → 폴백
+    }
+    clearTimeout(cloudSyncTimer);
+    cloudSyncTimer = null;
+    // 병합 없이 올렸으므로 다음 동기화에서 클라우드를 반드시 다시 읽도록 캐시 무효화
+    lastCloudModifiedTime = null;
+    return true;
+}
+
+// 클라우드에 올리는 DB 파일 내용 (일반 업로드와 pagehide 즉시 업로드가 공용)
+function buildDbPayload() {
+    return {
         entries: state.entries,
         categories: state.allCategories,
         order: state.categoryOrder,
@@ -735,7 +771,10 @@ async function uploadToDrive(folderId, fileId) {
         rootOrder: state.rootOrder,
         lastSync: new Date().toISOString()
     };
-    const fileContent = JSON.stringify(finalData);
+}
+
+async function uploadToDrive(folderId, fileId) {
+    const fileContent = JSON.stringify(buildDbPayload());
     const fileMetadata = { name: DB_FILE_NAME, mimeType: 'application/json' };
     if (!fileId) fileMetadata.parents = [folderId];
     const boundary = '-------faith_log_multipart_boundary';
@@ -829,25 +868,48 @@ function mergeEntries(localList, cloudList, protectedId, baseMap, conflictBox) {
 function mergeCategories(localState, cloudData) {
     const localTime = new Date(localState.categoryUpdatedAt || 0).getTime();
     const cloudTime = new Date(cloudData.categoryUpdatedAt || 0).getTime();
-    if (cloudTime > localTime && cloudData.categories && cloudData.categories.length > 0) {
-        return {
-            categories: cloudData.categories,
-            order: cloudData.order || [],
-            folders: cloudData.folders || [],
-            folderOrder: cloudData.folderOrder || [],
-            rootOrder: cloudData.rootOrder || [],
-            updatedAt: cloudData.categoryUpdatedAt
-        };
-    } else {
-        return {
-            categories: localState.allCategories,
-            order: localState.categoryOrder,
-            folders: localState.allFolders,
-            folderOrder: localState.folderOrder,
-            rootOrder: localState.rootOrder || [],
-            updatedAt: localState.categoryUpdatedAt
-        };
-    }
+    const cloudWins = cloudTime > localTime && cloudData.categories && cloudData.categories.length > 0;
+
+    const winner = cloudWins ? {
+        categories: cloudData.categories,
+        order: cloudData.order || [],
+        folders: cloudData.folders || [],
+        folderOrder: cloudData.folderOrder || [],
+        rootOrder: cloudData.rootOrder || [],
+        updatedAt: cloudData.categoryUpdatedAt
+    } : {
+        categories: localState.allCategories,
+        order: localState.categoryOrder,
+        folders: localState.allFolders,
+        folderOrder: localState.folderOrder,
+        rootOrder: localState.rootOrder || [],
+        updatedAt: localState.categoryUpdatedAt
+    };
+    const loser = cloudWins
+        ? { categories: localState.allCategories || [], folders: localState.allFolders || [] }
+        : { categories: (cloudData.categories) || [], folders: (cloudData.folders) || [] };
+
+    // 최신 쪽(승자)의 구조를 기본으로 쓰되, 진 쪽에만 존재하는 주제/폴더는 버리지 않고 합류시킨다.
+    // (두 기기가 각자 폴더/주제를 만든 경우 한쪽이 통째로 사라지던 문제 방지.
+    //  휴지통 표식(isDeleted)이 있는 항목도 그대로 합류 → 삭제 전파는 기존과 동일하게 동작)
+    const categories = winner.categories.slice();
+    const folders = winner.folders.slice();
+    const order = winner.order.slice();
+    const folderOrder = winner.folderOrder.slice();
+    const catIds = new Set(categories.map(c => c && c.id));
+    const folderIds = new Set(folders.map(f => f && f.id));
+    loser.categories.forEach(c => {
+        if (c && c.id && !catIds.has(c.id)) { categories.push(c); order.push(c.id); catIds.add(c.id); }
+    });
+    loser.folders.forEach(f => {
+        if (f && f.id && !folderIds.has(f.id)) { folders.push(f); folderOrder.push(f.id); folderIds.add(f.id); }
+    });
+    // 합류된 항목의 상위 폴더가 승자 쪽에 없으면 최상위로 승격 (매달릴 곳 없는 항목 방지)
+    folders.forEach(f => { if (f && f.parentFolderId && !folderIds.has(f.parentFolderId)) delete f.parentFolderId; });
+    categories.forEach(c => { if (c && c.folderId && !folderIds.has(c.folderId)) delete c.folderId; });
+
+    // rootOrder는 승자 기준 그대로 반환 — 합류된 최상위 항목은 이후 migrateRootOrder()가 뒤에 붙여준다
+    return { categories, order, folders, folderOrder, rootOrder: winner.rootOrder, updatedAt: winner.updatedAt };
 }
 
 // Drive 검색 쿼리(q)의 작은따옴표 문자열 안에 이름을 안전하게 넣기 위한 이스케이프

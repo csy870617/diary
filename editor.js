@@ -535,6 +535,14 @@ function scrollCaretIntoDefaultView() {
     window.scrollBy(0, dy);
 }
 
+// 책 모드 총 페이지 수. 네 곳(페이지 넘김·점프·내비·커서 추적)에서 각자 계산하다
+// 서로 어긋나던 것을 통일. 컬럼 레이아웃의 서브픽셀 반올림으로 scrollWidth가
+// stride 배수보다 1~2px 크게 나와 빈 마지막 페이지가 생기지 않도록 5% 여유를 두고 올림.
+function getBookPageCount(container, stride) {
+    if (!container || stride <= 0) return 1;
+    return Math.max(1, Math.ceil(container.scrollWidth / stride - 0.05));
+}
+
 function scrollCursorIntoBookView() {
     const container = document.getElementById('editor-container');
     if (!container) return false;
@@ -545,7 +553,7 @@ function scrollCursorIntoBookView() {
     const stride = Math.floor(container.clientWidth);
     if (stride <= 0) return false;
     const offsetX = rect.left - cr.left + container.scrollLeft;
-    const totalPages = Math.max(1, Math.ceil(container.scrollWidth / stride));
+    const totalPages = getBookPageCount(container, stride);
     const pageIndex = Math.max(0, Math.min(totalPages - 1, Math.floor(offsetX / stride)));
     currentBookPageIndex = pageIndex;
     container.scrollLeft = pageIndex * stride;
@@ -594,12 +602,12 @@ function toggleBookEventListeners(enable) {
     }
 }
 
-export function turnPage(direction) { 
+export function turnPage(direction) {
     const container = document.getElementById('editor-container');
     if (!container) return;
     const stride = Math.floor(container.clientWidth);
     if (stride <= 0) return;
-    const maxPage = Math.ceil(container.scrollWidth / stride) - 1;
+    const maxPage = getBookPageCount(container, stride) - 1;
     let nextIndex = Math.max(0, Math.min(maxPage, currentBookPageIndex + direction));
     if (nextIndex === currentBookPageIndex) return;
     currentBookPageIndex = nextIndex;
@@ -614,7 +622,7 @@ export function jumpToPage(index) {
     if (!container) return;
     const stride = Math.floor(container.clientWidth);
     if (stride <= 0) return;
-    const maxPage = Math.ceil(container.scrollWidth / stride) - 1;
+    const maxPage = getBookPageCount(container, stride) - 1;
     let nextIndex = Math.max(0, Math.min(maxPage, index));
     currentBookPageIndex = nextIndex;
     container.scrollLeft = currentBookPageIndex * stride;
@@ -775,7 +783,7 @@ export function updateBookNav() {
     if(!container) return;
     const stride = Math.floor(container.clientWidth);
     if (stride <= 0) return;
-    const totalPages = Math.ceil(container.scrollWidth / stride) || 1;
+    const totalPages = getBookPageCount(container, stride);
     document.getElementById('book-nav-left')?.classList.toggle('hidden', currentBookPageIndex <= 0);
     document.getElementById('book-nav-right')?.classList.toggle('hidden', currentBookPageIndex + 1 >= totalPages);
     const pageIndicator = document.getElementById('page-indicator');
