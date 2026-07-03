@@ -292,11 +292,14 @@ function refreshRangeDisplay() {
     const endInfo = document.getElementById('tts-end-info');
     const barLabel = document.getElementById('tts-bar-range-label');
 
+    // 본문이 일시적으로 짧아진 상태(재렌더링 중 등)에서 사용자가 지정한 구간을
+    // 지워버리지 않도록, 범위를 벗어난 경우에도 상태는 유지하고 표시만 기본값으로 한다.
+    // (본문이 비어 있지 않고 실제로 범위를 벗어났을 때만 초기화)
     if (ttsStartOffset !== null && ttsStartOffset < full.length) {
         const t = full.substring(ttsStartOffset, ttsStartOffset + 20).replace(/\n/g, ' ').trim();
         if (startInfo) { startInfo.textContent = `"${t}…"`; startInfo.classList.add('set'); }
     } else {
-        ttsStartOffset = null;
+        if (ttsStartOffset !== null && full.length > 0) ttsStartOffset = null;
         if (startInfo) { startInfo.textContent = '처음부터'; startInfo.classList.remove('set'); }
     }
 
@@ -305,7 +308,7 @@ function refreshRangeDisplay() {
         const t = full.substring(s, ttsEndOffset).replace(/\n/g, ' ').trim();
         if (endInfo) { endInfo.textContent = `"…${t}"`; endInfo.classList.add('set'); }
     } else {
-        ttsEndOffset = null;
+        if (ttsEndOffset !== null && full.length > 0) ttsEndOffset = null;
         if (endInfo) { endInfo.textContent = '끝까지'; endInfo.classList.remove('set'); }
     }
 
@@ -499,6 +502,8 @@ export function playTTS() {
         if (ttsGapInterrupted) {
             // 청크 간 쉼 도중 일시정지된 경우 → 살아있는 발화가 없으므로 speakNext로 재진입
             ttsGapInterrupted = false;
+            // 엔진이 paused로 남아 있으면 새 발화가 무음 대기하므로 먼저 해제 (발화 없을 땐 무해)
+            speechSynthesis.resume();
             speakNext();
         } else {
             speechSynthesis.resume();
@@ -517,6 +522,7 @@ export function playTTS() {
     ttsGen++; // 이전 발화의 stale 이벤트 무효화
     ttsGapInterrupted = false;
     speechSynthesis.cancel();
+    speechSynthesis.resume(); // 일시정지 상태에서 새 재생 시 paused 고착으로 무음이 되는 것 방지
     clearTimeout(ttsGapTimer);
     ttsGapTimer = null;
 
@@ -557,6 +563,7 @@ export function seekTTSByPercent(percent) {
     ttsGapTimer = null;
     ttsGen++; // 이전 발화의 stale 이벤트 무효화
     speechSynthesis.cancel();
+    speechSynthesis.resume(); // paused 고착 방지 (발화 없을 땐 무해)
 
     if (wasPlaying) {
         ttsGapInterrupted = false;
@@ -712,8 +719,11 @@ export function pauseTTS() {
             clearTimeout(ttsGapTimer);
             ttsGapTimer = null;
             ttsGapInterrupted = true;
+            // 살아있는 발화가 없는데 pause()를 호출하면 엔진이 paused로 고착되어
+            // 다음 발화가 무음 대기하므로, 이 경우에는 pause()를 건너뛴다
+        } else {
+            speechSynthesis.pause();
         }
-        speechSynthesis.pause();
         isTTSPaused = true;
         if (ttsPlayStartMs) {
             ttsElapsedBeforePause += Date.now() - ttsPlayStartMs;
@@ -730,6 +740,8 @@ export function stopTTS() {
     ttsGen++; // 이전 발화의 stale 이벤트 무효화
     ttsGapInterrupted = false;
     speechSynthesis.cancel();
+    // 일시정지 중 정지하면 Chrome이 paused 상태를 유지해 다음 재생이 무음이 되므로 해제
+    speechSynthesis.resume();
     clearTimeout(ttsGapTimer);
     ttsGapTimer = null;
     isTTSSpeaking = false;
@@ -772,7 +784,8 @@ export function playSelection() {
     updateTimeDisplay();
     startTimeTicker();
     startTTSHeartbeat();
-    speakNext();
+    // stopTTS()의 cancel() 직후 같은 틱에 speak()하면 Chrome에서 새 발화가 무시될 수 있어 한 틱 지연
+    setTimeout(speakNext, 0);
 }
 
 // ─── UI 동기화 ───

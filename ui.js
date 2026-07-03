@@ -1,6 +1,6 @@
 import { state, saveCategoriesToLocal, getCategorySort, migrateRootOrder, isReadOnlyView } from './state.js';
 import { updateEntryField, bulkUpdateEntryField, emptyTrash, saveEntry, restoreEntry, permanentDelete } from './data.js';
-import { openEditor, toggleViewMode, applyFontStyle, turnPage, formatDoc, changeGlobalFontSize, insertSticker, insertImage } from './editor.js';
+import { openEditor, toggleViewMode, applyFontStyle, turnPage, formatDoc, changeGlobalFontSize, insertSticker, insertImage, sanitizeEntryHtml } from './editor.js';
 import { saveToDrive, syncFromDrive } from './drive.js'; 
 
 const getEl = (id) => document.getElementById(id);
@@ -31,7 +31,10 @@ export function applyCategorySort() {
     if (icon) icon.className = sort.sortOrder === 'desc' ? 'ph ph-sort-descending' : 'ph ph-sort-ascending';
 }
 
-export function renderEntries(keyword = '') {
+export function renderEntries(keyword) {
+    // 호출부가 키워드를 넘기지 않아도 현재 검색어를 유지해,
+    // 선택 모드 전환 등 재렌더링 시 검색 결과가 풀리는 문제를 방지
+    if (keyword === undefined) keyword = getEl('search-input')?.value || '';
     const entryList = getEl('entry-list');
     if(!entryList) return;
     entryList.innerHTML = '';
@@ -77,7 +80,7 @@ export function renderEntries(keyword = '') {
         const checkboxHtml = state.isSelectMode
             ? `<div class="entry-checkbox ${state.selectedEntries.includes(entry.id) ? 'checked' : ''}"><i class="ph ph-check"></i></div>`
             : '';
-        div.innerHTML = `${checkboxHtml}<div class="entry-card-content"><h3 class="card-title">${escapeHtml(entry.title)}</h3>${entry.subtitle ? `<p class="card-subtitle">${escapeHtml(entry.subtitle)}</p>` : ''}<div class="card-meta"><span>${dateStr}</span></div></div>`;
+        div.innerHTML = `${checkboxHtml}<div class="entry-card-content"><h3 class="card-title">${escapeHtml(entry.title)}</h3>${entry.subtitle ? `<p class="card-subtitle">${escapeHtml(entry.subtitle)}</p>` : ''}<div class="card-meta"><span>${escapeHtml(dateStr)}</span></div></div>`;
 
         if (state.isSelectMode) {
             div.onclick = () => toggleEntrySelection(entry.id);
@@ -1014,15 +1017,18 @@ export function exitSelectMode() {
 }
 
 export function selectAllEntries() {
+    // 검색으로 목록을 좁힌 상태에서는 화면에 보이는 글만 선택 대상으로 삼는다
+    // (안 보이는 글까지 선택돼 일괄 이동/PDF가 의도치 않은 글에 적용되는 것 방지)
+    const keyword = getEl('search-input')?.value || '';
     const filtered = state.entries.filter(entry =>
-        !entry.isPurged && !entry.isDeleted && entry.category === state.currentCategory
+        !entry.isPurged && !entry.isDeleted && entry.category === state.currentCategory &&
+        ((entry.title || '').includes(keyword) || stripHtml(entry.body).includes(keyword))
     );
-    if (state.selectedEntries.length === filtered.length) {
-        state.selectedEntries = [];
-    } else {
-        state.selectedEntries = filtered.map(e => e.id);
-    }
-    renderEntries();
+    const filteredIds = filtered.map(e => e.id);
+    const allSelected = filteredIds.length > 0 && filteredIds.every(id => state.selectedEntries.includes(id))
+        && state.selectedEntries.length === filteredIds.length;
+    state.selectedEntries = allSelected ? [] : filteredIds;
+    renderEntries(keyword);
     updateBulkBar();
 }
 
@@ -1067,12 +1073,14 @@ function buildPdfContent(entry) {
     offscreen.style.cssText = 'position:absolute; left:-9999px; top:0;';
     const content = document.createElement('div');
     content.style.cssText = 'width:794px; background:#ffffff; padding:24px 32px; box-sizing:border-box;';
-    const font = entry.fontFamily || 'Pretendard';
+    const font = escapeHtml(entry.fontFamily || 'Pretendard');
+    // 본문은 에디터 열 때와 동일하게 위험 요소(script/이벤트 핸들러 등)만 제거 후 삽입
+    // (구버전에 동기화된 오염 데이터가 PDF 생성 시 실제 DOM에서 실행되는 것 방지)
     content.innerHTML =
         `<h1 style="font-family:${font}; font-size:26px; font-weight:600; margin:0 0 10px; color:#1a1a1a; word-break:break-all;">${escapeHtml(entry.title)}</h1>`
         + (entry.subtitle ? `<p style="font-family:${font}; font-size:16px; color:#666; margin:0 0 8px; word-break:break-all;">${escapeHtml(entry.subtitle)}</p>` : '')
         + `<div style="font-size:13px; color:#999; margin:0 0 18px;">${escapeHtml(entry.date || '')}</div>`
-        + `<div style="font-family:${font}; font-size:16px; line-height:1.8; white-space:pre-wrap; word-break:break-all; overflow-wrap:break-word; color:#1a1a1a;">${entry.body || ''}</div>`;
+        + `<div style="font-family:${font}; font-size:16px; line-height:1.8; white-space:pre-wrap; word-break:break-all; overflow-wrap:break-word; color:#1a1a1a;">${sanitizeEntryHtml(entry.body || '')}</div>`;
 
     // html2canvas가 밑줄(text-decoration) 위치를 잘못 그리므로 링크는 border-bottom으로 대체
     content.querySelectorAll('a').forEach(link => {
@@ -1156,22 +1164,33 @@ export async function bulkDownloadPdf() {
             const zip = new JSZip();
             const pad = String(selected.length).length; // 정렬 유지를 위한 자리수
             const usedNames = new Set();
+            const failedTitles = [];
             for (let i = 0; i < selected.length; i++) {
                 const entry = selected[i];
                 if (pdfBtn) pdfBtn.innerHTML = `<i class="ph ph-spinner" style="animation:spin 1s linear infinite;"></i> 생성 중... (${i + 1}/${selected.length})`;
-                const { offscreen, content } = buildPdfContent(entry);
-                let blob;
+                // 한 글이 실패해도 이미 만들어진 나머지 PDF는 버리지 않고 ZIP에 포함
                 try {
-                    blob = await html2pdf().set(pdfOptions('entry.pdf')).from(content).outputPdf('blob');
-                } finally {
-                    offscreen.remove();
+                    const { offscreen, content } = buildPdfContent(entry);
+                    let blob;
+                    try {
+                        blob = await html2pdf().set(pdfOptions('entry.pdf')).from(content).outputPdf('blob');
+                    } finally {
+                        offscreen.remove();
+                    }
+                    // 목록 순서를 보존하고 동일 제목 충돌을 피하기 위해 번호를 접두어로 사용
+                    const prefix = String(i + 1).padStart(pad, '0');
+                    let name = `${prefix}_${sanitizeFilename(entry.title)}.pdf`;
+                    while (usedNames.has(name)) name = `${prefix}_${sanitizeFilename(entry.title)}_${Math.random().toString(36).slice(2, 5)}.pdf`;
+                    usedNames.add(name);
+                    zip.file(name, blob);
+                } catch (entryErr) {
+                    console.error('개별 PDF 생성 실패:', entry.title, entryErr);
+                    failedTitles.push(entry.title || '제목 없음');
                 }
-                // 목록 순서를 보존하고 동일 제목 충돌을 피하기 위해 번호를 접두어로 사용
-                const prefix = String(i + 1).padStart(pad, '0');
-                let name = `${prefix}_${sanitizeFilename(entry.title)}.pdf`;
-                while (usedNames.has(name)) name = `${prefix}_${sanitizeFilename(entry.title)}_${Math.random().toString(36).slice(2, 5)}.pdf`;
-                usedNames.add(name);
-                zip.file(name, blob);
+            }
+            if (failedTitles.length === selected.length) throw new Error('모든 PDF 생성에 실패했습니다.');
+            if (failedTitles.length > 0) {
+                alert(`${failedTitles.length}개 글은 PDF 생성에 실패해 제외되었습니다:\n- ${failedTitles.join('\n- ')}`);
             }
             if (pdfBtn) pdfBtn.innerHTML = `<i class="ph ph-spinner" style="animation:spin 1s linear infinite;"></i> 압축 중...`;
             const zipBlob = await zip.generateAsync({ type: 'blob' });
