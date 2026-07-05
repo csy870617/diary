@@ -1587,7 +1587,10 @@ export function toggleViewMode(mode) {
     const container = document.getElementById('editor-container'), writeModal = document.getElementById('write-modal'), editBody = document.getElementById('editor-body'), editTitle = document.getElementById('edit-title'), editSubtitle = document.getElementById('edit-subtitle'), editorToolbar = document.getElementById('editor-toolbar');
     const wasBookMode = state.currentViewMode === 'book' || state.currentViewMode === 'book-edit', oldScrollTop = container ? container.scrollTop : 0, oldHeight = container ? container.clientHeight : 0, lastPageIndex = currentBookPageIndex;
     const isBookToBook = wasBookMode && (mode === 'book' || mode === 'book-edit');
-    const anchor = isBookToBook ? null : findVisibleAnchor();
+    const willBeBookMode = mode === 'book' || mode === 'book-edit';
+    // 편집(default) ↔ 보기(readOnly)는 본문 레이아웃이 동일한 흐름 모드 전환 → 보던 스크롤 위치를 그대로 유지
+    const isFlowToFlow = !wasBookMode && !willBeBookMode;
+    const anchor = (isBookToBook || isFlowToFlow) ? null : findVisibleAnchor();
     // 편집 모드에서 벗어날 때 보류 중인 자동 저장을 즉시 반영 (디바운스 중 모드 전환으로 인한 편집 유실 방지)
     const wasEditable = state.currentViewMode === 'default' || state.currentViewMode === 'book-edit';
     const willBeEditable = mode === 'default' || mode === 'book-edit';
@@ -1641,7 +1644,9 @@ export function toggleViewMode(mode) {
         writeModal.classList.add('mode-read-only');
         editorToolbar?.classList.add('collapsed');
         requestAnimationFrame(() => {
-            if (!scrollAnchorIntoView(anchor, 'normal') && wasBookMode && container) {
+            // 편집↔보기는 동일한 흐름 레이아웃이므로 보던 위치를 그대로 유지 (앵커 추정으로 인한 튕김 방지)
+            if (isFlowToFlow) { if (container) container.scrollTop = oldScrollTop; }
+            else if (!scrollAnchorIntoView(anchor, 'normal') && wasBookMode && container) {
                 container.scrollTop = lastPageIndex * oldHeight;
             }
         });
@@ -1650,7 +1655,8 @@ export function toggleViewMode(mode) {
         editTitle.readOnly = false; editSubtitle.readOnly = false; editBody.contentEditable = "true";
         editorToolbar?.classList.remove('collapsed');
         requestAnimationFrame(() => {
-            if (!scrollAnchorIntoView(anchor, 'normal') && wasBookMode && container) {
+            if (isFlowToFlow) { if (container) container.scrollTop = oldScrollTop; }
+            else if (!scrollAnchorIntoView(anchor, 'normal') && wasBookMode && container) {
                 container.scrollTop = lastPageIndex * oldHeight;
             }
         });
