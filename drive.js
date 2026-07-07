@@ -870,6 +870,13 @@ function mergeCategories(localState, cloudData) {
     const cloudTime = new Date(cloudData.categoryUpdatedAt || 0).getTime();
     const cloudWins = cloudTime > localTime && cloudData.categories && cloudData.categories.length > 0;
 
+    // 진 쪽이 한 번도 수정된 적 없는 기본 시드 상태(타임스탬프 0)라면, 그 쪽의 주제/폴더는
+    // 실제 사용자 데이터가 아니라 초기 기본값이므로 합류시키지 않는다.
+    // (앱 삭제 후 재설치 → localStorage가 비어 기본 주제만 있는 상태로 동기화하면,
+    //  기본 주제가 동기화된 주제 옆에 되살아나던 문제 방지)
+    const loserTime = cloudWins ? localTime : cloudTime;
+    const loserIsUntouched = loserTime === 0;
+
     const winner = cloudWins ? {
         categories: cloudData.categories,
         order: cloudData.order || [],
@@ -898,12 +905,14 @@ function mergeCategories(localState, cloudData) {
     const folderOrder = winner.folderOrder.slice();
     const catIds = new Set(categories.map(c => c && c.id));
     const folderIds = new Set(folders.map(f => f && f.id));
-    loser.categories.forEach(c => {
-        if (c && c.id && !catIds.has(c.id)) { categories.push(c); order.push(c.id); catIds.add(c.id); }
-    });
-    loser.folders.forEach(f => {
-        if (f && f.id && !folderIds.has(f.id)) { folders.push(f); folderOrder.push(f.id); folderIds.add(f.id); }
-    });
+    if (!loserIsUntouched) {
+        loser.categories.forEach(c => {
+            if (c && c.id && !catIds.has(c.id)) { categories.push(c); order.push(c.id); catIds.add(c.id); }
+        });
+        loser.folders.forEach(f => {
+            if (f && f.id && !folderIds.has(f.id)) { folders.push(f); folderOrder.push(f.id); folderIds.add(f.id); }
+        });
+    }
     // 합류된 항목의 상위 폴더가 승자 쪽에 없으면 최상위로 승격 (매달릴 곳 없는 항목 방지)
     folders.forEach(f => { if (f && f.parentFolderId && !folderIds.has(f.parentFolderId)) delete f.parentFolderId; });
     categories.forEach(c => { if (c && c.folderId && !folderIds.has(c.folderId)) delete c.folderId; });
