@@ -692,9 +692,10 @@ function getBookViewportHeight() {
 function getBookPageContentSize(container) {
     const colWidth = Math.floor(container.clientWidth);
     const isMobile = window.innerWidth <= 650;
-    const horizontalPad = isMobile ? 40 : 80; // editor-body padding-left + padding-right
+    const horizontalPad = isMobile ? 56 : 96; // editor-body padding-left + padding-right
+    const verticalPad = isMobile ? 40 : 48; // editor-container 상/하 패딩 합 (페이지 세로 여백)
     const pageWidth = Math.max(50, colWidth - horizontalPad);
-    const pageHeight = Math.max(50, getBookViewportHeight() - 180);
+    const pageHeight = Math.max(50, getBookViewportHeight() - 120 - verticalPad - 20);
     return { pageWidth, pageHeight };
 }
 
