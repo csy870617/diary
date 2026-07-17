@@ -19,6 +19,8 @@ let touchStartX = 0;
 let touchStartY = 0;
 let bookSwiping = false; // 책 편집 모드에서 가로 스와이프 판정 중
 let lastBookColWidth = 0; // 마지막 책 레이아웃 시 컨테이너 폭 (키보드로 높이만 변한 경우 재배치 생략용)
+let lastBookViewportH = 0; // 마지막 책 레이아웃 시 가시 뷰포트 높이 (가상 키보드 표시/숨김 감지용)
+let bookKbdResizeTimer = null; // 키보드로 높이가 크게 변할 때 재배치를 한 번만 반영하기 위한 디바운스 타이머
 let bookPinPage = -1;       // 탭한 시점에 보이던 페이지 (캐럿 좌표 대신 이 페이지를 고정)
 let bookPinActive = false;  // 탭/페이지이동 후 현재 페이지를 고정(브라우저 자동 스크롤 무시). 타이핑 시작 시 해제
 let lastBookTouchTime = 0;  // 마지막 책 모드 터치 시각 (터치로 발생하는 에뮬레이트 mousedown 무시용)
@@ -424,14 +426,30 @@ function handleBookTouchEnd(e) {
 function handleBookResize() {
     if (state.currentViewMode !== 'book' && state.currentViewMode !== 'book-edit') return;
     const container = document.getElementById('editor-container');
-    // 책 편집 모드에서 컨테이너 폭(=컬럼 폭)이 그대로이고 높이만 변한 경우(가상 키보드 표시/숨김)는
-    // 컬럼을 다시 계산하지 않는다. 재배치하면 내용이 흘러 현재 페이지가 어긋나며 화면이 튕긴다.
-    // 단, 폭이 바뀌면(회전/화면 변화) 반드시 재배치해야 컬럼 폭과 스크롤 보폭이 어긋나 화면이 한쪽으로 치우치지 않는다.
+    // 폭이 바뀌면(회전/화면 변화) 반드시 재배치해야 컬럼 폭과 스크롤 보폭이 어긋나지 않는다.
+    // 폭은 그대로이고 높이만 변한 경우는 아래에서 변화 크기에 따라 나눠 처리한다(자잘한 변동=유지, 키보드=재배치).
     const widthChanged = !container || container.clientWidth !== lastBookColWidth;
     if (state.currentViewMode === 'book-edit' && !widthChanged) {
-        // 키보드 등 높이만 변함: 재배치 없이 현재(탭한) 페이지를 그대로 유지, 세로 스크롤도 0
-        if (container) { container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth); container.scrollTop = 0; }
-        updateBookNav();
+        // 폭은 그대로이고 높이만 변한 경우.
+        const heightDelta = Math.abs(getBookViewportHeight() - lastBookViewportH);
+        // 주소창 노출/숨김 같은 자잘한 높이 변동은 재배치하면 오히려 튀므로 현재 페이지만 유지한다.
+        if (heightDelta < 100) {
+            if (container) { container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth); container.scrollTop = 0; }
+            updateBookNav();
+            return;
+        }
+        // 가상 키보드 표시/숨김 등 큰 높이 변화: 페이지 높이를 현재 가시 영역에 맞춰 다시 배치하고
+        // 커서가 있는 페이지로 스냅한다. → 편집 중인 줄(맨 윗줄·맨 아랫줄 포함)이 키보드에 가리지 않는다.
+        // 키보드 애니메이션 중 여러 번 발생하는 리사이즈는 디바운스로 한 번만 반영해 화면 떨림을 막는다.
+        if (bookKbdResizeTimer) clearTimeout(bookKbdResizeTimer);
+        bookKbdResizeTimer = setTimeout(() => {
+            bookKbdResizeTimer = null;
+            if (state.currentViewMode !== 'book-edit') return;
+            updateBookLayout();
+            const c = document.getElementById('editor-container');
+            if (!scrollCursorIntoBookView() && c) c.scrollLeft = currentBookPageIndex * Math.floor(c.clientWidth);
+            updateBookNav();
+        }, 120);
         return;
     }
     updateBookLayout();
@@ -761,6 +779,7 @@ function updateBookLayout() {
     const container = document.getElementById('editor-container');
     if (!container) return;
     lastBookColWidth = container.clientWidth; // 재배치 기준 컨테이너 폭 기록 (키보드로 높이만 변한 경우 구분)
+    lastBookViewportH = getBookViewportHeight(); // 재배치 기준 가시 높이 기록 (키보드 표시/숨김 판별용)
     container.style.columnWidth = `${Math.floor(container.clientWidth)}px`;
     container.style.columnGap = '0px';
     container.style.height = `${getBookViewportHeight() - 120}px`;

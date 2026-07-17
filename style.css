@@ -297,7 +297,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 /* 책 모드 스타일 유지 */
 #write-modal.mode-book { overflow: hidden; display: flex; flex-direction: column; width: 100vw; height: 100vh; position: fixed; top: 0; left: 0; z-index: 2000; }
 #write-modal.mode-book .editor-container { margin: 0; max-width: none; width: 100%; height: calc(100vh - 120px) !important; padding: 0 !important; column-width: auto; column-gap: 0 !important; column-fill: auto; overflow-x: hidden !important; overflow-y: hidden !important; scroll-behavior: auto !important; }
-#write-modal.mode-book .editor-body { padding: 20px 40px 200px 40px; box-sizing: border-box; text-align: justify; }
+#write-modal.mode-book .editor-body { padding: 20px 40px 56px 40px; box-sizing: border-box; text-align: justify; }
 #write-modal.mode-book .editor-title, #write-modal.mode-book .editor-subtitle { padding: 0 40px; box-sizing: border-box; }
 #write-modal.mode-book .meta-info-row, #write-modal.mode-book .divider { margin-left: 40px; margin-right: 40px; }
 #write-modal.mode-book .editor-title, #write-modal.mode-book .editor-subtitle, #write-modal.mode-book .meta-info-row, #write-modal.mode-book .divider { break-inside: avoid; }
@@ -316,7 +316,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 /* TTS 바 열림 시 하단 여백 확보 */
 #write-modal.tts-open .editor-body { padding-bottom: 60px; }
 #write-modal.tts-open.mode-book .editor-container { height: calc(100vh - 168px) !important; }
-#write-modal.tts-open.mode-book .editor-body { padding-bottom: 200px; }
+#write-modal.tts-open.mode-book .editor-body { padding-bottom: 80px; }
 #write-modal.tts-open .page-indicator { bottom: 88px; }
 #write-modal.tts-open .book-slider-container { bottom: 128px; }
 .book-slider-container.hidden { display: none !important; }
@@ -390,7 +390,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
     .editor-container { padding: 20px 20px 100px; }
     .full-screen-modal { padding-top: var(--safe-top); padding-bottom: var(--safe-bottom); }
     #write-modal.mode-book .editor-container { padding: 0 !important; column-width: auto; column-gap: 0 !important; height: 100% !important; }
-    #write-modal.mode-book .editor-body { padding: 20px 20px 200px 20px; }
+    #write-modal.mode-book .editor-body { padding: 20px 20px 56px 20px; }
     #write-modal.mode-book .editor-title, #write-modal.mode-book .editor-subtitle { padding: 0 20px; }
     #write-modal.mode-book .meta-info-row, #write-modal.mode-book .divider { margin-left: 20px; margin-right: 20px; }
     
