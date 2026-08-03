@@ -1510,9 +1510,48 @@ export function getCleanBodyHtml(bodyEl) {
     return clone.innerHTML;
 }
 
+// ── 맞춤법 검사 (브라우저 내장 검사기) ──────────────────────────────────
+// 본문을 외부로 전송하지 않고 기기 안에서만 검사한다(오프라인 동작, 개인 기록 보호).
+// 한국어 인식률은 기기/브라우저의 사전 지원에 따라 다르다(아이폰·맥은 한국어 지원, 일부 안드로이드는 영어 위주).
+const SPELLCHECK_KEY = 'faith_spellcheck';
+
+export function isSpellcheckOn() {
+    return localStorage.getItem(SPELLCHECK_KEY) !== 'off'; // 기본값: 켜짐
+}
+
+// 맞춤법 표시는 '편집 중'일 때만 의미가 있으므로, 읽기/책(읽기) 모드에서는 끈다.
+export function applySpellcheck() {
+    const on = isSpellcheckOn();
+    const editable = state.currentViewMode === 'default' || state.currentViewMode === 'book-edit';
+    const active = on && editable;
+    ['edit-title', 'edit-subtitle', 'editor-body'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.setAttribute('spellcheck', active ? 'true' : 'false');
+        // 한국어/영어가 섞여 있으므로 특정 언어로 고정하지 않고 브라우저가 판단하게 둔다.
+        if (active) el.removeAttribute('lang');
+    });
+    const btn = document.getElementById('toolbar-spellcheck-btn');
+    if (btn) {
+        btn.classList.toggle('active', on);
+        btn.title = on ? '맞춤법 검사 끄기' : '맞춤법 검사 켜기';
+    }
+}
+
+export function toggleSpellcheck() {
+    const next = !isSpellcheckOn();
+    localStorage.setItem(SPELLCHECK_KEY, next ? 'on' : 'off');
+    applySpellcheck();
+    // 이미 렌더된 밑줄 표시를 즉시 갱신하려면 편집 영역을 다시 포커스해야 하는 브라우저가 있다.
+    const body = document.getElementById('editor-body');
+    if (body && next && document.activeElement === body) { body.blur(); body.focus(); }
+    return next;
+}
+
 export function openEditor(isEdit, entryData) {
     hideTransientPopups(); // 홈 화면에서 열려 있던 팝업/메뉴를 닫고 에디터로 진입
     state.isEditMode = isEdit; const writeModal = document.getElementById('write-modal'); openModal(writeModal); writeModal.scrollTop = 0; currentBookPageIndex = 0; savedRange = null; setupBasicHandling();
+    applySpellcheck();
     const catName = state.allCategories.find(c => c.id === state.currentCategory)?.name || '기록';
     document.getElementById('display-category').innerText = catName; document.getElementById('display-date').innerText = entryData ? entryData.date : new Date().toLocaleDateString('ko-KR');
     const editTitle = document.getElementById('edit-title'), editSubtitle = document.getElementById('edit-subtitle'), editBody = document.getElementById('editor-body');
@@ -1624,6 +1663,7 @@ export function toggleViewMode(mode) {
             .catch(err => console.error('자동 저장 실패:', err));
     }
     state.currentViewMode = mode;
+    applySpellcheck(); // 읽기 모드에서는 맞춤법 밑줄을 감추고, 편집 모드로 돌아오면 다시 표시
     const btnReadOnly = document.getElementById('btn-readonly'), btnBookMode = document.getElementById('btn-bookmode');
     if(btnReadOnly) btnReadOnly.classList.toggle('active', mode === 'readOnly');
     if(btnBookMode) btnBookMode.classList.toggle('active', mode === 'book' || mode === 'book-edit');
