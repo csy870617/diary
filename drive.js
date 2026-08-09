@@ -4,6 +4,7 @@ import { renderEntries, renderTabs, renderFolders } from './ui.js';
 import { refreshEditorContent, reloadEntryIntoEditor } from './editor.js';
 import { sanitizeExternalHtml } from './utils.js';
 import { genEntryId } from './data.js';
+import { saveEntries, clearEntries } from './storage.js';
 
 let tokenClient;
 let gapiInited = false;
@@ -402,7 +403,7 @@ export async function handleSignoutClick(callback) {
     localStorage.removeItem('faith_token_exp');
     localStorage.removeItem('is_faith_logged_in');
     localStorage.removeItem('faith_user_email');
-    localStorage.removeItem('faithLogDB');
+    clearEntries().catch(e => console.error('저장소 초기화 실패:', e));
     localStorage.removeItem('faithCatData');
     localStorage.removeItem('faithSyncBase');
     syncBaseMap = {};
@@ -630,14 +631,9 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
             state.categoryUpdatedAt = mergedCats.updatedAt;
             migrateRootOrder();
 
-            try {
-                localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-            } catch(e) {
-                console.error("동기화 후 로컬 저장 실패:", e);
-                if (e.name === 'QuotaExceededError') {
-                    showSyncWarning("저장 공간이 부족합니다. 휴지통을 비워주세요.");
-                }
-            }
+            saveEntries(state.entries).then(ok => {
+                if (!ok) showSyncWarning("이 기기의 저장 공간이 부족합니다. 글은 드라이브에 안전하게 보관되어 있습니다.");
+            }).catch(e => console.error("동기화 후 로컬 저장 실패:", e));
             saveCategoriesToLocal();
             renderFolders();
             renderTabs();

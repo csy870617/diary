@@ -1,7 +1,8 @@
 import { state, saveCategoriesToLocal, getCategorySort, migrateRootOrder, isReadOnlyView } from './state.js';
 import { updateEntryField, bulkUpdateEntryField, emptyTrash, saveEntry, restoreEntry, permanentDelete } from './data.js';
 import { openEditor, toggleViewMode, applyFontStyle, turnPage, formatDoc, changeGlobalFontSize, insertSticker, insertImage, sanitizeEntryHtml } from './editor.js';
-import { saveToDrive, syncFromDrive } from './drive.js'; 
+import { saveToDrive, syncFromDrive } from './drive.js';
+import { saveEntries } from './storage.js'; 
 
 const getEl = (id) => document.getElementById(id);
 
@@ -926,7 +927,7 @@ export function permanentDeleteCategory(id) {
     state.rootOrder = (state.rootOrder || []).filter(rid => rid !== id);
     const newCatId = remaining[0].id;
     state.entries.forEach(e => { if (e.category === id) e.category = newCatId; });
-    try { localStorage.setItem('faithLogDB', JSON.stringify(state.entries)); } catch(e) { console.error(e); }
+    saveEntries(state.entries).catch(e => console.error(e));
     if (state.currentCategory === id) { state.currentCategory = newCatId; applyCategorySort(); }
     state.categoryUpdatedAt = new Date().toISOString();
     saveCategoriesToLocal(); renderTrash(); renderFolders(); renderTabs(); renderEntries(); saveToDrive();

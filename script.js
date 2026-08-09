@@ -6,6 +6,7 @@ import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, flushCloudSync, flushCloudSyncBeacon, ensureTokenOnResume, startKeepAlive } from './drive.js';
 import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, setTTSStart, setTTSEnd, resetTTSRange, playSelection, updateSpeedDisplay, updatePitchDisplay, updateGapDisplay, initTTS, updateTTSRange, seekTTSByPercent, saveTTSVoice } from './tts.js';
 import { initFaithsSSO } from './faiths-sso.js';
+import { flushEntries } from './storage.js';
 
 const faithsSsoReady = initFaithsSSO();
 
@@ -98,7 +99,7 @@ async function init() {
 
     loadCategoriesFromLocal();
     loadCategorySortsFromLocal();
-    loadDataFromLocal();
+    await loadDataFromLocal(); // IndexedDB에서 불러옴 (예전 localStorage 데이터는 최초 1회 자동 이전)
     // 휴지통 자동 정리: 로그인 사용자는 첫 클라우드 동기화 후 실행(병합 전 stale 데이터로 영구삭제 전파 방지),
     // 비로그인(오프라인) 사용자는 지금 실행
     if (localStorage.getItem('is_faith_logged_in') !== 'true') {
@@ -190,7 +191,10 @@ async function init() {
     window.addEventListener('online', handleResume);
     // 탭/창을 닫거나 떠날 때도 미전송 변경분을 즉시 업로드 (모바일에서 신뢰성 높음)
     // keepalive 전송(언로드 후에도 완료 보장)을 우선 시도하고, 조건이 안 되면 기존 방식으로 폴백
-    window.addEventListener('pagehide', () => { if (!flushCloudSyncBeacon()) flushCloudSync(); });
+    window.addEventListener('pagehide', () => {
+        flushEntries().catch(() => {}); // 아직 기록되지 않은 로컬 저장분을 마무리
+        if (!flushCloudSyncBeacon()) flushCloudSync();
+    });
 
     // 사용자 활동 감지 → 토큰 만료 임박 시 자동 갱신 (페이지 활성 상태에서 로그아웃 방지)
     let lastActivityRefresh = 0;
