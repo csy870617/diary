@@ -9,14 +9,27 @@ export function genEntryId() {
     return Date.now().toString() + '_' + Math.random().toString(36).slice(2, 7);
 }
 
+// 같은 알림이 자동저장마다 반복해서 뜨지 않도록 한 번만 안내한다.
+let quotaAlertShown = false;
+
 function safeLocalSave() {
     try {
         localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
+        quotaAlertShown = false;
         return true;
     } catch(e) {
         console.error("로컬 저장 실패:", e);
-        if (e.name === 'QuotaExceededError') {
-            alert("저장 공간이 부족합니다. 휴지통을 비우거나 오래된 항목을 삭제해주세요.");
+        // 브라우저마다 이름이 달라(QuotaExceededError / NS_ERROR_DOM_QUOTA_REACHED, code 22)
+        // 이름만 보면 용량 초과를 놓치는 경우가 있어 code까지 함께 확인한다.
+        const isQuota = e.name === 'QuotaExceededError'
+            || e.name === 'NS_ERROR_DOM_QUOTA_REACHED'
+            || e.code === 22 || e.code === 1014;
+        if (isQuota && !quotaAlertShown) {
+            quotaAlertShown = true;
+            alert("이 기기의 저장 공간이 가득 찼습니다.\n\n" +
+                  "글은 구글 드라이브에 계속 저장되니 내용이 사라지지는 않습니다.\n" +
+                  "공간을 늘리려면 휴지통을 비우거나, 사진이 많은 오래된 글을 정리해 주세요.\n" +
+                  "(사진 한 장이 글 수백 개보다 많은 공간을 차지합니다)");
         }
         return false;
     }
