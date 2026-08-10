@@ -1,11 +1,12 @@
 import { state, loadCategoriesFromLocal, saveCategoriesToLocal, isReadOnlyView, loadCategorySortsFromLocal, setCategorySort } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
 import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, renameFolderAction, deleteFolderAction, openFolderAssignModal, createFolderFromAssignModal, addSubfolderAction, closeFolderPopup, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort, bulkDownloadPdf, downloadEntryPdf } from './ui.js';
-import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize, getCleanBodyHtml } from './editor.js';
+import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize, getCleanBodyHtml, toggleSpellcheck } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, flushCloudSync, flushCloudSyncBeacon, ensureTokenOnResume, startKeepAlive } from './drive.js';
 import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, setTTSStart, setTTSEnd, resetTTSRange, playSelection, updateSpeedDisplay, updatePitchDisplay, updateGapDisplay, initTTS, updateTTSRange, seekTTSByPercent, saveTTSVoice } from './tts.js';
 import { initFaithsSSO } from './faiths-sso.js';
+import { flushEntries } from './storage.js';
 
 const faithsSsoReady = initFaithsSSO();
 
@@ -98,7 +99,7 @@ async function init() {
 
     loadCategoriesFromLocal();
     loadCategorySortsFromLocal();
-    loadDataFromLocal();
+    await loadDataFromLocal(); // IndexedDB에서 불러옴 (예전 localStorage 데이터는 최초 1회 자동 이전)
     // 휴지통 자동 정리: 로그인 사용자는 첫 클라우드 동기화 후 실행(병합 전 stale 데이터로 영구삭제 전파 방지),
     // 비로그인(오프라인) 사용자는 지금 실행
     if (localStorage.getItem('is_faith_logged_in') !== 'true') {
@@ -190,7 +191,10 @@ async function init() {
     window.addEventListener('online', handleResume);
     // 탭/창을 닫거나 떠날 때도 미전송 변경분을 즉시 업로드 (모바일에서 신뢰성 높음)
     // keepalive 전송(언로드 후에도 완료 보장)을 우선 시도하고, 조건이 안 되면 기존 방식으로 폴백
-    window.addEventListener('pagehide', () => { if (!flushCloudSyncBeacon()) flushCloudSync(); });
+    window.addEventListener('pagehide', () => {
+        flushEntries().catch(() => {}); // 아직 기록되지 않은 로컬 저장분을 마무리
+        if (!flushCloudSyncBeacon()) flushCloudSync();
+    });
 
     // 사용자 활동 감지 → 토큰 만료 임박 시 자동 갱신 (페이지 활성 상태에서 로그아웃 방지)
     let lastActivityRefresh = 0;
@@ -503,6 +507,22 @@ function setupUIListeners() {
 
     document.getElementById('toolbar-link-btn')?.addEventListener('click', () => { createHyperlink(); });
 
+    // 맞춤법 검사 켜기/끄기 (설정은 기기에 저장되어 다음에 열 때도 유지)
+    document.getElementById('toolbar-spellcheck-btn')?.addEventListener('click', () => {
+        const on = toggleSpellcheck();
+        let toast = document.getElementById('tts-toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'tts-toast';
+            toast.className = 'tts-toast';
+            document.body.appendChild(toast);
+        }
+        toast.textContent = on ? '맞춤법 검사를 켰습니다.' : '맞춤법 검사를 껐습니다.';
+        toast.classList.add('show');
+        clearTimeout(toast._timer);
+        toast._timer = setTimeout(() => toast.classList.remove('show'), 1800);
+    });
+
     const tableModal = document.getElementById('table-modal');
     
     // 툴바에서 표 삽입 버튼 클릭 시 커서 위치 저장 후 삽입 모드로 모달 열기
@@ -668,16 +688,22 @@ function processTextFile(file) {
     reader.readAsText(file, 'UTF-8');
 }
 
-function compressAndInsertImage(dataUrl) {
+// 잘라낸 이미지도 반드시 용량을 제한해서 넣는다.
+// (예전에는 화질 보존을 위해 원본 해상도 + 무손실 PNG로 넣었는데, 사진 한 장이
+//  수 MB가 되어 브라우저 저장 공간(보통 5MB)을 혼자 다 써버리는 원인이었다.
+//  자르기는 화질 의도가 있으므로 일반 삽입보다 여유 있는 상한을 준다.)
+function compressAndInsertImage(dataUrl, maxWidth = 800, quality = 0.7) {
     const img = new Image();
     img.onload = () => {
         const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d'), maxWidth = 800;
+        const ctx = canvas.getContext('2d');
         let { width, height } = img;
         if (width > maxWidth) { height *= maxWidth / width; width = maxWidth; }
         canvas.width = width; canvas.height = height;
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img, 0, 0, width, height);
-        insertImage(canvas.toDataURL('image/jpeg', 0.7));
+        insertImage(canvas.toDataURL('image/jpeg', quality));
     };
     img.onerror = () => { console.error('이미지 로드 실패'); alert('이미지를 불러올 수 없습니다. 손상된 파일일 수 있습니다.'); };
     img.src = dataUrl;
@@ -687,7 +713,7 @@ function processImage(file) {
     const reader = new FileReader();
     reader.onload = (e) => {
         openCropModal(e.target.result, (resultDataUrl, wasCropped) => {
-            if (wasCropped) insertImage(resultDataUrl);
+            if (wasCropped) compressAndInsertImage(resultDataUrl, 1280, 0.82);
             else compressAndInsertImage(resultDataUrl);
         });
     };
@@ -697,7 +723,7 @@ function processImage(file) {
 
 function processImageDataUrl(dataUrl) {
     openCropModal(dataUrl, (resultDataUrl, wasCropped) => {
-        if (wasCropped) insertImage(resultDataUrl);
+        if (wasCropped) compressAndInsertImage(resultDataUrl, 1280, 0.82);
         else compressAndInsertImage(resultDataUrl);
     });
 }
@@ -770,7 +796,8 @@ function performCrop() {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(imgEl, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-    // 원본 해상도 유지 + 무손실(PNG)로 인코딩하여 화질 보존
+    // 자르기 단계에서는 무손실(PNG)로 넘기고, 삽입 직전 compressAndInsertImage에서
+    // 용량 상한(가로 1280px / JPEG 0.82)을 적용한다. (저장 공간 초과 방지)
     return canvas.toDataURL('image/png');
 }
 

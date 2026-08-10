@@ -4,6 +4,7 @@ import { renderEntries, renderTabs, renderFolders } from './ui.js';
 import { refreshEditorContent, reloadEntryIntoEditor } from './editor.js';
 import { sanitizeExternalHtml } from './utils.js';
 import { genEntryId } from './data.js';
+import { saveEntries, clearEntries } from './storage.js';
 
 let tokenClient;
 let gapiInited = false;
@@ -402,7 +403,7 @@ export async function handleSignoutClick(callback) {
     localStorage.removeItem('faith_token_exp');
     localStorage.removeItem('is_faith_logged_in');
     localStorage.removeItem('faith_user_email');
-    localStorage.removeItem('faithLogDB');
+    clearEntries().catch(e => console.error('저장소 초기화 실패:', e));
     localStorage.removeItem('faithCatData');
     localStorage.removeItem('faithSyncBase');
     syncBaseMap = {};
@@ -630,14 +631,9 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
             state.categoryUpdatedAt = mergedCats.updatedAt;
             migrateRootOrder();
 
-            try {
-                localStorage.setItem('faithLogDB', JSON.stringify(state.entries));
-            } catch(e) {
-                console.error("동기화 후 로컬 저장 실패:", e);
-                if (e.name === 'QuotaExceededError') {
-                    showSyncWarning("저장 공간이 부족합니다. 휴지통을 비워주세요.");
-                }
-            }
+            saveEntries(state.entries).then(ok => {
+                if (!ok) showSyncWarning("이 기기의 저장 공간이 부족합니다. 글은 드라이브에 안전하게 보관되어 있습니다.");
+            }).catch(e => console.error("동기화 후 로컬 저장 실패:", e));
             saveCategoriesToLocal();
             renderFolders();
             renderTabs();
@@ -870,6 +866,13 @@ function mergeCategories(localState, cloudData) {
     const cloudTime = new Date(cloudData.categoryUpdatedAt || 0).getTime();
     const cloudWins = cloudTime > localTime && cloudData.categories && cloudData.categories.length > 0;
 
+    // 진 쪽이 한 번도 수정된 적 없는 기본 시드 상태(타임스탬프 0)라면, 그 쪽의 주제/폴더는
+    // 실제 사용자 데이터가 아니라 초기 기본값이므로 합류시키지 않는다.
+    // (앱 삭제 후 재설치 → localStorage가 비어 기본 주제만 있는 상태로 동기화하면,
+    //  기본 주제가 동기화된 주제 옆에 되살아나던 문제 방지)
+    const loserTime = cloudWins ? localTime : cloudTime;
+    const loserIsUntouched = loserTime === 0;
+
     const winner = cloudWins ? {
         categories: cloudData.categories,
         order: cloudData.order || [],
@@ -898,12 +901,14 @@ function mergeCategories(localState, cloudData) {
     const folderOrder = winner.folderOrder.slice();
     const catIds = new Set(categories.map(c => c && c.id));
     const folderIds = new Set(folders.map(f => f && f.id));
-    loser.categories.forEach(c => {
-        if (c && c.id && !catIds.has(c.id)) { categories.push(c); order.push(c.id); catIds.add(c.id); }
-    });
-    loser.folders.forEach(f => {
-        if (f && f.id && !folderIds.has(f.id)) { folders.push(f); folderOrder.push(f.id); folderIds.add(f.id); }
-    });
+    if (!loserIsUntouched) {
+        loser.categories.forEach(c => {
+            if (c && c.id && !catIds.has(c.id)) { categories.push(c); order.push(c.id); catIds.add(c.id); }
+        });
+        loser.folders.forEach(f => {
+            if (f && f.id && !folderIds.has(f.id)) { folders.push(f); folderOrder.push(f.id); folderIds.add(f.id); }
+        });
+    }
     // 합류된 항목의 상위 폴더가 승자 쪽에 없으면 최상위로 승격 (매달릴 곳 없는 항목 방지)
     folders.forEach(f => { if (f && f.parentFolderId && !folderIds.has(f.parentFolderId)) delete f.parentFolderId; });
     categories.forEach(c => { if (c && c.folderId && !folderIds.has(c.folderId)) delete c.folderId; });
