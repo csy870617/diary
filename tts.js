@@ -265,6 +265,14 @@ export function setTTSEnd() {
     refreshRangeDisplay();
 }
 
+// 다른 글을 열 때 호출. 이전 글에서 잡아둔 구간이 남아 있으면
+// 새 글을 엉뚱한 위치부터 읽으므로 조용히(안내 없이) 초기화한다.
+export function clearTTSRangeForNewEntry() {
+    ttsStartOffset = null;
+    ttsEndOffset = null;
+    try { refreshRangeDisplay(); } catch (e) { /* 패널이 아직 없으면 무시 */ }
+}
+
 export function resetTTSRange() {
     ttsStartOffset = null;
     ttsEndOffset = null;

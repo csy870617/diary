@@ -403,7 +403,10 @@ export async function handleSignoutClick(callback) {
     localStorage.removeItem('faith_token_exp');
     localStorage.removeItem('is_faith_logged_in');
     localStorage.removeItem('faith_user_email');
-    clearEntries().catch(e => console.error('저장소 초기화 실패:', e));
+    // IndexedDB 삭제는 비동기다. 기다리지 않고 곧바로 새로고침하면 삭제가 커밋되기 전에
+    // 문서가 파괴되어 이전 사용자의 글이 기기에 남고, 다음 계정으로 로그인할 때 그 계정 드라이브로
+    // 올라갈 수 있다(공용 PC). 반드시 완료를 기다린다.
+    try { await clearEntries(); } catch (e) { console.error('저장소 초기화 실패:', e); }
     localStorage.removeItem('faithCatData');
     localStorage.removeItem('faithSyncBase');
     syncBaseMap = {};
@@ -480,7 +483,10 @@ async function checkAuthAndSync(callback, onReady) {
 }
 
 function toggleSpinners(active) {
-    const btns = [document.getElementById('refresh-btn'), document.getElementById('write-sync-btn')];
+    // 예전 UI에 있던 id(refresh-btn, write-sync-btn)는 지금 화면에 존재하지 않아
+    // 동기화 중 표시가 전혀 나오지 않았다. 현재 헤더의 동기화 버튼을 함께 대상에 넣는다.
+    const btns = [document.getElementById('login-trigger-btn'),
+                  document.getElementById('refresh-btn'), document.getElementById('write-sync-btn')];
     btns.forEach(btn => {
         if (!btn) return;
         if (active) btn.classList.add('rotating');
@@ -518,6 +524,7 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
         if (runId === syncRunId && isSyncing) { isSyncing = false; toggleSpinners(false); }
     }, 30000);
 
+    let baseSnapshot = null; // 병합 전 동기화 기준점 백업 (업로드 실패 시 되돌리기용)
     const doSync = async () => {
         const folderId = await ensureAppFolder();
         const fileMeta = await findDBFileMeta(folderId);
@@ -614,9 +621,12 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
             // 편집 중인 글은 병합으로 덮어쓰지 않도록 보호 (충돌은 확인창으로만 해소)
             const protectedId = editingActive ? state.editingId : null;
             const baseMap = loadSyncBase();
+            // 업로드 전에 기준점을 확정 저장하면, 업로드가 실패했을 때 '클라우드=내 로컬'이라고
+            // 잘못 기록되어 미전송 편집이 다음 병합에서 충돌로 인식되지 못하고 조용히 사라진다.
+            // 그래서 병합 전 상태를 백업해 두고, 업로드 성공 후에만 확정한다.
+            baseSnapshot = JSON.stringify(baseMap);
             const conflictBox = [];
             state.entries = mergeEntries(state.entries, cloudData.entries || [], protectedId, baseMap, conflictBox);
-            saveSyncBase();
             if (conflictBox.length > 0) {
                 // 충돌 사본이 생겼으면 다른 기기에도 전파되도록 업로드를 강제
                 skipUpload = false;
@@ -628,6 +638,7 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
             state.allFolders = mergedCats.folders;
             state.folderOrder = mergedCats.folderOrder;
             state.rootOrder = mergedCats.rootOrder;
+            state.purgedIds = mergedCats.purgedIds || {};
             state.categoryUpdatedAt = mergedCats.updatedAt;
             migrateRootOrder();
 
@@ -660,10 +671,20 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
         }
     };
 
+    const rollbackSyncBase = () => {
+        // 업로드가 끝내 실패했으면 기준점을 병합 전으로 되돌린다.
+        // 그래야 아직 클라우드에 올라가지 못한 로컬 편집이 다음 병합에서 '변경됨'으로 잡혀
+        // 충돌 사본으로라도 보존된다.
+        if (baseSnapshot === null) return;
+        try { syncBaseMap = JSON.parse(baseSnapshot); saveSyncBase(); } catch (e) {}
+    };
+
     let syncOk = false;
     try {
         try {
             syncOk = (await doSync()) !== false;
+            // 여기까지 왔으면 업로드(또는 pullOnly 결정)가 정상 완료된 것 — 기준점 확정
+            saveSyncBase();
         } catch (err) {
             // 서버에서 폐기된 토큰(401, authError 403) → 갱신 후 1회만 재시도
             const isAuthErr = err && (err.status === 401 ||
@@ -672,12 +693,14 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
                 const refreshed = await silentTokenRefreshWithRetry();
                 if (!refreshed) throw err;
                 syncOk = (await doSync()) !== false;
+                saveSyncBase();
             } else {
                 throw err;
             }
         }
     } catch (err) {
         console.error("구글 드라이브 저장 실패:", err);
+        rollbackSyncBase();
         showSyncWarning("클라우드 동기화에 실패했습니다. 데이터는 기기에 저장되어 있습니다.");
     } finally {
         // 워치독 발동 후 새 실행이 시작된 경우, 늦게 끝난 이전 실행이 새 실행의 상태를 건드리지 않도록 함
@@ -737,7 +760,9 @@ export function flushCloudSyncBeacon() {
         || localStorage.getItem('faith_token');
     if (!token) return false;
     const body = JSON.stringify(buildDbPayload());
-    if (body.length > 60000) return false; // keepalive 본문 한도 초과 → 일반 flush에 맡김
+    // keepalive 본문 한도는 64KiB '바이트'다. 한글은 글자당 3바이트라 글자 수로 재면 한참 넘겨서
+    // 전송이 조용히 거부된다. 실제 바이트로 재고 여유도 둔다.
+    if (new Blob([body]).size > 60 * 1024) return false; // 한도 초과 → 일반 flush에 맡김
     try {
         fetch(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(dbFileId)}?uploadType=media`, {
             method: 'PATCH',
@@ -762,6 +787,7 @@ function buildDbPayload() {
         categories: state.allCategories,
         order: state.categoryOrder,
         categoryUpdatedAt: state.categoryUpdatedAt,
+        purgedIds: state.purgedIds || {},
         folders: state.allFolders,
         folderOrder: state.folderOrder,
         rootOrder: state.rootOrder,
@@ -817,7 +843,10 @@ function mergeEntries(localList, cloudList, protectedId, baseMap, conflictBox) {
         if (!loc && cld) { resultMap.set(id, cld); baseMap[id] = cld.modifiedAt || cld.timestamp || ''; return; } // 클라우드에만 → 채택
         if (id === protectedId) { resultMap.set(id, loc); return; }     // 편집 중인 글은 로컬 유지(확인창이 처리)
 
+        // category까지 비교해야 '주제 재배정'만 바뀐 경우도 최신본이 채택된다
+        // (빠뜨리면 기기마다 서로 다른 분류를 영구히 유지하게 된다)
         const sameContent = loc.body === cld.body && loc.title === cld.title && loc.subtitle === cld.subtitle
+            && loc.category === cld.category
             && !!loc.isDeleted === !!cld.isDeleted && !!loc.isPurged === !!cld.isPurged;
         if (sameContent) {
             const winner = tOf(loc) >= tOf(cld) ? loc : cld;
@@ -839,15 +868,19 @@ function mergeEntries(localList, cloudList, protectedId, baseMap, conflictBox) {
             const loser = localWins ? cld : loc;
             resultMap.set(id, winner);
             baseMap[id] = winner.modifiedAt || winner.timestamp || '';
-            const nowISO = new Date().toISOString();
-            const copy = {
-                ...loser,
-                id: genEntryId(),
-                title: (loser.title || '제목 없음') + ' (동기화 충돌 사본)',
-                timestamp: nowISO, modifiedAt: nowISO, isDeleted: false, isPurged: false
-            };
-            resultMap.set(copy.id, copy);
-            if (conflictBox) conflictBox.push(copy);
+            // 진 쪽이 '삭제/영구삭제' 표식이면 사본을 만들지 않는다.
+            // (지운 글이 사본으로 되살아나는 것을 막기 위해 — 보존할 내용이 없는 툼스톤이다)
+            if (!loser.isDeleted && !loser.isPurged) {
+                const nowISO = new Date().toISOString();
+                const copy = {
+                    ...loser,
+                    id: genEntryId(),
+                    title: (loser.title || '제목 없음') + ' (동기화 충돌 사본)',
+                    timestamp: nowISO, modifiedAt: nowISO
+                };
+                resultMap.set(copy.id, copy);
+                if (conflictBox) conflictBox.push(copy);
+            }
         } else {
             // 한쪽만 변경(또는 기준값 없음) → 최신본 채택(LWW)
             const winner = tOf(loc) >= tOf(cld) ? loc : cld;
@@ -913,8 +946,25 @@ function mergeCategories(localState, cloudData) {
     folders.forEach(f => { if (f && f.parentFolderId && !folderIds.has(f.parentFolderId)) delete f.parentFolderId; });
     categories.forEach(c => { if (c && c.folderId && !folderIds.has(c.folderId)) delete c.folderId; });
 
-    // rootOrder는 승자 기준 그대로 반환 — 합류된 최상위 항목은 이후 migrateRootOrder()가 뒤에 붙여준다
-    return { categories, order, folders, folderOrder, rootOrder: winner.rootOrder, updatedAt: winner.updatedAt };
+    // 영구 삭제 표식은 양쪽을 합집합으로 모은다 (한쪽에서만 지웠어도 삭제가 전파되도록)
+    const purgedIds = Object.assign({}, cloudData.purgedIds || {}, localState.purgedIds || {});
+    const purgedSet = new Set(Object.keys(purgedIds));
+    // 표식이 있는 주제/폴더는 어느 쪽에 남아 있든 제거한다 (되살아남 방지)
+    const keptCategories = categories.filter(c => c && !purgedSet.has(c.id));
+    const keptFolders = folders.filter(f => f && !purgedSet.has(f.id));
+    const keptFolderIds = new Set(keptFolders.map(f => f.id));
+    keptFolders.forEach(f => { if (f.parentFolderId && !keptFolderIds.has(f.parentFolderId)) delete f.parentFolderId; });
+    keptCategories.forEach(c => { if (c.folderId && !keptFolderIds.has(c.folderId)) delete c.folderId; });
+
+    return {
+        categories: keptCategories,
+        order: order.filter(id => !purgedSet.has(id)),
+        folders: keptFolders,
+        folderOrder: folderOrder.filter(id => !purgedSet.has(id)),
+        rootOrder: (winner.rootOrder || []).filter(id => !purgedSet.has(id)),
+        purgedIds,
+        updatedAt: winner.updatedAt
+    };
 }
 
 // Drive 검색 쿼리(q)의 작은따옴표 문자열 안에 이름을 안전하게 넣기 위한 이스케이프

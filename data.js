@@ -162,15 +162,20 @@ export async function emptyTrash() {
         state.allFolders = state.allFolders.filter(f => !f.isDeleted);
         state.folderOrder = state.folderOrder.filter(id => !deletedFolderIds.has(id));
         state.rootOrder = (state.rootOrder || []).filter(id => !deletedFolderIds.has(id));
+        if (!state.purgedIds) state.purgedIds = {};
+        deletedFolderIds.forEach(id => { state.purgedIds[id] = now; });
     }
 
     const deletedCatIds = new Set(trashCats.map(c => c.id));
     if (deletedCatIds.size > 0) {
         const remaining = state.allCategories.find(c => !c.isDeleted && !deletedCatIds.has(c.id));
-        if (remaining) state.entries.forEach(e => { if (deletedCatIds.has(e.category)) e.category = remaining.id; });
+        // 재분류도 '변경'이므로 수정시각을 갱신해야 다른 기기로 전파된다
+        if (remaining) state.entries.forEach(e => { if (deletedCatIds.has(e.category)) { e.category = remaining.id; e.modifiedAt = now; } });
         state.allCategories = state.allCategories.filter(c => !c.isDeleted);
         state.categoryOrder = state.categoryOrder.filter(id => !deletedCatIds.has(id));
         state.rootOrder = (state.rootOrder || []).filter(id => !deletedCatIds.has(id));
+        if (!state.purgedIds) state.purgedIds = {};
+        deletedCatIds.forEach(id => { state.purgedIds[id] = now; });
     }
 
     if (deletedFolderIds.size > 0 || deletedCatIds.size > 0) {
@@ -201,6 +206,8 @@ export async function checkOldTrash() {
         state.allFolders = state.allFolders.filter(f => !oldFolderIds.has(f.id));
         state.folderOrder = state.folderOrder.filter(id => !oldFolderIds.has(id));
         state.rootOrder = (state.rootOrder || []).filter(id => !oldFolderIds.has(id));
+        if (!state.purgedIds) state.purgedIds = {};
+        oldFolderIds.forEach(id => { state.purgedIds[id] = now.toISOString(); });
         metaChanged = true;
     }
 
@@ -208,10 +215,12 @@ export async function checkOldTrash() {
     state.allCategories.forEach(c => { if (c.isDeleted && c.deletedAt && cutoff(c.deletedAt)) oldCatIds.add(c.id); });
     if (oldCatIds.size > 0) {
         const remaining = state.allCategories.find(c => !c.isDeleted && !oldCatIds.has(c.id));
-        if (remaining) state.entries.forEach(e => { if (oldCatIds.has(e.category)) { e.category = remaining.id; entryChanged = true; } });
+        if (remaining) state.entries.forEach(e => { if (oldCatIds.has(e.category)) { e.category = remaining.id; e.modifiedAt = now.toISOString(); entryChanged = true; } });
         state.allCategories = state.allCategories.filter(c => !oldCatIds.has(c.id));
         state.categoryOrder = state.categoryOrder.filter(id => !oldCatIds.has(id));
         state.rootOrder = (state.rootOrder || []).filter(id => !oldCatIds.has(id));
+        if (!state.purgedIds) state.purgedIds = {};
+        oldCatIds.forEach(id => { state.purgedIds[id] = now.toISOString(); });
         metaChanged = true;
     }
 

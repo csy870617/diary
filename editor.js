@@ -2,7 +2,7 @@ import { state } from './state.js';
 import { saveEntry } from './data.js';
 import { saveToDrive, scheduleCloudSync, flushCloudSync } from './drive.js';
 import { openModal, hideTransientPopups } from './ui.js';
-import { setupLinkPreservation, autoLink } from './utils.js';
+import { setupLinkPreservation, autoLink, isSafeUrl } from './utils.js';
 
 let currentSelectedElement = null; 
 let lastClickedCell = null; 
@@ -293,42 +293,6 @@ function saveInitialState() {
     const snapshot = createSnapshot();
     if (snapshot) {
         undoStack.push(snapshot);
-    }
-}
-
-// 이전 호환성을 위한 함수 (기존 코드에서 호출하는 곳용)
-function getCursorOffset(element) {
-    const selection = window.getSelection();
-    if (selection.rangeCount === 0) return 0;
-    const range = selection.getRangeAt(0);
-    const preCaretRange = range.cloneRange();
-    preCaretRange.selectNodeContents(element);
-    preCaretRange.setEnd(range.endContainer, range.endOffset);
-    return preCaretRange.toString().length;
-}
-
-function setCursorOffset(element, offset) {
-    const selection = window.getSelection();
-    const range = document.createRange();
-    let currentPos = 0;
-    const nodeStack = [element];
-    while (nodeStack.length > 0) {
-        const node = nodeStack.pop();
-        if (node.nodeType === 3) {
-            const nextPos = currentPos + node.length;
-            if (offset >= currentPos && offset <= nextPos) {
-                range.setStart(node, offset - currentPos);
-                range.setEnd(node, offset - currentPos);
-                selection.removeAllRanges();
-                selection.addRange(range);
-                return;
-            }
-            currentPos = nextPos;
-        } else {
-            for (let i = node.childNodes.length - 1; i >= 0; i--) {
-                nodeStack.push(node.childNodes[i]);
-            }
-        }
     }
 }
 
@@ -783,7 +747,10 @@ function updateBookLayout() {
     lastBookViewportH = getBookViewportHeight(); // 재배치 기준 가시 높이 기록 (키보드 표시/숨김 판별용)
     container.style.columnWidth = `${Math.floor(container.clientWidth)}px`;
     container.style.columnGap = '0px';
-    container.style.height = `${getBookViewportHeight() - 120}px`;
+    // style.css의 책 모드 규칙이 height를 !important로 고정하므로, 인라인도 important로 지정해야
+    // 실제로 적용된다. (그냥 style.height = ... 로 두면 캐스케이드에서 밀려 무시되어
+    // 키보드가 떴을 때 페이지 높이가 줄지 않는다 — iOS 사파리에서 하단 줄이 가려지던 원인)
+    container.style.setProperty('height', `${getBookViewportHeight() - 120}px`, 'important');
     container.style.overflow = 'hidden';
     const body = document.getElementById('editor-body');
     if (body) {
@@ -1474,8 +1441,11 @@ export function sanitizeEntryHtml(html) {
         Array.from(el.attributes).forEach(attr => {
             const name = attr.name.toLowerCase();
             if (name.startsWith('on')) el.removeAttribute(attr.name);
-            else if ((name === 'href' || name === 'src' || name === 'xlink:href' || name === 'srcdoc' || name === 'formaction') &&
-                     /^\s*(javascript|vbscript)\s*:/i.test(attr.value)) el.removeAttribute(attr.name);
+            // 스킴 안에 탭·개행을 끼우면 정규식 비교를 빠져나가지만 브라우저는 javascript: 로 해석한다.
+            // 공용 판정(isSafeUrl)이 공백류를 걷어낸 뒤 허용 목록으로 검사한다.
+            else if ((name === 'href' || name === 'src' || name === 'xlink:href' || name === 'srcdoc' ||
+                      name === 'formaction' || name === 'srcset' || name === 'action' || name === 'data') &&
+                     !isSafeUrl(attr.value)) el.removeAttribute(attr.name);
         });
     });
     return doc.body.innerHTML;
@@ -1552,6 +1522,8 @@ export function openEditor(isEdit, entryData) {
     hideTransientPopups(); // 홈 화면에서 열려 있던 팝업/메뉴를 닫고 에디터로 진입
     state.isEditMode = isEdit; const writeModal = document.getElementById('write-modal'); openModal(writeModal); writeModal.scrollTop = 0; currentBookPageIndex = 0; savedRange = null; setupBasicHandling();
     applySpellcheck();
+    // 이전 글의 TTS 구간이 남아 새 글을 엉뚱한 위치부터 읽는 것을 방지
+    import('./tts.js').then(m => m.clearTTSRangeForNewEntry && m.clearTTSRangeForNewEntry()).catch(() => {});
     const catName = state.allCategories.find(c => c.id === state.currentCategory)?.name || '기록';
     document.getElementById('display-category').innerText = catName; document.getElementById('display-date').innerText = entryData ? entryData.date : new Date().toLocaleDateString('ko-KR');
     const editTitle = document.getElementById('edit-title'), editSubtitle = document.getElementById('edit-subtitle'), editBody = document.getElementById('editor-body');
@@ -1667,7 +1639,7 @@ export function toggleViewMode(mode) {
     const btnReadOnly = document.getElementById('btn-readonly'), btnBookMode = document.getElementById('btn-bookmode');
     if(btnReadOnly) btnReadOnly.classList.toggle('active', mode === 'readOnly');
     if(btnBookMode) btnBookMode.classList.toggle('active', mode === 'book' || mode === 'book-edit');
-    if(!isBookToBook && container) { container.style.height = ''; container.style.overflow = ''; container.style.columnWidth = ''; container.style.columnGap = ''; container.scrollLeft = 0; }
+    if(!isBookToBook && container) { container.style.removeProperty('height'); container.style.overflow = ''; container.style.columnWidth = ''; container.style.columnGap = ''; container.scrollLeft = 0; }
     if (wasBookMode && !isBookToBook) { const body = document.getElementById('editor-body'); if (body) body.querySelectorAll('img').forEach(img => { img.style.maxHeight = ''; img.style.maxWidth = ''; img.style.width = img.dataset.bookOrigWidth || ''; img.style.height = img.dataset.bookOrigHeight || ''; delete img.dataset.bookOrigWidth; delete img.dataset.bookOrigHeight; delete img.dataset.bookTargetW; delete img.dataset.bookTargetH; }); }
     writeModal.classList.remove('mode-read-only', 'mode-book', 'mode-book-edit');
     if (!wasBookMode && (mode === 'book' || mode === 'book-edit')) {
@@ -1958,12 +1930,20 @@ function createSelectionUI() {
             if (!img || img.tagName !== 'IMG' || typeof window.openImageCropper !== 'function') return;
             saveBeforeChange('crop');
             window.openImageCropper(img.src, (result, wasCropped) => {
-                if (wasCropped && result) {
+                if (!wasCropped || !result) return;
+                // 자르기 결과는 원본 해상도 무손실 PNG라 그대로 넣으면 본문이 수 MB로 불어난다.
+                // 새로 삽입하는 경로와 동일한 상한(1280px)을 적용한 뒤 넣는다.
+                const apply = (src) => {
                     img.style.height = 'auto'; // 비율이 바뀌었으므로 세로 자동
                     img.addEventListener('load', () => { updateSelectionBox(); markBookImageResized(img); }, { once: true });
-                    img.src = result;
+                    img.src = src;
                     updateSelectionBox();
                     triggerAutoSave();
+                };
+                if (typeof window.compressImageDataUrl === 'function') {
+                    window.compressImageDataUrl(result, 1280, 0.82).then(apply).catch(() => apply(result));
+                } else {
+                    apply(result);
                 }
             });
         };

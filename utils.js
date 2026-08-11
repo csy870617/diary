@@ -57,6 +57,32 @@ let globalCellClipboard = { cellData: null, rows: 0, cols: 0 };
  * 서식(색상, 굵기, 기울임, 밑줄, 글꼴 등)은 보존하고
  * 위험한 요소(script, iframe 등)는 제거합니다.
  */
+/**
+ * URL 속성값이 안전한지 판정한다.
+ *
+ * 브라우저는 URL 스킴 안의 탭·개행·공백을 무시하고 해석하므로
+ * `java\tscript:` 도 정상적인 javascript: 링크가 된다.
+ * 따라서 startsWith('javascript:') 같은 단순 비교로는 막을 수 없다.
+ * 공백류와 제어문자를 모두 걷어낸 뒤, 허용 목록 방식으로 판정한다.
+ */
+export function isSafeUrl(value) {
+    if (value == null) return false;
+    // 공백류(탭/개행/캐리지리턴/폼피드)와 널 등 제어문자를 제거해 스킴을 드러낸다.
+    const bare = String(value).replace(/[\u0000-\u0020\u00a0\u1680\u2000-\u200f\u2028\u2029\u202f\u205f\u3000\ufeff]/g, '').toLowerCase();
+    if (bare === '') return true; // 빈 값은 무해
+    // 스킴이 없으면(상대경로·앵커·쿼리) 안전
+    const m = bare.match(/^([a-z][a-z0-9+.-]*):/);
+    if (!m) return true;
+    const scheme = m[1];
+    const ALLOWED = new Set(['http', 'https', 'mailto', 'tel']);
+    if (!ALLOWED.has(scheme)) {
+        // data:image 는 본문에 삽입된 사진이라 허용 (그 외 data: 는 차단)
+        if (scheme === 'data' && /^data:image\/(png|jpe?g|gif|webp|bmp);/.test(bare)) return true;
+        return false;
+    }
+    return true;
+}
+
 export function sanitizeExternalHtml(html) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
@@ -134,13 +160,20 @@ export function sanitizeExternalHtml(html) {
 
         const tag = node.tagName.toLowerCase();
 
-        // 허용되지 않는 태그는 내용만 유지
+        // 허용되지 않는 태그는 내용만 유지.
+        // 이때 부모 자리로 올린 자식들은 호출부의 순회 목록(이미 찍어둔 스냅샷)에 없으므로
+        // 여기서 직접 정화해야 한다. 빠뜨리면 <foo><img onerror=...></foo> 처럼
+        // 한 겹만 감싸는 것으로 핸들러가 그대로 통과한다.
         if (!allowedTags.has(tag)) {
             const parent = node.parentNode;
+            const promoted = [];
             while (node.firstChild) {
-                parent.insertBefore(node.firstChild, node);
+                const child = node.firstChild;
+                parent.insertBefore(child, node);
+                promoted.push(child);
             }
             parent.removeChild(node);
+            for (const child of promoted) sanitizeNode(child);
             return;
         }
 
@@ -161,8 +194,8 @@ export function sanitizeExternalHtml(html) {
                 node.removeAttribute(attr.name);
                 continue;
             }
-            // javascript: URL 차단
-            if ((name === 'href' || name === 'src') && attr.value.trim().toLowerCase().startsWith('javascript:')) {
+            // 위험한 스킴 차단 (스킴 안의 탭·개행까지 고려한 공용 판정)
+            if ((name === 'href' || name === 'src' || name === 'srcset') && !isSafeUrl(attr.value)) {
                 node.removeAttribute(attr.name);
             }
         }
@@ -209,19 +242,38 @@ export function sanitizeExternalHtml(html) {
             nodesToProcess.push(textNode);
         }
     }
+    // 주의: 여기서 innerHTML을 쓰면 안 된다.
+    // 텍스트 노드의 값은 '글자'일 뿐인데 innerHTML에 넣으면 다시 HTML로 해석되어,
+    // 정화 단계에서 안전하게 글자로 바뀌어 있던 <img onerror=...> 가 실제 태그로 되살아난다.
+    // 그래서 DOM API로만 조립한다.
+    const URL_RE = /(https?:\/\/[^\s]+)/g;
     nodesToProcess.forEach(tn => {
-        const span = document.createElement('span');
-        span.innerHTML = tn.nodeValue.replace(/(https?:\/\/[^\s]+)/g, (match) => {
-            const { url, trail } = splitTrailingPunctuation(match);
-            const safeUrl = url.replace(/"/g, '&quot;'); // 따옴표 이스케이프로 속성 주입 방지
-            return `<a href="${safeUrl}" target="_blank" style="color:#2563EB; text-decoration:underline; cursor:pointer;">${safeUrl}</a>${trail}`;
-        });
-        tn.parentElement.replaceChild(span, tn);
-        const parent = span.parentElement;
-        while (span.firstChild) {
-            parent.insertBefore(span.firstChild, span);
+        const text = tn.nodeValue;
+        const frag = document.createDocumentFragment();
+        let lastIdx = 0;
+        let m;
+        URL_RE.lastIndex = 0;
+        while ((m = URL_RE.exec(text)) !== null) {
+            const { url, trail } = splitTrailingPunctuation(m[0]);
+            if (m.index > lastIdx) frag.appendChild(document.createTextNode(text.slice(lastIdx, m.index)));
+            if (isSafeUrl(url)) {
+                const a = document.createElement('a');
+                a.href = url;
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+                a.style.color = '#2563EB';
+                a.style.textDecoration = 'underline';
+                a.style.cursor = 'pointer';
+                a.textContent = url;
+                frag.appendChild(a);
+            } else {
+                frag.appendChild(document.createTextNode(url));
+            }
+            if (trail) frag.appendChild(document.createTextNode(trail));
+            lastIdx = m.index + m[0].length;
         }
-        parent.removeChild(span);
+        if (lastIdx < text.length) frag.appendChild(document.createTextNode(text.slice(lastIdx)));
+        tn.parentElement.replaceChild(frag, tn);
     });
     result = tempDiv.innerHTML;
 

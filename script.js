@@ -7,6 +7,7 @@ import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, flushClou
 import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, setTTSStart, setTTSEnd, resetTTSRange, playSelection, updateSpeedDisplay, updatePitchDisplay, updateGapDisplay, initTTS, updateTTSRange, seekTTSByPercent, saveTTSVoice } from './tts.js';
 import { initFaithsSSO } from './faiths-sso.js';
 import { flushEntries } from './storage.js';
+import { isSafeUrl } from './utils.js';
 
 const faithsSsoReady = initFaithsSSO();
 
@@ -81,8 +82,10 @@ function sanitizeSharedHtml(html) {
             const name = attr.name.toLowerCase();
             const value = attr.value.trim().toLowerCase();
             if (name.startsWith('on')) el.removeAttribute(attr.name);
-            else if ((name === 'href' || name === 'src' || name === 'srcset' || name === 'xlink:href')
-                && (value.startsWith('javascript:') || value.startsWith('vbscript:') || value.startsWith('data:text/html'))) el.removeAttribute(attr.name);
+            // 스킴 중간의 탭·개행까지 고려한 공용 판정 사용 (허용 목록 방식)
+            else if ((name === 'href' || name === 'src' || name === 'srcset' || name === 'xlink:href'
+                || name === 'action' || name === 'formaction' || name === 'data' || name === 'srcdoc')
+                && !isSafeUrl(attr.value)) el.removeAttribute(attr.name);
             else if (name === 'style' && (value.includes('expression') || value.includes('javascript'))) el.removeAttribute(attr.name);
         });
     });
@@ -692,21 +695,40 @@ function processTextFile(file) {
 // (예전에는 화질 보존을 위해 원본 해상도 + 무손실 PNG로 넣었는데, 사진 한 장이
 //  수 MB가 되어 브라우저 저장 공간(보통 5MB)을 혼자 다 써버리는 원인이었다.
 //  자르기는 화질 의도가 있으므로 일반 삽입보다 여유 있는 상한을 준다.)
+// 이미지를 지정한 상한 안으로 줄여서 data URL로 돌려준다.
+// 투명한 부분이 있는 이미지를 JPEG로 바꾸면 그 영역이 검게 변하므로, 투명 픽셀이 있으면
+// PNG로 유지한다(대신 해상도 상한만 적용). 스티커·로고 등이 검게 변하지 않도록.
+export function compressImageDataUrl(dataUrl, maxWidth = 800, quality = 0.7) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            let { width, height } = img;
+            if (width > maxWidth) { height *= maxWidth / width; width = maxWidth; }
+            width = Math.max(1, Math.round(width));
+            height = Math.max(1, Math.round(height));
+            canvas.width = width; canvas.height = height;
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(img, 0, 0, width, height);
+            let hasAlpha = false;
+            try {
+                const d = ctx.getImageData(0, 0, width, height).data;
+                for (let i = 3; i < d.length; i += 4) { if (d[i] < 250) { hasAlpha = true; break; } }
+            } catch (e) { /* 교차 출처 등으로 읽을 수 없으면 JPEG 기준으로 처리 */ }
+            resolve(hasAlpha ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', quality));
+        };
+        img.onerror = () => reject(new Error('이미지 로드 실패'));
+        img.src = dataUrl;
+    });
+}
+window.compressImageDataUrl = compressImageDataUrl;
+
 function compressAndInsertImage(dataUrl, maxWidth = 800, quality = 0.7) {
-    const img = new Image();
-    img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        let { width, height } = img;
-        if (width > maxWidth) { height *= maxWidth / width; width = maxWidth; }
-        canvas.width = width; canvas.height = height;
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(img, 0, 0, width, height);
-        insertImage(canvas.toDataURL('image/jpeg', quality));
-    };
-    img.onerror = () => { console.error('이미지 로드 실패'); alert('이미지를 불러올 수 없습니다. 손상된 파일일 수 있습니다.'); };
-    img.src = dataUrl;
+    compressImageDataUrl(dataUrl, maxWidth, quality)
+        .then(insertImage)
+        .catch(err => { console.error(err); alert('이미지를 불러올 수 없습니다. 손상된 파일일 수 있습니다.'); });
 }
 
 function processImage(file) {
