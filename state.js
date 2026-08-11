@@ -9,6 +9,9 @@ export const state = {
     categoryOrder: ['cat_sermon', 'cat_meditation', 'cat_prayer', 'cat_thanks'],
     currentCategory: 'cat_sermon',
     categoryUpdatedAt: new Date(0).toISOString(),
+    // 영구 삭제한 주제/폴더의 id → 삭제시각. 배열에서 지우기만 하면 다른 기기와 병합할 때
+    // 상대 쪽에 남아 있던 항목이 그대로 되돌아오므로, 삭제 사실 자체를 기록해 전파한다.
+    purgedIds: {},
     allFolders: [],
     folderOrder: [],
     rootOrder: [],
@@ -45,6 +48,7 @@ export function saveCategoriesToLocal() {
         folders: state.allFolders,
         folderOrder: state.folderOrder,
         rootOrder: state.rootOrder,
+        purgedIds: state.purgedIds || {},
         updatedAt: state.categoryUpdatedAt || new Date().toISOString()
     };
     try {
@@ -114,6 +118,7 @@ export function loadCategoriesFromLocal() {
                 state.allFolders = Array.isArray(parsed.folders) ? parsed.folders.filter(isValidItem) : [];
                 state.folderOrder = Array.isArray(parsed.folderOrder) ? parsed.folderOrder.filter(id => typeof id === 'string') : [];
                 state.rootOrder = Array.isArray(parsed.rootOrder) ? parsed.rootOrder.filter(id => typeof id === 'string') : [];
+                state.purgedIds = (parsed.purgedIds && typeof parsed.purgedIds === 'object') ? parsed.purgedIds : {};
                 state.categoryUpdatedAt = parsed.updatedAt || new Date(0).toISOString();
                 migrateRootOrder();
                 const exists = state.allCategories.find(c => c.id === state.currentCategory && !c.isDeleted);

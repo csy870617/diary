@@ -104,6 +104,22 @@ function legacySave(entries) {
     }
 }
 
+// 두 글 목록을 id 기준으로 합치되, 같은 id는 수정시각이 더 최신인 쪽을 남긴다.
+// (IndexedDB 본과 localStorage 폴백본 중 어느 쪽이 최신인지 알 수 없을 때 사용)
+function mergeByModifiedAt(primary, secondary) {
+    const tOf = (e) => new Date((e && (e.modifiedAt || e.timestamp)) || 0).getTime() || 0;
+    const byId = new Map();
+    let changed = false;
+    for (const e of primary) { if (e && e.id != null) byId.set(e.id, e); }
+    for (const e of secondary) {
+        if (!e || e.id == null) continue;
+        const cur = byId.get(e.id);
+        if (!cur) { byId.set(e.id, e); changed = true; }
+        else if (tOf(e) > tOf(cur)) { byId.set(e.id, e); changed = true; }
+    }
+    return { list: Array.from(byId.values()), changed };
+}
+
 export function isQuotaError(e) {
     if (!e) return false;
     return e.name === 'QuotaExceededError'
@@ -140,24 +156,45 @@ export async function loadEntries() {
     let legacyRaw = null;
     try { legacyRaw = localStorage.getItem(LEGACY_KEY); } catch (e) { /* 접근 불가 시 무시 */ }
 
+    // 예전 키를 안전하게 배열로 해석한다. 해석에 실패하면 null을 돌려
+    // '데이터 없음'과 '해석 불가'를 구분한다(해석 불가일 때 원본을 지우면 복구가 불가능해진다).
+    const parseLegacy = () => {
+        if (legacyRaw === null) return null;
+        try {
+            const v = JSON.parse(legacyRaw);
+            return Array.isArray(v) ? v : null;
+        } catch (e) {
+            console.error('기존 데이터 해석 실패(원본은 보존합니다):', e);
+            return null;
+        }
+    };
+
     try {
         const stored = await idbGet(ENTRIES_KEY);
         if (Array.isArray(stored)) {
-            // IndexedDB에 이미 정상 데이터가 있으면 그것을 쓰고, 남아 있는 예전 데이터는 정리한다.
-            if (legacyRaw !== null) { try { localStorage.removeItem(LEGACY_KEY); } catch (e) {} }
-            return stored;
+            // LEGACY_KEY는 마이그레이션 원본일 뿐 아니라, IndexedDB를 못 쓰던 세션의 '폴백 최신본'이기도 하다.
+            // 비교 없이 지우면 그 세션에 쓴 글이 사라지므로, 항목별 수정시각으로 병합한 뒤에만 정리한다.
+            const legacy = parseLegacy();
+            if (legacy === null) {
+                // 해석할 수 없는 값이면 건드리지 않고 남겨 둔다 (수동 복구 여지 보존)
+                return stored;
+            }
+            const merged = mergeByModifiedAt(stored, legacy);
+            if (merged.changed) {
+                await idbSet(ENTRIES_KEY, merged.list);
+                console.info(`폴백 저장본을 병합했습니다 (총 ${merged.list.length}건).`);
+            }
+            try { localStorage.removeItem(LEGACY_KEY); } catch (e) {}
+            return merged.list;
         }
         // IndexedDB가 비어 있고 예전 데이터가 있으면 옮긴다 (최초 1회 마이그레이션)
-        if (legacyRaw !== null) {
-            let parsed = [];
-            try { parsed = JSON.parse(legacyRaw) || []; } catch (e) { console.error('기존 데이터 해석 실패:', e); parsed = []; }
-            if (Array.isArray(parsed)) {
-                await idbSet(ENTRIES_KEY, parsed);
-                // 옮기기에 성공한 뒤에만 지워서, 실패 시 원본이 사라지지 않게 한다.
-                try { localStorage.removeItem(LEGACY_KEY); } catch (e) {}
-                console.info(`저장소 이전 완료: 글 ${parsed.length}건을 IndexedDB로 옮겼습니다.`);
-                return parsed;
-            }
+        const legacy = parseLegacy();
+        if (legacy !== null) {
+            await idbSet(ENTRIES_KEY, legacy);
+            // 옮기기에 성공한 뒤에만 지워서, 실패 시 원본이 사라지지 않게 한다.
+            try { localStorage.removeItem(LEGACY_KEY); } catch (e) {}
+            console.info(`저장소 이전 완료: 글 ${legacy.length}건을 IndexedDB로 옮겼습니다.`);
+            return legacy;
         }
         return [];
     } catch (err) {

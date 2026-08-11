@@ -729,6 +729,15 @@ export function deleteFolderAction() {
     const allFolderIds = new Set([folder.id, ...descendants]);
     const affectedCats = state.allCategories.filter(c => c.folderId && allFolderIds.has(c.folderId) && !c.isDeleted);
 
+    // 주제 삭제와 동일한 보호: 이 폴더를 지우면 살아있는 주제가 하나도 남지 않는 경우를 막는다.
+    // (막지 않으면 모든 탭이 사라져 글이 어디에도 보이지 않고, 30일 뒤 자동 정리로 영구 손실된다)
+    const liveCats = state.allCategories.filter(c => !c.isDeleted);
+    const affectedIds = new Set(state.allCategories.filter(c => c.folderId && allFolderIds.has(c.folderId) && !c.isDeleted).map(c => c.id));
+    if (liveCats.every(c => affectedIds.has(c.id))) {
+        alert('이 폴더를 삭제하면 남는 주제가 없습니다.\n다른 주제를 먼저 만들거나 폴더 밖으로 옮겨 주세요.');
+        return;
+    }
+
     let extra = '';
     if (descendants.length > 0 && affectedCats.length > 0) extra = ` (하위 폴더 ${descendants.length}개, 주제 ${affectedCats.length}개 포함)`;
     else if (descendants.length > 0) extra = ` (하위 폴더 ${descendants.length}개 포함)`;
@@ -736,8 +745,14 @@ export function deleteFolderAction() {
 
     if (confirm(`'${folder.name}' 폴더를 휴지통으로 보내시겠습니까?${extra}`)) {
         const now = new Date().toISOString();
-        state.allFolders.forEach(f => { if (allFolderIds.has(f.id)) { f.isDeleted = true; f.deletedAt = now; } });
-        affectedCats.forEach(c => { c.isDeleted = true; c.deletedAt = now; });
+        // 함께 지워지는 항목에 '어느 폴더를 지우면서 딸려 삭제됐는지'를 남긴다.
+        // 복구할 때 이 표식으로 하위 폴더·주제까지 같이 되살린다.
+        state.allFolders.forEach(f => {
+            if (!allFolderIds.has(f.id)) return;
+            f.isDeleted = true; f.deletedAt = now;
+            if (f.id !== folder.id) f.deletedWith = folder.id;
+        });
+        affectedCats.forEach(c => { c.isDeleted = true; c.deletedAt = now; c.deletedWith = folder.id; });
         // state.currentFolder는 renderFolders에서 항상 null로 초기화되므로 별도 처리 불필요
         if (state.allCategories.find(c => c.id === state.currentCategory)?.isDeleted) {
             const next = state.allCategories.find(c => !c.isDeleted);
@@ -753,6 +768,15 @@ export function restoreFolder(id) {
     if (!folder) return;
     delete folder.isDeleted;
     delete folder.deletedAt;
+    delete folder.deletedWith;
+    // 이 폴더를 지우면서 함께 삭제된 하위 폴더·주제도 같이 되살린다.
+    // (되살리지 않으면 폴더만 빈 채로 돌아오고, 주제들은 30일 뒤 자동 정리로 사라진다)
+    state.allFolders.forEach(f => {
+        if (f.deletedWith === id) { delete f.isDeleted; delete f.deletedAt; delete f.deletedWith; }
+    });
+    state.allCategories.forEach(c => {
+        if (c.deletedWith === id) { delete c.isDeleted; delete c.deletedAt; delete c.deletedWith; }
+    });
     let parentId = folder.parentFolderId;
     while (parentId) {
         const parent = state.allFolders.find(f => f.id === parentId);
@@ -773,6 +797,9 @@ export function permanentDeleteFolder(id) {
     state.allFolders = state.allFolders.filter(f => f.id !== id);
     state.folderOrder = state.folderOrder.filter(fid => fid !== id);
     state.rootOrder = (state.rootOrder || []).filter(rid => rid !== id);
+    // 삭제 사실을 남겨야 다른 기기와 병합할 때 되살아나지 않는다
+    if (!state.purgedIds) state.purgedIds = {};
+    state.purgedIds[id] = new Date().toISOString();
     state.categoryUpdatedAt = new Date().toISOString();
     saveCategoriesToLocal(); renderTrash(); renderFolders(); renderTabs(); renderEntries(); saveToDrive();
 }
@@ -925,9 +952,15 @@ export function permanentDeleteCategory(id) {
     state.allCategories = state.allCategories.filter(c => c.id !== id);
     state.categoryOrder = state.categoryOrder.filter(cid => cid !== id);
     state.rootOrder = (state.rootOrder || []).filter(rid => rid !== id);
+    if (!state.purgedIds) state.purgedIds = {};
+    state.purgedIds[id] = new Date().toISOString();
     const newCatId = remaining[0].id;
-    state.entries.forEach(e => { if (e.category === id) e.category = newCatId; });
-    saveEntries(state.entries).catch(e => console.error(e));
+    // 재배정도 '변경'이므로 수정시각을 갱신해야 다른 기기로 전파된다
+    const reassignedAt = new Date().toISOString();
+    state.entries.forEach(e => { if (e.category === id) { e.category = newCatId; e.modifiedAt = reassignedAt; } });
+    saveEntries(state.entries).then(ok => {
+        if (!ok) alert('이 기기의 저장 공간이 부족해 변경 내용을 기록하지 못했습니다.\n공간을 확보한 뒤 다시 시도해 주세요.');
+    }).catch(e => console.error(e));
     if (state.currentCategory === id) { state.currentCategory = newCatId; applyCategorySort(); }
     state.categoryUpdatedAt = new Date().toISOString();
     saveCategoriesToLocal(); renderTrash(); renderFolders(); renderTabs(); renderEntries(); saveToDrive();
