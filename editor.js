@@ -398,6 +398,7 @@ function handleBookResize() {
         const heightDelta = Math.abs(getBookViewportHeight() - lastBookViewportH);
         // 주소창 노출/숨김 같은 자잘한 높이 변동은 재배치하면 오히려 튀므로 현재 페이지만 유지한다.
         if (heightDelta < 100) {
+            syncBookViewportFrame(); // 주소창 변화로 시각 뷰포트가 밀린 경우에도 화면은 제자리에 붙여둔다
             if (container) { container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth); container.scrollTop = 0; }
             updateBookNav();
             return;
@@ -409,7 +410,11 @@ function handleBookResize() {
         bookKbdResizeTimer = setTimeout(() => {
             bookKbdResizeTimer = null;
             if (state.currentViewMode !== 'book-edit') return;
+            // 1) 먼저 화면 틀을 '지금 보이는 영역'에 맞춘다 (이걸 해야 이후 측정값이 정확하다)
+            syncBookViewportFrame();
+            // 2) 줄어든 높이에 맞춰 페이지를 다시 배치
             updateBookLayout();
+            // 3) 커서가 들어간 페이지로 이동 — 재배치로 커서가 다른 페이지로 밀려도 따라간다
             const c = document.getElementById('editor-container');
             if (!scrollCursorIntoBookView() && c) c.scrollLeft = currentBookPageIndex * Math.floor(c.clientWidth);
             updateBookNav();
@@ -567,6 +572,36 @@ function handleBookScrollSnap(e) {
     container.scrollLeft = nearest * stride;
     updateBookNav();
 }
+// 가상 키보드가 뜨면 브라우저는 캐럿을 보이려고 '페이지 전체'를 스크롤한다.
+// 책 모드 화면(#write-modal)은 position:fixed라 레이아웃 뷰포트에 붙어 있는데,
+// 시각 뷰포트만 아래로 내려가므로 화면이 통째로 위로 밀려 올라간 것처럼 보인다.
+// (사용자가 탭한 위치가 위로 사라지는 원인)
+//
+// 그래서 책 모드에서는 페이지 스크롤을 되돌리고, 모달을 '지금 실제로 보이는 영역'에
+// 정확히 맞춰 붙인다. 그러면 키보드가 떠도 화면이 밀리지 않는다.
+function syncBookViewportFrame() {
+    if (!isBookNavMode()) return;
+    const modal = document.getElementById('write-modal');
+    if (!modal) return;
+    // 브라우저가 캐럿을 보이려 민 페이지 스크롤을 되돌린다 (책 모드는 페이지 스크롤이 없어야 함)
+    if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);
+    if (modal.scrollTop !== 0) modal.scrollTop = 0;
+
+    const vv = window.visualViewport;
+    if (!vv) return;
+    // 시각 뷰포트가 내려간 만큼 모달도 따라 내려, 보이는 영역과 정확히 겹치게 한다.
+    const offset = Math.max(0, Math.round(vv.offsetTop));
+    modal.style.transform = offset ? `translateY(${offset}px)` : '';
+    modal.style.setProperty('height', `${Math.round(vv.height)}px`, 'important');
+}
+
+function clearBookViewportFrame() {
+    const modal = document.getElementById('write-modal');
+    if (!modal) return;
+    modal.style.transform = '';
+    modal.style.removeProperty('height');
+}
+
 function toggleBookEventListeners(enable) {
     const container = document.getElementById('editor-container');
     if (!container) return;
@@ -575,12 +610,26 @@ function toggleBookEventListeners(enable) {
     container.removeEventListener('touchmove', handleBookTouchMove);
     container.removeEventListener('touchend', handleBookTouchEnd);
     container.removeEventListener('scroll', handleBookScrollSnap);
+    window.removeEventListener('scroll', syncBookViewportFrame);
+    if (window.visualViewport) {
+        window.visualViewport.removeEventListener('scroll', syncBookViewportFrame);
+        window.visualViewport.removeEventListener('resize', syncBookViewportFrame);
+    }
     if (enable) {
         container.addEventListener('wheel', handleBookWheel, { passive: false });
         container.addEventListener('touchstart', handleBookTouchStart, { passive: true });
         container.addEventListener('touchmove', handleBookTouchMove, { passive: false });
         container.addEventListener('touchend', handleBookTouchEnd, { passive: true });
         container.addEventListener('scroll', handleBookScrollSnap, { passive: true });
+        // 책 모드에서는 페이지 스크롤이 정상 동작이 아니므로, 밀릴 때마다 즉시 되돌린다.
+        window.addEventListener('scroll', syncBookViewportFrame, { passive: true });
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('scroll', syncBookViewportFrame);
+            window.visualViewport.addEventListener('resize', syncBookViewportFrame);
+        }
+        syncBookViewportFrame();
+    } else {
+        clearBookViewportFrame();
     }
 }
 
