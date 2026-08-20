@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <meta name="referrer" content="origin"> 
     <title>신앙일지 | Faith Log</title>
-    <link rel="stylesheet" href="style.css?v=4.6">
+    <link rel="stylesheet" href="style.css?v=4.7">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
     <script>
         // 페이지 로드 전 다크모드 적용 (깜빡임 방지)
@@ -304,6 +304,7 @@
             <button class="tt-btn tt-w" data-w="75">75%</button>
             <button class="tt-btn tt-w" data-w="100">100%</button>
             <button id="tt-toggle-edit" class="tt-btn tt-toggle" aria-expanded="false">표 편집</button>
+            <button id="tt-table-del" class="tt-btn danger" title="표 전체 삭제"><i class="ph ph-trash"></i>삭제</button>
         </div>
         <div id="table-tools-edit" class="table-tools-edit hidden">
             <div class="table-tools-row">
@@ -319,9 +320,8 @@
                 <button id="tt-col-del" class="tt-btn danger"><i class="ph ph-trash"></i>삭제</button>
             </div>
             <div class="table-tools-row">
-                <span class="table-tools-label">표</span>
+                <span class="table-tools-label">셀</span>
                 <button id="tt-merge" class="tt-btn"><i class="ph ph-arrows-in-simple"></i>셀 합치기</button>
-                <button id="tt-table-del" class="tt-btn danger"><i class="ph ph-trash"></i>표 삭제</button>
             </div>
         </div>
     </div>
@@ -411,6 +411,6 @@
         <button class="add-menu-item" data-action="folder"><i class="ph ph-folder-plus"></i> 새 폴더</button>
     </div>
     <div id="modal-overlay" class="modal-overlay hidden"></div>
-    <script type="module" src="script.js?v=6.8"></script>
+    <script type="module" src="script.js?v=6.9"></script>
 </body>
 </html>
