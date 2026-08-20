@@ -775,3 +775,61 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
 /* TTS 헤더 버튼 활성 (재생 중) */
 #btn-tts.tts-active i { color: var(--accent); animation: ttsPulse 1.5s ease-in-out infinite; }
 @keyframes ttsPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+/* ── 표 도구 바 ──────────────────────────────────────────────
+   표 안을 누르면 표 옆에 떠서, 지금 어느 줄·칸을 다루는지 보여주고
+   그 자리에서 바로 넣고 뺄 수 있게 한다. */
+.table-tools {
+    position: absolute;
+    z-index: 2500;
+    background: var(--surface-color);
+    border: 1px solid var(--gray-200);
+    border-radius: 12px;
+    box-shadow: 0 8px 28px var(--shadow-color);
+    padding: 10px 12px 12px;
+    font-family: var(--text-sans);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: calc(100vw - 16px);
+}
+.table-tools.hidden { display: none !important; }
+.table-tools-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding-bottom: 8px; border-bottom: 1px solid var(--gray-100);
+}
+.table-tools-pos { font-size: 12.5px; font-weight: 600; color: var(--gray-900); white-space: nowrap; }
+.table-tools-close {
+    background: none; border: none; color: var(--gray-400); cursor: pointer;
+    font-size: 16px; padding: 2px; display: flex; align-items: center; border-radius: 6px;
+}
+.table-tools-close:hover { color: var(--gray-900); background: var(--gray-100); }
+.table-tools-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.table-tools-label {
+    font-size: 11px; font-weight: 700; color: var(--gray-500);
+    min-width: 20px; flex-shrink: 0;
+}
+.tt-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: var(--gray-100); border: 1px solid transparent; border-radius: 8px;
+    color: var(--gray-900); font-family: var(--text-sans); font-size: 12.5px; font-weight: 500;
+    padding: 7px 10px; cursor: pointer; white-space: nowrap;
+    transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+.tt-btn i { font-size: 14px; }
+.tt-btn:hover:not(:disabled) { background: var(--active-bg); border-color: var(--active-text); color: var(--active-text); }
+.tt-btn:active:not(:disabled) { transform: scale(0.97); }
+.tt-btn:disabled { opacity: 0.38; cursor: default; }
+.tt-btn.danger { color: var(--danger); }
+.tt-btn.danger:hover:not(:disabled) { background: var(--danger); border-color: var(--danger); color: #fff; }
+.tt-btn:focus-visible { outline: 2px solid var(--active-text); outline-offset: 1px; }
+
+/* 지금 다루는 줄·칸 표시 — 무엇이 바뀔지 눈으로 알 수 있게 */
+#editor-body td.tt-row-mark, #editor-body td.tt-col-mark { background-color: var(--active-bg); }
+#editor-body td.tt-cell-mark { box-shadow: inset 0 0 0 2px var(--active-text); }
+
+@media (max-width: 650px) {
+    .table-tools { padding: 10px; gap: 7px; border-radius: 14px; }
+    .tt-btn { font-size: 12px; padding: 9px 10px; }  /* 손가락으로 누르기 쉬운 크기 */
+    .table-tools-row { gap: 5px; }
+}
