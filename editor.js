@@ -2009,19 +2009,37 @@ function createSelectionUI() {
         toolbarTableEditBtn.style.display = currentSelectedElement.tagName === 'TABLE' ? 'flex' : 'none';
     }
 }
+// 선택된 요소가 본문 영역 안에서 실제로 보이는지 (스크롤로 위/아래로 벗어났는지)
+function isSelectionInView(rect) {
+    const container = document.getElementById('editor-container');
+    if (!container) return true;
+    const cr = container.getBoundingClientRect();
+    // 조금이라도 겹쳐 있으면 보이는 것으로 본다
+    return rect.bottom > cr.top + 2 && rect.top < cr.bottom - 2;
+}
+
 function updateSelectionBox() {
     if (!currentSelectedElement || !selectionBox) return;
     const rect = currentSelectedElement.getBoundingClientRect(), scrollTop = window.scrollY, scrollLeft = window.scrollX;
+    const isTable = currentSelectedElement.tagName === 'TABLE';
+
+    // 선택 표시는 document.body에 붙어 있어 본문 영역에 잘리지 않는다.
+    // 그래서 표를 선택한 채 맨 위/맨 아래로 스크롤하면 표를 따라간 박스가
+    // 헤더 위 등 엉뚱한 자리에 그려졌다. 화면 밖으로 나가면 아예 감춘다.
+    const visible = isSelectionInView(rect);
+    selectionBox.style.display = visible ? 'block' : 'none';
+    resizeHandle.style.display = visible ? 'block' : 'none';
+    // 이미지용 떠 있는 버튼들도 함께 (표에서는 원래 감춰져 있다)
+    const showFloating = visible && !isTable;
+    if (deleteBtn) deleteBtn.style.display = showFloating ? 'flex' : 'none';
+    if (resizeBtnGroup) resizeBtnGroup.style.display = showFloating ? 'flex' : 'none';
+    if (!visible) return;
+
     selectionBox.style.top = (rect.top + scrollTop) + 'px'; selectionBox.style.left = (rect.left + scrollLeft) + 'px'; selectionBox.style.width = rect.width + 'px'; selectionBox.style.height = rect.height + 'px';
     resizeHandle.style.top = (rect.bottom + scrollTop - 11) + 'px'; resizeHandle.style.left = (rect.right + scrollLeft - 11) + 'px';
     const centerX = rect.left + scrollLeft + rect.width / 2;
-    if (currentSelectedElement.tagName === 'TABLE') {
-        resizeBtnGroup.style.top = (rect.bottom + scrollTop + 15) + 'px'; resizeBtnGroup.style.left = centerX + 'px';
-        deleteBtn.style.top = (rect.bottom + scrollTop + 55) + 'px'; deleteBtn.style.left = centerX + 'px';
-    } else {
-        resizeBtnGroup.style.top = (rect.bottom + scrollTop + 15) + 'px'; resizeBtnGroup.style.left = centerX + 'px';
-        deleteBtn.style.top = (rect.bottom + scrollTop + 55) + 'px'; deleteBtn.style.left = centerX + 'px';
-    }
+    resizeBtnGroup.style.top = (rect.bottom + scrollTop + 15) + 'px'; resizeBtnGroup.style.left = centerX + 'px';
+    deleteBtn.style.top = (rect.bottom + scrollTop + 55) + 'px'; deleteBtn.style.left = centerX + 'px';
 }
 function deleteSelectedElement() { if (currentSelectedElement) { currentSelectedElement.remove(); hideSelection(); triggerAutoSave(); } }
 
@@ -2342,6 +2360,19 @@ export function updateTableTools() {
     positionTableTools(t.table);
 }
 
+/**
+ * 스크롤 중에는 위치만 다시 잡는다.
+ * updateTableTools()는 격자를 새로 만들고 강조 표시까지 다시 칠하므로
+ * 스크롤마다 부르면 큰 표에서 버벅인다.
+ */
+export function repositionTableTools() {
+    const tools = getTableTools();
+    if (!tools || tools.classList.contains('hidden')) return;
+    const t = activeTableCell();
+    if (!t) { hideTableTools(); return; }
+    positionTableTools(t.table);
+}
+
 function positionTableTools(table) {
     const tools = getTableTools();
     if (!tools || !table) return;
@@ -2352,11 +2383,20 @@ function positionTableTools(table) {
     const tw = tools.offsetWidth || 300;
     const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
 
-    // 표 아래에 두되, 아래 공간이 부족하면 표 위로 올린다
+    // 표가 본문 영역 밖으로 스크롤되면 도구 바도 감춘다 (엉뚱한 자리에 떠 있지 않도록)
+    if (!isSelectionInView(r)) { tools.style.visibility = 'hidden'; return; }
+    tools.style.visibility = '';
+
+    // 표 바로 아래 가운데. 아래 공간이 부족하면 표 위로 올린다.
     let top = r.bottom + sy + 8;
     if (r.bottom + 8 + th > vh) top = Math.max(sy + 8, r.top + sy - th - 8);
-    // 가로는 표에 맞추되 화면 밖으로 나가지 않게
-    let left = r.left + sx;
+    // 가로: 표 중앙에 맞춘다.
+    // 다만 도구 바가 표보다 넓으면(좁은 표) 표 중앙에 맞출 수 없어 화면 밖으로 밀리므로,
+    // 그때는 본문 영역 중앙에 둔다 — 한쪽에 치우쳐 붙는 것보다 자연스럽다.
+    const container = document.getElementById('editor-container');
+    const cr = container ? container.getBoundingClientRect() : null;
+    const anchor = (tw > r.width && cr) ? cr : r;
+    let left = anchor.left + sx + (anchor.width - tw) / 2;
     const maxLeft = sx + Math.max(8, window.innerWidth - tw - 8);
     left = Math.min(Math.max(sx + 8, left), maxLeft);
 

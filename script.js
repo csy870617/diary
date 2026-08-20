@@ -1,7 +1,7 @@
 import { state, loadCategoriesFromLocal, saveCategoriesToLocal, isReadOnlyView, loadCategorySortsFromLocal, setCategorySort } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
 import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, renameFolderAction, deleteFolderAction, openFolderAssignModal, createFolderFromAssignModal, addSubfolderAction, closeFolderPopup, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort, bulkDownloadPdf, downloadEntryPdf } from './ui.js';
-import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize, getCleanBodyHtml, addRowAbove, addRowBelow, addColumnLeft, addColumnRight, deleteTable, hideTableTools, updateTableTools, setTableWidth, toggleTableEditSection } from './editor.js';
+import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize, getCleanBodyHtml, addRowAbove, addRowBelow, addColumnLeft, addColumnRight, deleteTable, hideTableTools, updateTableTools, setTableWidth, toggleTableEditSection, repositionTableTools } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, flushCloudSync, flushCloudSyncBeacon, ensureTokenOnResume, startKeepAlive } from './drive.js';
 import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, setTTSStart, setTTSEnd, resetTTSRange, playSelection, updateSpeedDisplay, updatePitchDisplay, updateGapDisplay, initTTS, updateTTSRange, seekTTSByPercent, saveTTSVoice } from './tts.js';
@@ -585,7 +585,8 @@ function setupUIListeners() {
     });
 
     // 스크롤·화면 변화 시 표 옆에 계속 붙어 있도록 위치 갱신
-    document.getElementById('editor-container')?.addEventListener('scroll', () => updateTableTools(), { passive: true });
+    // 스크롤 중에는 위치만 갱신 (격자 재계산은 불필요하고 무겁다)
+    document.getElementById('editor-container')?.addEventListener('scroll', () => repositionTableTools(), { passive: true });
     window.addEventListener('resize', () => updateTableTools());
 
     document.getElementById('sticker-btn')?.addEventListener('click', (e) => { 
