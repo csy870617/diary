@@ -1549,48 +1549,9 @@ export function getCleanBodyHtml(bodyEl) {
     return clone.innerHTML;
 }
 
-// ── 맞춤법 검사 (브라우저 내장 검사기) ──────────────────────────────────
-// 본문을 외부로 전송하지 않고 기기 안에서만 검사한다(오프라인 동작, 개인 기록 보호).
-// 한국어 인식률은 기기/브라우저의 사전 지원에 따라 다르다(아이폰·맥은 한국어 지원, 일부 안드로이드는 영어 위주).
-const SPELLCHECK_KEY = 'faith_spellcheck';
-
-export function isSpellcheckOn() {
-    return localStorage.getItem(SPELLCHECK_KEY) !== 'off'; // 기본값: 켜짐
-}
-
-// 맞춤법 표시는 '편집 중'일 때만 의미가 있으므로, 읽기/책(읽기) 모드에서는 끈다.
-export function applySpellcheck() {
-    const on = isSpellcheckOn();
-    const editable = state.currentViewMode === 'default' || state.currentViewMode === 'book-edit';
-    const active = on && editable;
-    ['edit-title', 'edit-subtitle', 'editor-body'].forEach(id => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        el.setAttribute('spellcheck', active ? 'true' : 'false');
-        // 한국어/영어가 섞여 있으므로 특정 언어로 고정하지 않고 브라우저가 판단하게 둔다.
-        if (active) el.removeAttribute('lang');
-    });
-    const btn = document.getElementById('toolbar-spellcheck-btn');
-    if (btn) {
-        btn.classList.toggle('active', on);
-        btn.title = on ? '맞춤법 검사 끄기' : '맞춤법 검사 켜기';
-    }
-}
-
-export function toggleSpellcheck() {
-    const next = !isSpellcheckOn();
-    localStorage.setItem(SPELLCHECK_KEY, next ? 'on' : 'off');
-    applySpellcheck();
-    // 이미 렌더된 밑줄 표시를 즉시 갱신하려면 편집 영역을 다시 포커스해야 하는 브라우저가 있다.
-    const body = document.getElementById('editor-body');
-    if (body && next && document.activeElement === body) { body.blur(); body.focus(); }
-    return next;
-}
-
 export function openEditor(isEdit, entryData) {
     hideTransientPopups(); // 홈 화면에서 열려 있던 팝업/메뉴를 닫고 에디터로 진입
     state.isEditMode = isEdit; const writeModal = document.getElementById('write-modal'); openModal(writeModal); writeModal.scrollTop = 0; currentBookPageIndex = 0; savedRange = null; setupBasicHandling();
-    applySpellcheck();
     // 이전 글의 TTS 구간이 남아 새 글을 엉뚱한 위치부터 읽는 것을 방지
     import('./tts.js').then(m => m.clearTTSRangeForNewEntry && m.clearTTSRangeForNewEntry()).catch(() => {});
     const catName = state.allCategories.find(c => c.id === state.currentCategory)?.name || '기록';
@@ -1705,7 +1666,6 @@ export function toggleViewMode(mode) {
     }
     state.currentViewMode = mode;
     hideTableTools(); // 모드가 바뀌면 표 도구 바는 닫는다 (읽기 모드에서 뜨지 않도록)
-    applySpellcheck(); // 읽기 모드에서는 맞춤법 밑줄을 감추고, 편집 모드로 돌아오면 다시 표시
     const btnReadOnly = document.getElementById('btn-readonly'), btnBookMode = document.getElementById('btn-bookmode');
     if(btnReadOnly) btnReadOnly.classList.toggle('active', mode === 'readOnly');
     if(btnBookMode) btnBookMode.classList.toggle('active', mode === 'book' || mode === 'book-edit');
@@ -2338,6 +2298,10 @@ function clearTableHighlight() {
 export function hideTableTools() {
     const tools = getTableTools();
     if (tools) tools.classList.add('hidden');
+    const sec = document.getElementById('table-tools-edit');
+    const btn = document.getElementById('tt-toggle-edit');
+    if (sec) sec.classList.add('hidden');           // 다음에 열 때는 기본(접힌) 상태로
+    if (btn) { btn.classList.remove('active'); btn.setAttribute('aria-expanded', 'false'); }
     clearTableHighlight();
 }
 
@@ -2360,6 +2324,12 @@ export function updateTableTools() {
     if (colDel) colDel.disabled = colCount <= 1;
     const merge = document.getElementById('tt-merge');
     if (merge) merge.disabled = document.querySelectorAll('td.selected-cell').length < 2;
+
+    // 현재 표 폭을 버튼에 표시 (직접 끌어서 조절한 경우 등 해당 없으면 아무것도 선택하지 않음)
+    const curW = (t.table.style.width || '').trim();
+    document.querySelectorAll('#table-tools .tt-w').forEach(btn => {
+        btn.classList.toggle('active', curW === btn.dataset.w + '%');
+    });
 
     highlightActiveCells(t.table, t.row, t.col);
     tools.classList.remove('hidden');
@@ -2454,6 +2424,38 @@ export function deleteColumn() {
     const g = buildTableGrid(t.table);
     const newCol = Math.min(t.col, g.colCount - 1);
     afterTableEdit((g.grid[t.row] || [])[newCol]);
+}
+
+/**
+ * 표 폭을 화면(본문 너비) 대비 비율로 맞춘다.
+ * 표는 기본이 '내용에 맞춘 폭'이라 좁게 만들 수 없었는데,
+ * 25/50/75/100% 버튼으로 한 번에 조절할 수 있게 한다.
+ */
+export function setTableWidth(pct) {
+    const t = activeTableCell(); if (!t) return;
+    saveBeforeChange('tableEdit');
+    const table = t.table;
+    // 기본 CSS의 min-width(100%)와 칸별 최소폭을 풀어야 실제로 좁아진다
+    table.classList.add('tbl-sized');
+    table.style.width = pct + '%';
+    table.style.minWidth = '0';
+    // 칸을 직접 끌어서 잡아둔 고정 폭이 남아 있으면 표 폭을 바꿔도 줄지 않으므로 정리한다
+    table.querySelectorAll('td').forEach(td => { td.style.width = ''; });
+    updateSelectionBox();
+    updateTableTools();
+    triggerAutoSave();
+}
+
+/** 표 편집(줄·칸) 영역 펼치기/접기 */
+export function toggleTableEditSection(force) {
+    const sec = document.getElementById('table-tools-edit');
+    const btn = document.getElementById('tt-toggle-edit');
+    if (!sec) return;
+    const open = force !== undefined ? force : sec.classList.contains('hidden');
+    sec.classList.toggle('hidden', !open);
+    if (btn) { btn.classList.toggle('active', open); btn.setAttribute('aria-expanded', String(open)); }
+    const t = activeTableCell();
+    if (t) positionTableTools(t.table); // 높이가 바뀌었으니 위치 다시 계산
 }
 
 /** 표 전체 삭제 */

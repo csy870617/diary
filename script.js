@@ -1,7 +1,7 @@
 import { state, loadCategoriesFromLocal, saveCategoriesToLocal, isReadOnlyView, loadCategorySortsFromLocal, setCategorySort } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
 import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, renameFolderAction, deleteFolderAction, openFolderAssignModal, createFolderFromAssignModal, addSubfolderAction, closeFolderPopup, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort, bulkDownloadPdf, downloadEntryPdf } from './ui.js';
-import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize, getCleanBodyHtml, toggleSpellcheck, addRowAbove, addRowBelow, addColumnLeft, addColumnRight, deleteTable, hideTableTools, updateTableTools } from './editor.js';
+import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize, getCleanBodyHtml, addRowAbove, addRowBelow, addColumnLeft, addColumnRight, deleteTable, hideTableTools, updateTableTools, setTableWidth, toggleTableEditSection } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, flushCloudSync, flushCloudSyncBeacon, ensureTokenOnResume, startKeepAlive } from './drive.js';
 import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, setTTSStart, setTTSEnd, resetTTSRange, playSelection, updateSpeedDisplay, updatePitchDisplay, updateGapDisplay, initTTS, updateTTSRange, seekTTSByPercent, saveTTSVoice } from './tts.js';
@@ -510,22 +510,6 @@ function setupUIListeners() {
 
     document.getElementById('toolbar-link-btn')?.addEventListener('click', () => { createHyperlink(); });
 
-    // 맞춤법 검사 켜기/끄기 (설정은 기기에 저장되어 다음에 열 때도 유지)
-    document.getElementById('toolbar-spellcheck-btn')?.addEventListener('click', () => {
-        const on = toggleSpellcheck();
-        let toast = document.getElementById('tts-toast');
-        if (!toast) {
-            toast = document.createElement('div');
-            toast.id = 'tts-toast';
-            toast.className = 'tts-toast';
-            document.body.appendChild(toast);
-        }
-        toast.textContent = on ? '맞춤법 검사를 켰습니다.' : '맞춤법 검사를 껐습니다.';
-        toast.classList.add('show');
-        clearTimeout(toast._timer);
-        toast._timer = setTimeout(() => toast.classList.remove('show'), 1800);
-    });
-
     const tableModal = document.getElementById('table-modal');
     
     // 툴바에서 표 삽입 버튼 클릭 시 커서 위치 저장 후 삽입 모드로 모달 열기
@@ -591,6 +575,14 @@ function setupUIListeners() {
     ttBind('tt-merge', mergeCells);
     ttBind('tt-table-del', deleteTable);
     ttBind('table-tools-close', hideTableTools);
+    ttBind('tt-toggle-edit', () => toggleTableEditSection());
+    // 표 폭 프리셋 (25 / 50 / 75 / 100%)
+    document.querySelectorAll('#table-tools .tt-w').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault(); e.stopPropagation();
+            setTableWidth(parseInt(btn.dataset.w, 10));
+        });
+    });
 
     // 스크롤·화면 변화 시 표 옆에 계속 붙어 있도록 위치 갱신
     document.getElementById('editor-container')?.addEventListener('scroll', () => updateTableTools(), { passive: true });

@@ -833,3 +833,18 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
     .tt-btn { font-size: 12px; padding: 9px 10px; }  /* 손가락으로 누르기 쉬운 크기 */
     .table-tools-row { gap: 5px; }
 }
+
+/* 표 폭을 비율로 지정한 경우: 기본 최소폭 제한을 풀어야 실제로 좁아진다 */
+.editor-body table.tbl-sized, .article-body table.tbl-sized { min-width: 0 !important; }
+.editor-body table.tbl-sized td, .article-body table.tbl-sized td { min-width: 0; }
+
+/* 표 도구 바 — 폭 프리셋 / 표 편집 토글 */
+.tt-btn.active { background: var(--active-bg); border-color: var(--active-text); color: var(--active-text); font-weight: 700; }
+.tt-btn.tt-w { min-width: 52px; justify-content: center; font-variant-numeric: tabular-nums; }
+.tt-btn.tt-toggle { margin-left: auto; font-weight: 600; }
+.table-tools-edit { display: flex; flex-direction: column; gap: 8px; padding-top: 9px; border-top: 1px solid var(--gray-100); }
+.table-tools-edit.hidden { display: none !important; }
+@media (max-width: 650px) {
+    .tt-btn.tt-w { min-width: 46px; }
+    .table-tools-edit { gap: 7px; }
+}
