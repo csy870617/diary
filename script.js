@@ -1,7 +1,7 @@
 import { state, loadCategoriesFromLocal, saveCategoriesToLocal, isReadOnlyView, loadCategorySortsFromLocal, setCategorySort } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
 import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, renameFolderAction, deleteFolderAction, openFolderAssignModal, createFolderFromAssignModal, addSubfolderAction, closeFolderPopup, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort, bulkDownloadPdf, downloadEntryPdf } from './ui.js';
-import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize, getCleanBodyHtml, toggleSpellcheck } from './editor.js';
+import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize, getCleanBodyHtml, toggleSpellcheck, addRowAbove, addRowBelow, addColumnLeft, addColumnRight, deleteTable, hideTableTools, updateTableTools } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, flushCloudSync, flushCloudSyncBeacon, ensureTokenOnResume, startKeepAlive } from './drive.js';
 import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, setTTSStart, setTTSEnd, resetTTSRange, playSelection, updateSpeedDisplay, updatePitchDisplay, updateGapDisplay, initTTS, updateTTSRange, seekTTSByPercent, saveTTSVoice } from './tts.js';
@@ -534,9 +534,10 @@ function setupUIListeners() {
         openTableInsertModal();
     });
     
-    // 툴바에서 표 편집 버튼 클릭 시 편집 모드로 모달 열기
-    document.getElementById('toolbar-table-edit-btn')?.addEventListener('click', () => { 
-        openTableEditModal();
+    // 툴바의 표 편집 버튼: 모달 대신 표 옆 도구 바를 띄운다
+    // (모달은 표를 가려서 결과를 볼 수 없었다)
+    document.getElementById('toolbar-table-edit-btn')?.addEventListener('click', () => {
+        updateTableTools();
     });
     
     // 표 삽입 확인
@@ -568,6 +569,32 @@ function setupUIListeners() {
     document.getElementById('btn-merge-cells')?.addEventListener('click', () => {
         mergeCells();
     });
+
+    // ── 표 도구 바 ──────────────────────────────────────────
+    // 표 안을 누르면 표 옆에 떠서 그 자리에서 바로 줄·칸을 넣고 뺀다.
+    // mousedown 단계에서 막아야 편집 영역의 포커스(=대상 셀)를 잃지 않는다.
+    const tableTools = document.getElementById('table-tools');
+    tableTools?.addEventListener('mousedown', (e) => e.preventDefault());
+    tableTools?.addEventListener('touchstart', (e) => {
+        if (e.target.closest('button')) e.preventDefault();
+    }, { passive: false });
+
+    const ttBind = (id, fn) => document.getElementById(id)?.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation(); fn();
+    });
+    ttBind('tt-row-above', addRowAbove);
+    ttBind('tt-row-below', addRowBelow);
+    ttBind('tt-row-del', deleteRow);
+    ttBind('tt-col-left', addColumnLeft);
+    ttBind('tt-col-right', addColumnRight);
+    ttBind('tt-col-del', deleteColumn);
+    ttBind('tt-merge', mergeCells);
+    ttBind('tt-table-del', deleteTable);
+    ttBind('table-tools-close', hideTableTools);
+
+    // 스크롤·화면 변화 시 표 옆에 계속 붙어 있도록 위치 갱신
+    document.getElementById('editor-container')?.addEventListener('scroll', () => updateTableTools(), { passive: true });
+    window.addEventListener('resize', () => updateTableTools());
 
     document.getElementById('sticker-btn')?.addEventListener('click', (e) => { 
         e.stopPropagation(); const palette = document.getElementById('sticker-palette');

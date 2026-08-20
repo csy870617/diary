@@ -1160,7 +1160,11 @@ function setupBasicHandling() {
             const table = cell.closest('table');
             if (table && currentSelectedElement !== table) {
                 selectTableFromCell(cell);
+            } else {
+                updateTableTools(); // 같은 표 안에서 다른 셀로 옮긴 경우 위치 표시 갱신
             }
+        } else {
+            hideTableTools(); // 표 밖을 누르면 도구 바를 닫는다
         }
         
         if (target) { 
@@ -1198,6 +1202,22 @@ function setupBasicHandling() {
             e.preventDefault(); 
             formatDoc('redo'); 
             return; 
+        }
+
+        // 서식 단축키 (Cmd/Ctrl + B / I / U, Cmd/Ctrl+Shift+X = 취소선)
+        // 브라우저 기본 동작에 맡기면 '셀을 여러 개 선택한 상태'에서는 아무 일도 일어나지 않는다.
+        // 그 상태에서는 텍스트 선택(Range)이 없어서 기본 동작이 적용될 대상이 없기 때문이다.
+        // 그래서 직접 formatDoc으로 넘겨, 표 안에서도 툴바 버튼과 똑같이 동작하게 한다.
+        // (덤으로 실행취소 기록도 남는다 — 기본 동작은 기록되지 않았다)
+        if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+            const k = e.key.toLowerCase();
+            const shortcut = (!e.shiftKey && { b: 'bold', i: 'italic', u: 'underline' }[k])
+                          || (e.shiftKey && k === 'x' ? 'strikeThrough' : null);
+            if (shortcut) {
+                e.preventDefault();
+                formatDoc(shortcut);
+                return;
+            }
         }
         
         // 표 셀 내에서 Tab과 화살표 키 처리
@@ -1684,6 +1704,7 @@ export function toggleViewMode(mode) {
             .catch(err => console.error('자동 저장 실패:', err));
     }
     state.currentViewMode = mode;
+    hideTableTools(); // 모드가 바뀌면 표 도구 바는 닫는다 (읽기 모드에서 뜨지 않도록)
     applySpellcheck(); // 읽기 모드에서는 맞춤법 밑줄을 감추고, 편집 모드로 돌아오면 다시 표시
     const btnReadOnly = document.getElementById('btn-readonly'), btnBookMode = document.getElementById('btn-bookmode');
     if(btnReadOnly) btnReadOnly.classList.toggle('active', mode === 'readOnly');
@@ -1778,11 +1799,22 @@ export function formatDoc(cmd, value = null) {
         }
         else { const selection = window.getSelection(); const td = selection.anchorNode?.nodeType === 3 ? selection.anchorNode.parentElement?.closest('td') : selection.anchorNode?.closest('td'); if (td) td.style.textAlign = alignValue; else document.execCommand(cmd, false, value); }
     } else {
-        const selectedCells = document.querySelectorAll('td.selected-cell');
-        if (selectedCells.length > 0) {
-            selectedCells.forEach(cell => {
+        let targetCells = Array.from(document.querySelectorAll('td.selected-cell'));
+        // 셀을 따로 고르지 않고 '표'만 선택한 상태에서 단축키를 누른 경우 → 표 전체에 적용
+        if (targetCells.length === 0 && currentSelectedElement && currentSelectedElement.tagName === 'TABLE') {
+            const sel0 = window.getSelection();
+            const hasTextSelection = sel0 && sel0.rangeCount > 0 && !sel0.getRangeAt(0).collapsed;
+            const caretInTable = sel0 && sel0.rangeCount > 0 &&
+                currentSelectedElement.contains(sel0.getRangeAt(0).startContainer);
+            if (!hasTextSelection && !caretInTable) {
+                targetCells = Array.from(currentSelectedElement.querySelectorAll('td'));
+            }
+        }
+        if (targetCells.length > 0) {
+            const sel = window.getSelection();
+            targetCells.forEach(cell => {
                 const range = document.createRange(); range.selectNodeContents(cell);
-                const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+                sel.removeAllRanges(); sel.addRange(range);
                 document.execCommand(cmd, false, value);
             });
         } else { document.execCommand(cmd, false, value); }
@@ -1917,7 +1949,8 @@ export function detectSelectionFontSize() {
 
 /* --- 리사이징 및 기타 유틸리티 --- */
 function selectElement(el) { currentSelectedElement = el; createSelectionUI(); updateSelectionBox(); }
-function hideSelection() { 
+function hideSelection() {
+    hideTableTools(); 
     currentSelectedElement = null; 
     ['img-selection-box','resize-handle','img-delete-btn','img-resize-group'].forEach(cls => { 
         document.querySelectorAll('.'+cls).forEach(e => e.style.display = 'none'); 
@@ -1938,6 +1971,7 @@ function selectTableFromCell(cell) {
         lastClickedCell = cell;
         createSelectionUI();
         updateSelectionBox();
+        updateTableTools();
     }
 }
 
@@ -2143,86 +2177,302 @@ function stopResizeTouch() {
     triggerAutoSave();
 }
 
-export function addRow() {
-    const table = currentSelectedElement;
-    if (!table || table.tagName !== 'TABLE') return;
-    saveBeforeChange('tableEdit');
-    const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null;
-    const refRow = targetCell ? targetCell.parentElement : table.rows[table.rows.length - 1];
-    const colIdx = targetCell ? targetCell.cellIndex : 0;
-    const newRow = table.insertRow(refRow.rowIndex + 1);
-    const colCount = table.rows[0].cells.length;
-    let cellToFocus = null;
-    for (let i = 0; i < colCount; i++) {
-        const newCell = newRow.insertCell(i);
-        newCell.innerHTML = '<br>';
-        if (i === colIdx) cellToFocus = newCell;
+// ── 표 격자 계산 ───────────────────────────────────────────────
+// colspan/rowspan이 있으면 tr.cells의 인덱스와 화면상의 칸 위치가 어긋난다.
+// 실제로 보이는 격자를 만들어 두면 병합된 표에서도 줄·칸을 정확히 넣고 뺄 수 있다.
+// grid[r][c] === 그 자리를 차지하는 <td> (병합 셀은 여러 자리에 같은 셀이 들어감)
+function buildTableGrid(table) {
+    const grid = [];
+    const rows = table.rows;
+    for (let r = 0; r < rows.length; r++) {
+        if (!grid[r]) grid[r] = [];
+        let c = 0;
+        for (const cell of rows[r].cells) {
+            while (grid[r][c]) c++; // 위에서 내려온 rowspan 자리를 건너뜀
+            const cs = Math.max(1, cell.colSpan || 1);
+            const rs = Math.max(1, cell.rowSpan || 1);
+            for (let dr = 0; dr < rs; dr++) {
+                const rr = r + dr;
+                if (!grid[rr]) grid[rr] = [];
+                for (let dc = 0; dc < cs; dc++) grid[rr][c + dc] = cell;
+            }
+            c += cs;
+        }
     }
-    if (cellToFocus) focusCell(cellToFocus);
+    const width = grid.reduce((m, row) => Math.max(m, row.length), 0);
+    return { grid, rowCount: rows.length, colCount: width };
+}
+
+// 셀이 화면상 어느 줄·칸에 있는지 (병합 고려)
+function getCellPosition(table, cell) {
+    const { grid } = buildTableGrid(table);
+    for (let r = 0; r < grid.length; r++) {
+        for (let c = 0; c < (grid[r] || []).length; c++) {
+            if (grid[r][c] === cell) return { row: r, col: c };
+        }
+    }
+    return null;
+}
+
+function makeCell(sample) {
+    const td = document.createElement('td');
+    td.innerHTML = '<br>';
+    if (sample) {
+        // 표 서식(테두리·정렬 등)이 새 칸에서도 이어지도록 최소한만 복사
+        if (sample.style.textAlign) td.style.textAlign = sample.style.textAlign;
+        if (sample.style.width) td.style.width = sample.style.width;
+    }
+    return td;
+}
+
+/** 지정한 줄의 위/아래에 새 줄을 넣는다 (병합 셀 고려) */
+function insertRowAt(table, rowIdx, where) {
+    const { grid, colCount } = buildTableGrid(table);
+    const at = where === 'above' ? rowIdx : rowIdx + 1;
+    const newRow = table.insertRow(Math.min(at, table.rows.length));
+    for (let c = 0; c < colCount; ) {
+        // 새 줄을 가로지르는 rowspan이 있으면 칸을 새로 만들지 않고 rowspan만 늘린다
+        const above = at > 0 ? (grid[at - 1] || [])[c] : null;
+        const below = (grid[at] || [])[c];
+        const spans = above && below && above === below;
+        if (spans) {
+            above.rowSpan = Math.max(1, above.rowSpan || 1) + 1;
+            c += Math.max(1, above.colSpan || 1);
+            continue;
+        }
+        const sample = (grid[rowIdx] || [])[c] || null;
+        newRow.appendChild(makeCell(sample));
+        c += 1;
+    }
+    return newRow;
+}
+
+/** 지정한 줄을 지운다 (병합 셀 고려) */
+function removeRowAt(table, rowIdx) {
+    const { grid, colCount } = buildTableGrid(table);
+    if (table.rows.length <= 1) return false;
+    const handled = new Set();
+    for (let c = 0; c < colCount; c++) {
+        const cell = (grid[rowIdx] || [])[c];
+        if (!cell || handled.has(cell)) continue;
+        handled.add(cell);
+        const rs = Math.max(1, cell.rowSpan || 1);
+        if (rs > 1) {
+            // 여러 줄에 걸친 셀: 지우지 않고 높이만 줄인다.
+            cell.rowSpan = rs - 1;
+            // 지워지는 줄에서 시작하던 셀이면 다음 줄로 옮겨 준다
+            if (cell.parentElement === table.rows[rowIdx]) {
+                const nextRow = table.rows[rowIdx + 1];
+                if (nextRow) {
+                    const belowRef = (grid[rowIdx + 1] || []).find((x, i) => i > c && x && x !== cell && x.parentElement === nextRow);
+                    nextRow.insertBefore(cell, belowRef || null);
+                }
+            }
+        }
+    }
+    table.deleteRow(rowIdx);
+    return true;
+}
+
+/** 지정한 칸의 왼쪽/오른쪽에 새 칸을 넣는다 (병합 셀 고려) */
+function insertColumnAt(table, colIdx, where) {
+    const { grid, rowCount } = buildTableGrid(table);
+    const at = where === 'left' ? colIdx : colIdx + 1;
+    const widened = new Set();
+    for (let r = 0; r < rowCount; r++) {
+        const row = table.rows[r];
+        const left = at > 0 ? (grid[r] || [])[at - 1] : null;
+        const right = (grid[r] || [])[at];
+        if (left && right && left === right) {
+            // 삽입 위치를 가로지르는 병합 셀: 칸을 만들지 않고 폭만 늘린다
+            if (!widened.has(left)) { left.colSpan = Math.max(1, left.colSpan || 1) + 1; widened.add(left); }
+            continue;
+        }
+        const refCell = right && right.parentElement === row ? right : null;
+        const sample = (grid[r] || [])[colIdx] || null;
+        row.insertBefore(makeCell(sample), refCell);
+    }
+}
+
+/** 지정한 칸을 지운다 (병합 셀 고려) */
+function removeColumnAt(table, colIdx) {
+    const { grid, rowCount, colCount } = buildTableGrid(table);
+    if (colCount <= 1) return false;
+    const handled = new Set();
+    for (let r = 0; r < rowCount; r++) {
+        const cell = (grid[r] || [])[colIdx];
+        if (!cell || handled.has(cell)) continue;
+        handled.add(cell);
+        const cs = Math.max(1, cell.colSpan || 1);
+        if (cs > 1) cell.colSpan = cs - 1;   // 여러 칸에 걸친 셀은 폭만 줄인다
+        else if (cell.parentElement) cell.parentElement.removeChild(cell);
+    }
+    return true;
+}
+
+// ── 표 도구 바 ────────────────────────────────────────────────
+// 표 안을 누르면 표 바로 아래(공간이 없으면 위)에 떠서, 지금 어느 줄·칸을 다루는지
+// 알려주고 그 자리에서 바로 넣고 뺄 수 있게 한다.
+// 예전에는 툴바의 작은 아이콘을 찾아 모달을 열어야 했고, 그 모달이 표를 가려
+// 결과를 볼 수 없었다.
+
+function getTableTools() { return document.getElementById('table-tools'); }
+
+// 지금 다루는 줄·칸에 옅은 표시를 넣어, 무엇이 바뀔지 눈으로 알 수 있게 한다
+function highlightActiveCells(table, row, col) {
+    clearTableHighlight();
+    if (!table) return;
+    const { grid } = buildTableGrid(table);
+    (grid[row] || []).forEach(c => c && c.classList.add('tt-row-mark'));
+    grid.forEach(r => { const c = (r || [])[col]; if (c) c.classList.add('tt-col-mark'); });
+    const cur = (grid[row] || [])[col];
+    if (cur) cur.classList.add('tt-cell-mark');
+}
+
+function clearTableHighlight() {
+    document.querySelectorAll('.tt-row-mark, .tt-col-mark, .tt-cell-mark').forEach(el => {
+        el.classList.remove('tt-row-mark', 'tt-col-mark', 'tt-cell-mark');
+    });
+}
+
+export function hideTableTools() {
+    const tools = getTableTools();
+    if (tools) tools.classList.add('hidden');
+    clearTableHighlight();
+}
+
+export function updateTableTools() {
+    const tools = getTableTools();
+    if (!tools) return;
+    // 편집 가능한 모드에서만 (읽기·책 읽기 모드에서는 표시하지 않음)
+    const editable = state.currentViewMode === 'default' || state.currentViewMode === 'book-edit';
+    const t = editable ? activeTableCell() : null;
+    if (!t || !t.table.isConnected) { hideTableTools(); return; }
+
+    const { rowCount, colCount } = buildTableGrid(t.table);
+    const posEl = document.getElementById('table-tools-pos');
+    if (posEl) posEl.textContent = `${t.row + 1}번째 줄 · ${t.col + 1}번째 칸  (${rowCount}×${colCount})`;
+
+    // 마지막 하나는 지울 수 없으므로 버튼을 흐리게 해 미리 알려준다
+    const rowDel = document.getElementById('tt-row-del');
+    const colDel = document.getElementById('tt-col-del');
+    if (rowDel) rowDel.disabled = rowCount <= 1;
+    if (colDel) colDel.disabled = colCount <= 1;
+    const merge = document.getElementById('tt-merge');
+    if (merge) merge.disabled = document.querySelectorAll('td.selected-cell').length < 2;
+
+    highlightActiveCells(t.table, t.row, t.col);
+    tools.classList.remove('hidden');
+    positionTableTools(t.table);
+}
+
+function positionTableTools(table) {
+    const tools = getTableTools();
+    if (!tools || !table) return;
+    const wrapper = table.closest('.table-wrapper') || table;
+    const r = wrapper.getBoundingClientRect();
+    const sx = window.scrollX, sy = window.scrollY;
+    const th = tools.offsetHeight || 130;
+    const tw = tools.offsetWidth || 300;
+    const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+
+    // 표 아래에 두되, 아래 공간이 부족하면 표 위로 올린다
+    let top = r.bottom + sy + 8;
+    if (r.bottom + 8 + th > vh) top = Math.max(sy + 8, r.top + sy - th - 8);
+    // 가로는 표에 맞추되 화면 밖으로 나가지 않게
+    let left = r.left + sx;
+    const maxLeft = sx + Math.max(8, window.innerWidth - tw - 8);
+    left = Math.min(Math.max(sx + 8, left), maxLeft);
+
+    tools.style.top = `${Math.round(top)}px`;
+    tools.style.left = `${Math.round(left)}px`;
+}
+
+// ── 표 편집 동작 (표 도구 바에서 호출) ──────────────────────────
+function activeTableCell() {
+    const table = currentSelectedElement && currentSelectedElement.tagName === 'TABLE' ? currentSelectedElement : null;
+    if (!table) return null;
+    const cell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : table.rows[0]?.cells[0];
+    if (!cell) return null;
+    const pos = getCellPosition(table, cell);
+    return pos ? { table, cell, ...pos } : null;
+}
+
+function afterTableEdit(focusTarget) {
+    if (focusTarget) { focusCell(focusTarget); lastClickedCell = focusTarget; }
+    updateSelectionBox();
+    updateTableTools();
     triggerAutoSave();
+}
+
+export function addRowAbove() {
+    const t = activeTableCell(); if (!t) return;
+    saveBeforeChange('tableEdit');
+    const row = insertRowAt(t.table, t.row, 'above');
+    afterTableEdit(row?.cells[Math.min(t.col, row.cells.length - 1)]);
+}
+
+export function addRowBelow() {
+    const t = activeTableCell(); if (!t) return;
+    saveBeforeChange('tableEdit');
+    const row = insertRowAt(t.table, t.row, 'below');
+    afterTableEdit(row?.cells[Math.min(t.col, row.cells.length - 1)]);
+}
+
+export function addColumnLeft() {
+    const t = activeTableCell(); if (!t) return;
+    saveBeforeChange('tableEdit');
+    insertColumnAt(t.table, t.col, 'left');
+    const g = buildTableGrid(t.table);
+    afterTableEdit((g.grid[t.row] || [])[t.col]);
+}
+
+export function addColumnRight() {
+    const t = activeTableCell(); if (!t) return;
+    saveBeforeChange('tableEdit');
+    insertColumnAt(t.table, t.col, 'right');
+    const g = buildTableGrid(t.table);
+    afterTableEdit((g.grid[t.row] || [])[t.col + 1]);
 }
 
 export function deleteRow() {
-    const table = currentSelectedElement;
-    if (!table || table.tagName !== 'TABLE' || table.rows.length <= 1) return;
+    const t = activeTableCell(); if (!t) return;
+    if (t.table.rows.length <= 1) { alert('줄이 하나뿐이라 지울 수 없습니다.\n표 전체를 지우려면 "표 삭제"를 눌러 주세요.'); return; }
     saveBeforeChange('tableEdit');
-    const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null;
-    const refRow = targetCell ? targetCell.parentElement : table.rows[table.rows.length - 1];
-    const rowIdx = refRow.rowIndex;
-    const colIdx = targetCell ? targetCell.cellIndex : 0;
-    table.deleteRow(rowIdx);
-    // 삭제 후 인접 셀로 커서 이동
-    const newRowIdx = Math.min(rowIdx, table.rows.length - 1);
-    if (newRowIdx >= 0 && table.rows[newRowIdx]) {
-        const newCell = table.rows[newRowIdx].cells[Math.min(colIdx, table.rows[newRowIdx].cells.length - 1)];
-        if (newCell) {
-            focusCell(newCell);
-            lastClickedCell = newCell;
-        }
-    }
-    triggerAutoSave();
-}
-
-export function addColumn() {
-    const table = currentSelectedElement;
-    if (!table || table.tagName !== 'TABLE') return;
-    saveBeforeChange('tableEdit');
-    const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null;
-    const colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1;
-    const rowIdx = targetCell ? targetCell.parentElement.rowIndex : 0;
-    let cellToFocus = null;
-    for (let i = 0; i < table.rows.length; i++) {
-        // 병합된 셀(colspan)이 있는 행에서도 범위를 벗어나지 않도록 보정
-        const newCell = table.rows[i].insertCell(Math.min(colIdx + 1, table.rows[i].cells.length));
-        newCell.innerHTML = '<br>';
-        if (i === rowIdx) cellToFocus = newCell;
-    }
-    if (cellToFocus) focusCell(cellToFocus);
-    triggerAutoSave();
+    removeRowAt(t.table, t.row);
+    const g = buildTableGrid(t.table);
+    const newRow = Math.min(t.row, g.rowCount - 1);
+    afterTableEdit((g.grid[newRow] || [])[Math.min(t.col, (g.grid[newRow] || []).length - 1)]);
 }
 
 export function deleteColumn() {
-    const table = currentSelectedElement;
-    if (!table || table.tagName !== 'TABLE' || table.rows[0].cells.length <= 1) return;
+    const t = activeTableCell(); if (!t) return;
+    const before = buildTableGrid(t.table);
+    if (before.colCount <= 1) { alert('칸이 하나뿐이라 지울 수 없습니다.\n표 전체를 지우려면 "표 삭제"를 눌러 주세요.'); return; }
     saveBeforeChange('tableEdit');
-    const targetCell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : null;
-    const colIdx = targetCell ? targetCell.cellIndex : table.rows[0].cells.length - 1;
-    const rowIdx = targetCell ? targetCell.parentElement.rowIndex : 0;
-    for (let i = 0; i < table.rows.length; i++) {
-        // 병합된 셀(colspan)로 셀 수가 적은 행은 건너뜀 (범위 초과 방지)
-        if (colIdx < table.rows[i].cells.length) table.rows[i].deleteCell(colIdx);
-    }
-    // 삭제 후 인접 셀로 커서 이동
-    const newColIdx = Math.min(colIdx, table.rows[0].cells.length - 1);
-    if (newColIdx >= 0 && table.rows[rowIdx]) {
-        const newCell = table.rows[rowIdx].cells[newColIdx];
-        if (newCell) {
-            focusCell(newCell);
-            lastClickedCell = newCell;
-        }
-    }
+    removeColumnAt(t.table, t.col);
+    const g = buildTableGrid(t.table);
+    const newCol = Math.min(t.col, g.colCount - 1);
+    afterTableEdit((g.grid[t.row] || [])[newCol]);
+}
+
+/** 표 전체 삭제 */
+export function deleteTable() {
+    const t = activeTableCell(); if (!t) return;
+    if (!confirm('이 표를 삭제하시겠습니까?')) return;
+    saveBeforeChange('tableEdit');
+    const wrapper = t.table.closest('.table-wrapper');
+    (wrapper || t.table).remove();
+    currentSelectedElement = null;
+    lastClickedCell = null;
+    hideTableTools();
+    hideSelection();
     triggerAutoSave();
 }
+
+// 기존 호출부(표 편집 모달) 호환용
+export function addRow() { addRowBelow(); }
+export function addColumn() { addColumnRight(); }
 
 /**
  * 선택된 셀들을 합치기
@@ -2230,7 +2480,7 @@ export function deleteColumn() {
 export function mergeCells() {
     const selectedCells = document.querySelectorAll('td.selected-cell');
     if (selectedCells.length < 2) {
-        alert('합칠 셀을 2개 이상 선택해주세요.\n(셀을 드래그하여 선택)');
+        alert('합칠 셀을 2개 이상 선택해 주세요.\n표 안에서 셀을 드래그하면 여러 칸을 고를 수 있습니다.');
         return;
     }
     

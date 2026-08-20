@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <meta name="referrer" content="origin"> 
     <title>신앙일지 | Faith Log</title>
-    <link rel="stylesheet" href="style.css?v=4.4">
+    <link rel="stylesheet" href="style.css?v=4.5">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
     <script>
         // 페이지 로드 전 다크모드 적용 (깜빡임 방지)
@@ -295,6 +295,30 @@
             </div>
         </div>
     </div>
+    <!-- 표 도구 바: 표 안을 누르면 표 바로 옆에 떠서, 어느 줄·칸을 다루는지 보여준다 -->
+    <div id="table-tools" class="table-tools hidden">
+        <div class="table-tools-head">
+            <span id="table-tools-pos" class="table-tools-pos">1번째 줄 · 1번째 칸</span>
+            <button id="table-tools-close" class="table-tools-close" title="닫기" aria-label="표 도구 닫기">✕</button>
+        </div>
+        <div class="table-tools-row">
+            <span class="table-tools-label">줄</span>
+            <button id="tt-row-above" class="tt-btn"><i class="ph ph-arrow-up"></i>위에 추가</button>
+            <button id="tt-row-below" class="tt-btn"><i class="ph ph-arrow-down"></i>아래에 추가</button>
+            <button id="tt-row-del" class="tt-btn danger"><i class="ph ph-trash"></i>삭제</button>
+        </div>
+        <div class="table-tools-row">
+            <span class="table-tools-label">칸</span>
+            <button id="tt-col-left" class="tt-btn"><i class="ph ph-arrow-left"></i>왼쪽에 추가</button>
+            <button id="tt-col-right" class="tt-btn"><i class="ph ph-arrow-right"></i>오른쪽에 추가</button>
+            <button id="tt-col-del" class="tt-btn danger"><i class="ph ph-trash"></i>삭제</button>
+        </div>
+        <div class="table-tools-row">
+            <span class="table-tools-label">표</span>
+            <button id="tt-merge" class="tt-btn"><i class="ph ph-arrows-in-simple"></i>셀 합치기</button>
+            <button id="tt-table-del" class="tt-btn danger"><i class="ph ph-trash"></i>표 삭제</button>
+        </div>
+    </div>
     <div id="crop-modal" class="modal-overlay hidden">
         <div class="simple-modal crop-modal-inner">
             <h3>이미지 자르기</h3>
@@ -381,6 +405,6 @@
         <button class="add-menu-item" data-action="folder"><i class="ph ph-folder-plus"></i> 새 폴더</button>
     </div>
     <div id="modal-overlay" class="modal-overlay hidden"></div>
-    <script type="module" src="script.js?v=6.6"></script>
+    <script type="module" src="script.js?v=6.7"></script>
 </body>
 </html>
