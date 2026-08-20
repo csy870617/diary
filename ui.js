@@ -1105,16 +1105,56 @@ function getSelectedEntriesInOrder() {
 function buildPdfContent(entry) {
     const offscreen = document.createElement('div');
     offscreen.style.cssText = 'position:absolute; left:-9999px; top:0;';
+
+    // 화면에서 보던 그대로 저장되도록, 에디터와 같은 크기·같은 스타일로 만든다.
+    //  - 너비: .editor-container 와 동일하게 700px(좌우 여백 40px) → 본문 열 620px
+    //    (예전에는 794px로 잡아 열이 더 넓어졌고, 그걸 A4 폭에 맞춰 줄이다 보니
+    //     글자가 화면보다 커 보이고 줄바꿈 위치도 달라졌다)
+    //  - 본문: .editor-body 클래스를 그대로 붙여 표 테두리·이미지 여백 등
+    //    에디터 CSS가 똑같이 적용되게 한다 (예전에는 클래스가 없어 표가 밋밋했다)
+    //  - 글자 크기: 저장된 글의 설정을 그대로 사용 (예전에는 16px로 고정)
     const content = document.createElement('div');
-    content.style.cssText = 'width:794px; background:#ffffff; padding:24px 32px; box-sizing:border-box;';
-    const font = escapeHtml(entry.fontFamily || 'Pretendard');
-    // 본문은 에디터 열 때와 동일하게 위험 요소(script/이벤트 핸들러 등)만 제거 후 삽입
-    // (구버전에 동기화된 오염 데이터가 PDF 생성 시 실제 DOM에서 실행되는 것 방지)
-    content.innerHTML =
-        `<h1 style="font-family:${font}; font-size:26px; font-weight:600; margin:0 0 10px; color:#1a1a1a; word-break:break-all;">${escapeHtml(entry.title)}</h1>`
-        + (entry.subtitle ? `<p style="font-family:${font}; font-size:16px; color:#666; margin:0 0 8px; word-break:break-all;">${escapeHtml(entry.subtitle)}</p>` : '')
-        + `<div style="font-size:13px; color:#999; margin:0 0 18px;">${escapeHtml(entry.date || '')}</div>`
-        + `<div style="font-family:${font}; font-size:16px; line-height:1.8; white-space:pre-wrap; word-break:break-all; overflow-wrap:break-word; color:#1a1a1a;">${sanitizeEntryHtml(entry.body || '')}</div>`;
+    content.style.cssText = 'width:700px; background:#ffffff; padding:30px 40px; box-sizing:border-box;';
+
+    const font = entry.fontFamily || 'Pretendard';
+    // 손글씨체는 에디터에서 +4px 보정해 표시하므로 여기서도 동일하게 맞춘다 (applyFontStyle과 같은 규칙)
+    const baseSize = (font === 'Nanum Pen Script' ? (entry.fontSize || 16) + 4 : (entry.fontSize || 16));
+    const catName = (state.allCategories.find(c => c.id === entry.category) || {}).name || '';
+
+    // 메타 줄(주제 · 날짜) → 제목 → 소제목 → 구분선 → 본문 : 에디터 화면과 같은 순서
+    const meta = document.createElement('div');
+    meta.style.cssText = 'display:flex; justify-content:space-between; margin-bottom:10px; font-size:13px; color:#6B7280; font-family:Pretendard, sans-serif;';
+    meta.innerHTML = `<span style="color:#14B8A6; font-weight:600;">${escapeHtml(catName)}</span><span>${escapeHtml(entry.date || '')}</span>`;
+
+    const h1 = document.createElement('h1');
+    h1.style.cssText = `font-family:${font}; font-size:26px; font-weight:600; margin:0 0 10px; color:#111827; word-break:break-all;`;
+    h1.textContent = entry.title || '';
+
+    content.appendChild(meta);
+    content.appendChild(h1);
+
+    if (entry.subtitle) {
+        const sub = document.createElement('p');
+        sub.style.cssText = `font-family:${font}; font-size:16px; color:#6B7280; margin:0 0 20px; word-break:break-all;`;
+        sub.textContent = entry.subtitle;
+        content.appendChild(sub);
+    }
+
+    const divider = document.createElement('div');
+    divider.style.cssText = 'width:30px; height:1px; background:#E5E7EB; margin-bottom:30px;';
+    content.appendChild(divider);
+
+    // 본문: 에디터와 같은 클래스를 붙여 동일하게 렌더링
+    // (본문 HTML은 에디터에 넣을 때와 같은 기준으로 위험 요소만 제거)
+    const body = document.createElement('div');
+    body.className = 'editor-body';
+    body.style.fontFamily = font;
+    body.style.fontSize = baseSize + 'px';
+    body.style.color = '#111827';
+    body.style.minHeight = '0';       // 짧은 글에서 빈 공간이 생기지 않도록
+    body.style.cursor = 'auto';
+    body.innerHTML = sanitizeEntryHtml(entry.body || '');
+    content.appendChild(body);
 
     // html2canvas가 밑줄(text-decoration) 위치를 잘못 그리므로 링크는 border-bottom으로 대체
     content.querySelectorAll('a').forEach(link => {
