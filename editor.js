@@ -1993,7 +1993,13 @@ function createSelectionUI() {
         resizeBtnGroup.appendChild(cropBtn);
         document.body.appendChild(resizeBtnGroup);
     }
-    selectionBox.style.display = 'block'; resizeHandle.style.display = 'block'; deleteBtn.style.display = 'flex'; resizeBtnGroup.style.display = 'flex';
+    const isTable = !!(currentSelectedElement && currentSelectedElement.tagName === 'TABLE');
+    selectionBox.style.display = 'block';
+    resizeHandle.style.display = 'block';
+    // 표는 표 도구 바에 폭·삭제가 이미 있으므로 이 떠 있는 버튼들은 감춘다 (겹쳐 보이던 문제).
+    // 이미지에는 그대로 필요하므로 이미지일 때만 표시한다.
+    deleteBtn.style.display = isTable ? 'none' : 'flex';
+    resizeBtnGroup.style.display = isTable ? 'none' : 'flex';
     // 자르기 버튼은 이미지일 때만 노출
     if (cropBtn) cropBtn.style.display = (currentSelectedElement && currentSelectedElement.tagName === 'IMG') ? 'flex' : 'none';
     

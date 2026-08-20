@@ -791,6 +791,9 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
     display: flex;
     flex-direction: column;
     gap: 8px;
+    /* 내용 폭만큼 잡되 화면을 넘지 않게. 지정하지 않으면 절대위치 요소의 shrink-to-fit 때문에
+       내용보다 좁게 잡혀 버튼이 불필요하게 줄바꿈된다. */
+    width: max-content;
     max-width: calc(100vw - 16px);
 }
 .table-tools.hidden { display: none !important; }
@@ -814,6 +817,7 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
     background: var(--gray-100); border: 1px solid transparent; border-radius: 8px;
     color: var(--gray-900); font-family: var(--text-sans); font-size: 12.5px; font-weight: 500;
     padding: 7px 10px; cursor: pointer; white-space: nowrap;
+    line-height: 1.2; min-height: 34px;   /* 아이콘 유무와 상관없이 버튼 높이를 맞춘다 */
     transition: background 0.15s, border-color 0.15s, opacity 0.15s;
 }
 .tt-btn i { font-size: 14px; }
@@ -841,10 +845,19 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
 /* 표 도구 바 — 폭 프리셋 / 표 편집 토글 */
 .tt-btn.active { background: var(--active-bg); border-color: var(--active-text); color: var(--active-text); font-weight: 700; }
 .tt-btn.tt-w { min-width: 52px; justify-content: center; font-variant-numeric: tabular-nums; }
-.tt-btn.tt-toggle { margin-left: auto; font-weight: 600; }
+/* 표 편집·삭제는 폭 버튼 뒤에 이어 붙인다. margin-left:auto 로 밀어두면
+   좁은 화면에서 줄바꿈될 때 '삭제'만 혼자 떨어져 어색해진다. */
+.tt-btn.tt-toggle { font-weight: 600; }
+.table-tools-row { row-gap: 6px; }
 .table-tools-edit { display: flex; flex-direction: column; gap: 8px; padding-top: 9px; border-top: 1px solid var(--gray-100); }
 .table-tools-edit.hidden { display: none !important; }
 @media (max-width: 650px) {
-    .tt-btn.tt-w { min-width: 46px; }
+    /* 좁은 화면에서도 '폭 · 25/50/75/100 · 표 편집 · 삭제'가 한 줄에 들어가도록 살짝 좁힌다
+       (높이는 그대로 두어 손가락으로 누르기 쉬운 크기를 유지) */
+    .table-tools { padding: 10px 8px; }
+    .table-tools-row { gap: 4px; }
+    .table-tools-label { min-width: 14px; font-size: 10.5px; }
+    .tt-btn { font-size: 11.5px; padding: 9px 7px; gap: 3px; }
+    .tt-btn.tt-w { min-width: 40px; }
     .table-tools-edit { gap: 7px; }
 }
