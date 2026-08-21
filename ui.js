@@ -1156,6 +1156,11 @@ function buildPdfContent(entry) {
     body.innerHTML = sanitizeEntryHtml(entry.body || '');
     content.appendChild(body);
 
+    // <br>로만 나뉜 맨텍스트는 '요소'가 아니라서 페이지 넘김 보호(avoid-all)를 받지 못해
+    // 줄 한가운데가 잘린다. 줄 단위로 블록에 감싸 보호 대상이 되게 한다.
+    // (블록은 여백이 없어 화면과 동일하게 보인다)
+    wrapLooseLinesForPdf(body);
+
     // html2canvas가 밑줄(text-decoration) 위치를 잘못 그리므로 링크는 border-bottom으로 대체
     content.querySelectorAll('a').forEach(link => {
         link.style.textDecoration = 'none';
@@ -1166,6 +1171,42 @@ function buildPdfContent(entry) {
     offscreen.appendChild(content);
     document.body.appendChild(offscreen);
     return { offscreen, content };
+}
+
+/**
+ * 본문에서 <br>로만 구분된 맨텍스트 줄들을 각각 블록(div)으로 감싼다.
+ * PDF 페이지 넘김 보호는 '요소' 단위로 동작하므로, 요소가 없는 줄은 잘려 나간다.
+ * 여백 없는 div로 감싸므로 보이는 모양은 그대로다.
+ */
+function wrapLooseLinesForPdf(body) {
+    const BLOCK = /^(DIV|P|H[1-6]|UL|OL|LI|TABLE|BLOCKQUOTE|PRE|HR|FIGURE|FIGCAPTION)$/;
+    const kids = Array.from(body.childNodes);
+    const out = [];
+    let group = [];
+
+    const makeLine = (nodes) => {
+        const div = document.createElement('div');
+        nodes.forEach(n => div.appendChild(n));
+        // 빈 줄도 원래처럼 한 줄 높이를 차지하도록
+        if (!div.textContent.trim() && !div.querySelector('img, br')) div.appendChild(document.createElement('br'));
+        return div;
+    };
+    const flush = () => { if (group.length) { out.push(makeLine(group)); group = []; } };
+
+    kids.forEach(node => {
+        if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'BR') {
+            if (group.length) flush();
+            else out.push(makeLine([]));   // 연속 <br> = 빈 줄
+            node.remove();
+            return;
+        }
+        if (node.nodeType === Node.ELEMENT_NODE && BLOCK.test(node.tagName)) { flush(); out.push(node); return; }
+        group.push(node);   // 텍스트·인라인 요소는 모아서 한 줄로
+    });
+    flush();
+
+    body.innerHTML = '';
+    out.forEach(n => body.appendChild(n));
 }
 
 function pdfOptions(filename) {
@@ -1180,7 +1221,10 @@ function pdfOptions(filename) {
             onclone: (clonedDoc) => { clonedDoc.documentElement.removeAttribute('data-theme'); }
         },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        pagebreak: { mode: ['css', 'legacy'] }
+        // avoid-all: 페이지 경계에 걸치는 요소를 다음 장으로 넘겨 글자가 가로로 잘리지 않게 한다.
+        // (예전에는 css/legacy만 있어 일반 본문은 보호되지 않아 줄 한가운데가 잘렸다)
+        // html2pdf는 페이지보다 큰 요소는 알아서 건너뛰므로 긴 문단이 통째로 밀리지 않는다.
+        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
     };
 }
 
