@@ -2020,7 +2020,10 @@ function isSelectionInView(rect) {
 
 function updateSelectionBox() {
     if (!currentSelectedElement || !selectionBox) return;
-    const rect = currentSelectedElement.getBoundingClientRect(), scrollTop = window.scrollY, scrollLeft = window.scrollX;
+    // 오버레이들은 position:fixed 라 '뷰포트 좌표'를 그대로 쓴다.
+    // 예전에는 absolute + window.scrollY 보정이었는데, 조상에 위치·transform이 걸리거나
+    // 스크롤 상태가 얽히면 박스가 엉뚱한 자리에 그려졌다. 보정 자체를 없애 그 여지를 제거.
+    const rect = currentSelectedElement.getBoundingClientRect();
     const isTable = currentSelectedElement.tagName === 'TABLE';
 
     // 선택 표시는 document.body에 붙어 있어 본문 영역에 잘리지 않는다.
@@ -2035,11 +2038,12 @@ function updateSelectionBox() {
     if (resizeBtnGroup) resizeBtnGroup.style.display = showFloating ? 'flex' : 'none';
     if (!visible) return;
 
-    selectionBox.style.top = (rect.top + scrollTop) + 'px'; selectionBox.style.left = (rect.left + scrollLeft) + 'px'; selectionBox.style.width = rect.width + 'px'; selectionBox.style.height = rect.height + 'px';
-    resizeHandle.style.top = (rect.bottom + scrollTop - 11) + 'px'; resizeHandle.style.left = (rect.right + scrollLeft - 11) + 'px';
-    const centerX = rect.left + scrollLeft + rect.width / 2;
-    resizeBtnGroup.style.top = (rect.bottom + scrollTop + 15) + 'px'; resizeBtnGroup.style.left = centerX + 'px';
-    deleteBtn.style.top = (rect.bottom + scrollTop + 55) + 'px'; deleteBtn.style.left = centerX + 'px';
+    selectionBox.style.top = rect.top + 'px'; selectionBox.style.left = rect.left + 'px';
+    selectionBox.style.width = rect.width + 'px'; selectionBox.style.height = rect.height + 'px';
+    resizeHandle.style.top = (rect.bottom - 11) + 'px'; resizeHandle.style.left = (rect.right - 11) + 'px';
+    const centerX = rect.left + rect.width / 2;
+    resizeBtnGroup.style.top = (rect.bottom + 15) + 'px'; resizeBtnGroup.style.left = centerX + 'px';
+    deleteBtn.style.top = (rect.bottom + 55) + 'px'; deleteBtn.style.left = centerX + 'px';
 }
 function deleteSelectedElement() { if (currentSelectedElement) { currentSelectedElement.remove(); hideSelection(); triggerAutoSave(); } }
 
@@ -2377,8 +2381,7 @@ function positionTableTools(table) {
     const tools = getTableTools();
     if (!tools || !table) return;
     const wrapper = table.closest('.table-wrapper') || table;
-    const r = wrapper.getBoundingClientRect();
-    const sx = window.scrollX, sy = window.scrollY;
+    const r = wrapper.getBoundingClientRect();   // 뷰포트 좌표 (도구 바도 position:fixed)
     const th = tools.offsetHeight || 130;
     const tw = tools.offsetWidth || 300;
     const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
@@ -2388,17 +2391,17 @@ function positionTableTools(table) {
     tools.style.visibility = '';
 
     // 표 바로 아래 가운데. 아래 공간이 부족하면 표 위로 올린다.
-    let top = r.bottom + sy + 8;
-    if (r.bottom + 8 + th > vh) top = Math.max(sy + 8, r.top + sy - th - 8);
+    let top = r.bottom + 8;
+    if (r.bottom + 8 + th > vh) top = Math.max(8, r.top - th - 8);
     // 가로: 표 중앙에 맞춘다.
     // 다만 도구 바가 표보다 넓으면(좁은 표) 표 중앙에 맞출 수 없어 화면 밖으로 밀리므로,
     // 그때는 본문 영역 중앙에 둔다 — 한쪽에 치우쳐 붙는 것보다 자연스럽다.
     const container = document.getElementById('editor-container');
     const cr = container ? container.getBoundingClientRect() : null;
     const anchor = (tw > r.width && cr) ? cr : r;
-    let left = anchor.left + sx + (anchor.width - tw) / 2;
-    const maxLeft = sx + Math.max(8, window.innerWidth - tw - 8);
-    left = Math.min(Math.max(sx + 8, left), maxLeft);
+    let left = anchor.left + (anchor.width - tw) / 2;
+    const maxLeft = Math.max(8, window.innerWidth - tw - 8);
+    left = Math.min(Math.max(8, left), maxLeft);
 
     tools.style.top = `${Math.round(top)}px`;
     tools.style.left = `${Math.round(left)}px`;
