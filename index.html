@@ -415,6 +415,17 @@
         <button class="add-menu-item" data-action="folder"><i class="ph ph-folder-plus"></i> 새 폴더</button>
     </div>
     <div id="modal-overlay" class="modal-overlay hidden"></div>
-    <script type="module" src="script.js?v=7.3"></script>
+
+    <!-- PDF 저장 진행 표시 (한 개를 저장할 때도 진행 상황이 보이도록) -->
+    <div id="pdf-progress" class="modal-overlay hidden" role="status" aria-live="polite">
+        <div class="pdf-progress-box">
+            <i class="ph ph-file-pdf"></i>
+            <h3 id="pdf-progress-title">PDF 만드는 중</h3>
+            <div class="pdf-progress-track"><div id="pdf-progress-fill" class="pdf-progress-fill"></div></div>
+            <p id="pdf-progress-detail">준비하고 있습니다…</p>
+        </div>
+    </div>
+
+    <script type="module" src="script.js?v=7.4"></script>
 </body>
 </html>
