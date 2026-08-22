@@ -18,7 +18,11 @@
             }
         })();
     </script>
-    <script src="https://unpkg.com/@phosphor-icons/web@2.1.1" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <!-- 아이콘은 저장소에 함께 둔다. 예전에는 unpkg의 스크립트가 6가지 굵기의 CSS를 심는 방식이라,
+         그 스크립트 하나만 막히거나 늦어도 화면의 아이콘이 통째로 사라졌다. -->
+    <link rel="preload" href="vendor/phosphor/Phosphor.woff2?v=1" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="vendor/phosphor/regular.css?v=1">
+    <link rel="stylesheet" href="vendor/phosphor/fill.css?v=1">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
