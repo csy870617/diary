@@ -1356,7 +1356,7 @@ function groupPdfSegments(pages, maxPx) {
  * 이제는 페이지 경계를 먼저 계산해 두고, 5쪽씩 나눠 그린 뒤 그 경계에서 잘라 붙인다.
  * 글 길이와 상관없이 선명도가 같고, 페이지마다 깔끔하게 채워진다.
  */
-async function renderEntryPdfDoc(entry, filename) {
+async function renderEntryPdfDoc(entry, filename, onPage) {
     const opt = pdfBaseOptions(filename);
     const page = pdfPageMetrics();
     const { offscreen, content } = buildPdfContent(entry);
@@ -1436,6 +1436,7 @@ async function renderEntryPdfDoc(entry, filename) {
                 doc.addImage(url, png ? 'PNG' : 'JPEG', PDF_MARGIN_MM, PDF_MARGIN_MM,
                              page.widthMm, sh * mmPerPx, undefined, png ? 'FAST' : undefined);
                 pg.pageNo = ++pageNo;
+                if (onPage) await onPage(pageNo, pages.length);
             }
             // 큰 캔버스를 바로 놓아준다 (여러 글을 연달아 만들 때 메모리가 몰리지 않도록)
             canvas.width = canvas.height = 0;
@@ -1456,6 +1457,52 @@ async function renderEntryPdfDoc(entry, filename) {
     }
 }
 
+/* ── PDF 저장 진행 표시 ──────────────────────────────────────────────
+   한 개를 저장할 때는 아무 표시가 없어 잘 되고 있는지 알 수 없었다.
+   이제 페이지 단위로 만들기 때문에 실제 진행률을 그대로 보여줄 수 있다. */
+let pdfProgressShownAt = 0;
+
+function showPdfProgress(title) {
+    const box = getEl('pdf-progress');
+    if (!box) return;
+    pdfProgressShownAt = Date.now();
+    getEl('pdf-progress-title').textContent = title;
+    getEl('pdf-progress-detail').textContent = '준비하고 있습니다…';
+    const fill = getEl('pdf-progress-fill');
+    fill.classList.add('indeterminate');   // 전체 쪽 수를 알기 전까지
+    fill.style.width = '';
+    box.classList.remove('hidden');
+}
+
+function setPdfProgress(detail, done, total) {
+    const box = getEl('pdf-progress');
+    if (!box || box.classList.contains('hidden')) return;
+    getEl('pdf-progress-detail').textContent = detail;
+    const fill = getEl('pdf-progress-fill');
+    if (total > 0) {
+        fill.classList.remove('indeterminate');
+        fill.style.width = Math.round(Math.min(1, done / total) * 100) + '%';
+    }
+}
+
+// 짧은 글은 순식간에 끝나서, 바로 감추면 화면이 한 번 깜빡인 것처럼만 보인다.
+// 최소한 잠깐은 남겨 두어 '저장됐다'는 신호로 읽히게 한다.
+const PDF_PROGRESS_MIN_MS = 500;
+async function hidePdfProgress() {
+    const box = getEl('pdf-progress');
+    if (!box || box.classList.contains('hidden')) return;
+    const left = PDF_PROGRESS_MIN_MS - (Date.now() - pdfProgressShownAt);
+    if (left > 0) await new Promise(r => setTimeout(r, left));
+    box.classList.add('hidden');
+}
+
+// 진행 표시가 실제로 화면에 그려질 틈을 준다.
+// (페이지를 그리는 동안은 자바스크립트가 화면을 붙잡고 있어, 양보하지 않으면
+//  진행률이 끝날 때 한 번에 튀거나 아예 안 보인다)
+function paintFrame() {
+    return new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+}
+
 // 파일명에 쓸 수 없는 문자 제거
 function sanitizeFilename(name) {
     return String(name || '신앙일지').replace(/[\\/:*?"<>|]/g, '_').trim() || '신앙일지';
@@ -1468,12 +1515,21 @@ export async function downloadEntryPdf(entry) {
         return;
     }
     const filename = `${sanitizeFilename(entry.title)}.pdf`;
+    showPdfProgress('PDF 만드는 중');
     try {
-        const doc = await renderEntryPdfDoc(entry, filename);
+        await paintFrame();   // 진행 표시를 먼저 그린 뒤 무거운 작업 시작
+        const doc = await renderEntryPdfDoc(entry, filename, async (done, total) => {
+            setPdfProgress(`${done} / ${total}쪽`, done, total);
+            await paintFrame();
+        });
+        setPdfProgress('파일로 저장하는 중…', 1, 1);
+        await paintFrame();
         await doc.save(filename, { returnPromise: true });
     } catch (err) {
         console.error('PDF 저장 실패', err);
         alert('PDF 저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
+    } finally {
+        await hidePdfProgress();
     }
 }
 
@@ -1510,12 +1566,21 @@ export async function bulkDownloadPdf() {
             const pad = String(selected.length).length; // 정렬 유지를 위한 자리수
             const usedNames = new Set();
             const failedTitles = [];
+            showPdfProgress(`PDF ${selected.length}개 만드는 중`);
+            await paintFrame();
             for (let i = 0; i < selected.length; i++) {
                 const entry = selected[i];
                 if (pdfBtn) pdfBtn.innerHTML = `<i class="ph ph-spinner" style="animation:spin 1s linear infinite;"></i> 생성 중... (${i + 1}/${selected.length})`;
                 // 한 글이 실패해도 이미 만들어진 나머지 PDF는 버리지 않고 ZIP에 포함
                 try {
-                    const doc = await renderEntryPdfDoc(entry, 'entry.pdf');
+                    const label = `${i + 1} / ${selected.length}번째 글`;
+                    setPdfProgress(label, i, selected.length);
+                    await paintFrame();
+                    const doc = await renderEntryPdfDoc(entry, 'entry.pdf', async (done, total) => {
+                        // 전체 진행률은 '몇 번째 글까지 끝났는가'에 그 글의 진행도를 더해 계산한다
+                        setPdfProgress(`${label} · ${done}/${total}쪽`, i + done / total, selected.length);
+                        await paintFrame();
+                    });
                     const blob = doc.output('blob');
                     // 다음 글로 넘어가기 전에 브라우저가 정리할 틈을 준다
                     // (연속 캡처로 메모리가 몰리면 뒤쪽 글이 흐릿하거나 비어 나온다)
@@ -1536,6 +1601,8 @@ export async function bulkDownloadPdf() {
                 alert(`${failedTitles.length}개 글은 PDF 생성에 실패해 제외되었습니다:\n- ${failedTitles.join('\n- ')}`);
             }
             if (pdfBtn) pdfBtn.innerHTML = `<i class="ph ph-spinner" style="animation:spin 1s linear infinite;"></i> 압축 중...`;
+            setPdfProgress('하나로 압축하는 중…', selected.length, selected.length);
+            await paintFrame();
             const zipBlob = await zip.generateAsync({ type: 'blob' });
             const url = URL.createObjectURL(zipBlob);
             const a = document.createElement('a');
@@ -1551,6 +1618,7 @@ export async function bulkDownloadPdf() {
         console.error('PDF 저장 실패', err);
         alert('PDF 저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
     } finally {
+        await hidePdfProgress();
         if (pdfBtn) {
             delete pdfBtn.dataset.busy;
             pdfBtn.innerHTML = `<i class="ph ph-file-pdf"></i> PDF 저장`;
