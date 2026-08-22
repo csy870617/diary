@@ -1209,23 +1209,251 @@ function wrapLooseLinesForPdf(body) {
     out.forEach(n => body.appendChild(n));
 }
 
-function pdfOptions(filename) {
+/**
+ * 캡처 전에 글꼴과 이미지가 준비될 때까지 기다린다.
+ * 기다리지 않고 그리면
+ *  - 글꼴이 아직이면 대체 글꼴로 그려져 줄 위치·줄바꿈이 화면과 달라지고,
+ *  - 이미지가 디코딩 전이면 높이가 0으로 잡혀 레이아웃과 페이지 나눔이 어긋난다.
+ * 여러 글을 연달아 만들 때 특히 자주 발생한다.
+ */
+async function waitForPdfAssets(root) {
+    try { if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch (e) { /* 미지원 브라우저는 무시 */ }
+    const imgs = Array.from(root.querySelectorAll('img'));
+    await Promise.all(imgs.map(img => {
+        if (img.complete && img.naturalWidth) {
+            return img.decode ? img.decode().catch(() => {}) : Promise.resolve();
+        }
+        return new Promise(resolve => {
+            const done = () => resolve();
+            img.addEventListener('load', done, { once: true });
+            img.addEventListener('error', done, { once: true });
+            setTimeout(done, 5000);   // 깨진 이미지로 무한 대기하지 않도록
+        });
+    }));
+    // 레이아웃이 실제로 반영된 뒤 캡처하도록 한 프레임 양보
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+}
+
+const PDF_MARGIN_MM = 10;
+
+/**
+ * PDF 캡처 옵션.
+ * 페이지를 한 장씩 따로 그리므로 html2pdf의 자동 페이지 나눔(pagebreak)과
+ * 자동 링크 처리(enableLinks)는 끈다. 둘 다 '문서 전체를 한 장의 큰 그림으로
+ * 만든 뒤 자른다'는 전제를 갖고 있어, 페이지별 렌더링과 함께 쓰면 서로 어긋난다.
+ */
+function pdfBaseOptions(filename) {
     return {
-        margin: 10,
+        margin: PDF_MARGIN_MM,
         filename,
-        image: { type: 'jpeg', quality: 0.98 },
+        image: { type: 'jpeg', quality: 0.92 },
         html2canvas: {
             scale: 2,
             useCORS: true,
+            backgroundColor: '#ffffff',   // 다크모드 잔재로 배경이 비치지 않도록
             // 다크모드에서도 항상 라이트모드 스타일로 저장 (캡처용 복제본에서만 테마 제거 → 화면 깜빡임 없음)
             onclone: (clonedDoc) => { clonedDoc.documentElement.removeAttribute('data-theme'); }
         },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        // avoid-all: 페이지 경계에 걸치는 요소를 다음 장으로 넘겨 글자가 가로로 잘리지 않게 한다.
-        // (예전에는 css/legacy만 있어 일반 본문은 보호되지 않아 줄 한가운데가 잘렸다)
-        // html2pdf는 페이지보다 큰 요소는 알아서 건너뛰므로 긴 문단이 통째로 밀리지 않는다.
-        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+        enableLinks: false,
+        pagebreak: { mode: [], before: [], after: [], avoid: [] }
     };
+}
+
+/**
+ * A4 인쇄 영역(210×297mm에서 여백을 뺀 크기)이 화면에서 몇 px인지 실제로 재어 온다.
+ * html2pdf가 캡처용 틀을 만들 때 쓰는 폭과 정확히 같은 값이어야
+ * 페이지를 자르는 위치가 어긋나지 않는다.
+ */
+function pdfPageMetrics() {
+    const widthMm = 210 - PDF_MARGIN_MM * 2;
+    const heightMm = 297 - PDF_MARGIN_MM * 2;
+    const probe = document.createElement('div');
+    probe.style.cssText = `position:absolute; visibility:hidden; top:0; left:0; width:${widthMm}mm; height:${heightMm}mm;`;
+    document.body.appendChild(probe);
+    const rect = probe.getBoundingClientRect();
+    probe.remove();
+    return {
+        widthMm,
+        // 반올림 오차로 한 쪽이 두 장으로 쪼개지지 않도록 1px 여유를 둔다
+        heightPx: Math.floor(rect.height) - 1,
+        pxToMm: widthMm / rect.width
+    };
+}
+
+// 페이지 나눔의 기준이 되는 '가장 안쪽 블록'(= 화면에서 한 줄, 표의 한 칸 등)
+const PDF_BLOCK_SEL = 'div,p,h1,h2,h3,h4,h5,h6,li,td,th,blockquote,pre,figure,hr,img,table';
+function collectPdfBlocks(root) {
+    return Array.from(root.querySelectorAll(PDF_BLOCK_SEL))
+        .filter(el => !el.querySelector(PDF_BLOCK_SEL));
+}
+
+/**
+ * 각 페이지가 본문의 어느 높이에서 시작하는지 계산한다.
+ * 블록의 시작점에서만 끊으므로 글자가 가로로 잘리는 일이 없다.
+ * 한 페이지보다 큰 블록(아주 긴 표·큰 이미지)만 어쩔 수 없이 페이지 높이로 끊는다.
+ */
+function computePdfPageStarts(content, pageH) {
+    const originTop = content.getBoundingClientRect().top;
+    const total = content.offsetHeight;
+    const starts = [0];
+    let start = 0;
+
+    for (const el of collectPdfBlocks(content)) {
+        const r = el.getBoundingClientRect();
+        if (r.height <= 0) continue;
+        const top = r.top - originTop;
+        const bottom = r.bottom - originTop;
+        if (bottom <= start + pageH) continue;          // 현재 페이지 안에 들어간다
+        if (top > start) { start = top; starts.push(start); }   // 이 블록부터 새 페이지
+        while (bottom > start + pageH) {                 // 블록 자체가 페이지보다 크다
+            start += pageH;
+            starts.push(start);
+        }
+    }
+
+    // (시작, 높이) 목록으로 변환하고 빈 페이지는 버린다
+    const pages = [];
+    for (let i = 0; i < starts.length; i++) {
+        const end = (i + 1 < starts.length) ? starts[i + 1] : total;
+        const height = Math.round(end - starts[i]);
+        if (height > 1) pages.push({ start: starts[i], height });
+    }
+    return pages.length ? pages : [{ start: 0, height: Math.max(1, Math.round(total)) }];
+}
+
+// 한 번에 그리는 최대 높이(화면 px). 캡처 배율 2를 곱해도 캔버스 한계(약 16000px)에
+// 넉넉히 못 미치도록 잡았다. 대략 5쪽 분량.
+const PDF_SEGMENT_MAX_PX = 5000;
+
+/**
+ * 페이지들을 '한 번에 그릴 묶음'으로 나눈다 (묶음 하나 = 캡처 한 번).
+ * 캡처 한 번의 고정 비용이 크므로 묶음 수를 되도록 줄인다.
+ */
+function groupPdfSegments(pages, maxPx) {
+    const segments = [];
+    let cur = null;
+    for (const pg of pages) {
+        if (cur && cur.height + pg.height <= maxPx) {
+            cur.height += pg.height;
+            cur.pages.push(pg);
+        } else {
+            cur = { start: pg.start, height: pg.height, pages: [pg] };
+            segments.push(cur);
+        }
+    }
+    return segments;
+}
+
+/**
+ * 글 하나를 PDF 문서(jsPDF)로 만든다.
+ *
+ * 예전에는 글 전체를 '한 장의 거대한 그림'으로 그린 뒤 페이지 크기로 잘랐다.
+ * 그래서 글이 길수록
+ *  - 브라우저 캔버스 크기 한계(약 16000px)에 걸려 흐려지거나 빈 페이지가 생기고,
+ *  - 메모리를 한꺼번에 많이 써서 여러 글을 연달아 만들 때 뒤쪽이 망가졌으며,
+ *  - 자동 페이지 나눔이 페이지마다 요소를 밀어내 여백이 들쭉날쭉했다.
+ * 이제는 페이지 경계를 먼저 계산해 두고, 5쪽씩 나눠 그린 뒤 그 경계에서 잘라 붙인다.
+ * 글 길이와 상관없이 선명도가 같고, 페이지마다 깔끔하게 채워진다.
+ */
+async function renderEntryPdfDoc(entry, filename) {
+    const opt = pdfBaseOptions(filename);
+    const page = pdfPageMetrics();
+    const { offscreen, content } = buildPdfContent(entry);
+
+    try {
+        // 인쇄 영역과 같은 폭의 틀에 본문을 넣고, 이 틀을 묶음 단위로 캡처한다.
+        const viewport = document.createElement('div');
+        viewport.style.cssText = `width:${page.widthMm}mm; overflow:hidden; background:#ffffff;`;
+        offscreen.appendChild(viewport);
+        viewport.appendChild(content);
+        content.style.marginLeft = 'auto';
+        content.style.marginRight = 'auto';
+
+        await waitForPdfAssets(viewport);
+
+        const pages = computePdfPageStarts(content, page.heightPx);
+        const pxToMm = page.pxToMm;
+
+        // 링크 위치는 본문을 밀기 전에 미리 재둔다 (페이지별로 직접 심는다)
+        const originTop = content.getBoundingClientRect().top;
+        const originLeft = viewport.getBoundingClientRect().left;
+        const links = Array.from(content.querySelectorAll('a[href]')).map(a => {
+            const r = a.getBoundingClientRect();
+            return { url: a.href, top: r.top - originTop, left: r.left - originLeft, w: r.width, h: r.height };
+        }).filter(l => l.w > 0 && l.h > 0 && l.url);
+
+        // 글자만 있는 페이지는 PNG(무손실)가 JPEG보다 선명하면서 파일도 작다.
+        // 사진이 걸친 페이지만 JPEG로 저장해 용량이 튀지 않게 한다.
+        const imageBands = Array.from(content.querySelectorAll('img')).map(im => {
+            const r = im.getBoundingClientRect();
+            return { top: r.top - originTop, bottom: r.bottom - originTop };
+        });
+        const hasPhoto = (pg) => imageBands.some(b => b.bottom > pg.start && b.top < pg.start + pg.height);
+
+        const slice = document.createElement('canvas');
+        const sctx = slice.getContext('2d');
+        let doc = null;
+        let pageNo = 0;
+
+        for (const seg of groupPdfSegments(pages, PDF_SEGMENT_MAX_PX)) {
+            viewport.style.height = seg.height + 'px';
+            content.style.marginTop = (-seg.start) + 'px';
+
+            let canvas;
+            if (!doc) {
+                // 첫 캡처에서 PDF 문서까지 함께 받아 온다 (문서를 만들려고 따로 캡처하지 않는다).
+                // html2pdf가 알아서 넣은 장들은 지우고, 아래에서 페이지 경계에 맞춰 다시 그린다.
+                // 그 장들은 버릴 것이므로 최저 화질로 만들어 시간을 아낀다.
+                const throwaway = Object.assign({}, opt, { image: { type: 'jpeg', quality: 0.1 } });
+                const worker = html2pdf().set(throwaway).from(viewport);
+                doc = await worker.toPdf().get('pdf');
+                canvas = worker.prop.canvas;
+                while (doc.internal.getNumberOfPages() > 0) doc.deletePage(1);
+            } else {
+                canvas = await html2pdf().set(opt).from(viewport).toCanvas().get('canvas');
+            }
+
+            // 캡처된 그림에서 세로 배율과 mm 환산값을 직접 구한다 (짐작하지 않는다)
+            const vScale = canvas.height / seg.height;
+            const mmPerPx = page.widthMm / canvas.width;
+
+            for (const pg of seg.pages) {
+                const sy = Math.round((pg.start - seg.start) * vScale);
+                const sh = Math.min(Math.round(pg.height * vScale), canvas.height - sy);
+                if (sh <= 0) continue;
+                slice.width = canvas.width;
+                slice.height = sh;
+                sctx.fillStyle = '#ffffff';
+                sctx.fillRect(0, 0, slice.width, sh);
+                sctx.drawImage(canvas, 0, sy, canvas.width, sh, 0, 0, canvas.width, sh);
+
+                const png = !hasPhoto(pg);
+                const url = png ? slice.toDataURL('image/png')
+                                : slice.toDataURL('image/jpeg', opt.image.quality);
+                doc.addPage();
+                // PNG는 압축을 지정해야 원본 크기로 들어가지 않는다
+                doc.addImage(url, png ? 'PNG' : 'JPEG', PDF_MARGIN_MM, PDF_MARGIN_MM,
+                             page.widthMm, sh * mmPerPx, undefined, png ? 'FAST' : undefined);
+                pg.pageNo = ++pageNo;
+            }
+            // 큰 캔버스를 바로 놓아준다 (여러 글을 연달아 만들 때 메모리가 몰리지 않도록)
+            canvas.width = canvas.height = 0;
+        }
+        slice.width = slice.height = 0;
+
+        links.forEach(l => {
+            const pg = pages.find(p => p.pageNo && l.top >= p.start && l.top < p.start + p.height);
+            if (!pg) return;
+            doc.setPage(pg.pageNo);
+            doc.link(PDF_MARGIN_MM + l.left * pxToMm, PDF_MARGIN_MM + (l.top - pg.start) * pxToMm,
+                     l.w * pxToMm, l.h * pxToMm, { url: l.url });
+        });
+        doc.setPage(doc.internal.getNumberOfPages());
+        return doc;
+    } finally {
+        offscreen.remove();
+    }
 }
 
 // 파일명에 쓸 수 없는 문자 제거
@@ -1239,14 +1467,13 @@ export async function downloadEntryPdf(entry) {
         alert('PDF 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해주세요.');
         return;
     }
-    const { offscreen, content } = buildPdfContent(entry);
+    const filename = `${sanitizeFilename(entry.title)}.pdf`;
     try {
-        await html2pdf().set(pdfOptions(`${sanitizeFilename(entry.title)}.pdf`)).from(content).save();
+        const doc = await renderEntryPdfDoc(entry, filename);
+        await doc.save(filename, { returnPromise: true });
     } catch (err) {
         console.error('PDF 저장 실패', err);
         alert('PDF 저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
-    } finally {
-        offscreen.remove();
     }
 }
 
@@ -1288,13 +1515,11 @@ export async function bulkDownloadPdf() {
                 if (pdfBtn) pdfBtn.innerHTML = `<i class="ph ph-spinner" style="animation:spin 1s linear infinite;"></i> 생성 중... (${i + 1}/${selected.length})`;
                 // 한 글이 실패해도 이미 만들어진 나머지 PDF는 버리지 않고 ZIP에 포함
                 try {
-                    const { offscreen, content } = buildPdfContent(entry);
-                    let blob;
-                    try {
-                        blob = await html2pdf().set(pdfOptions('entry.pdf')).from(content).outputPdf('blob');
-                    } finally {
-                        offscreen.remove();
-                    }
+                    const doc = await renderEntryPdfDoc(entry, 'entry.pdf');
+                    const blob = doc.output('blob');
+                    // 다음 글로 넘어가기 전에 브라우저가 정리할 틈을 준다
+                    // (연속 캡처로 메모리가 몰리면 뒤쪽 글이 흐릿하거나 비어 나온다)
+                    await new Promise(r => setTimeout(r, 60));
                     // 목록 순서를 보존하고 동일 제목 충돌을 피하기 위해 번호를 접두어로 사용
                     const prefix = String(i + 1).padStart(pad, '0');
                     let name = `${prefix}_${sanitizeFilename(entry.title)}.pdf`;
