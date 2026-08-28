@@ -95,6 +95,8 @@
             </button>
             <div class="header-actions">
                 <span id="book-edit-badge" class="book-edit-badge">✏️ 편집 중</span>
+                <!-- 글 쓰는 화면이 헤더를 덮으므로, 여기에도 같은 동기화 상태 점을 둔다 -->
+                <button id="sync-dot-editor" class="sync-dot hidden" type="button" aria-live="polite"></button>
                 <button id="write-theme-toggle-btn" class="icon-action-btn" title="다크모드 전환">
                     <i class="ph ph-moon"></i>
                 </button>
@@ -428,6 +430,6 @@
         </div>
     </div>
 
-    <script type="module" src="script.js?v=7.6"></script>
+    <script type="module" src="script.js?v=7.7"></script>
 </body>
 </html>
