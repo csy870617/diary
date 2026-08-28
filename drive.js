@@ -26,6 +26,50 @@ let refreshPromise = null; // 진행 중인 갱신 Promise 공유용
 let lastResumeCheck = 0; // resume 이벤트 디바운스용
 let syncWarningTimer = null; // 동기화 경고 디바운스용
 
+/* ── 동기화 상태 점 (헤더) ───────────────────────────────────────
+   초록: 동기화 완료 / 주황: 진행 중이거나 아직 못 올린 변경이 있음 / 빨강: 실패.
+   로그인 전에는 동기화할 것이 없으므로 점을 감춘다. */
+const SYNC_DOT = {
+    synced:  { cls: 'is-synced',  text: '동기화 완료' },
+    syncing: { cls: 'is-syncing', text: '동기화 중…' },
+    pending: { cls: 'is-pending', text: '저장한 내용을 곧 올립니다' },
+    error:   { cls: 'is-error',   text: '동기화 실패 — 내용은 이 기기에 저장되어 있습니다' },
+    offline: { cls: 'is-error',   text: '인터넷 연결 없음 — 연결되면 자동으로 올립니다' },
+};
+let syncDotState = 'off';
+let lastSyncedAt = 0;
+
+function renderSyncDot() {
+    const dot = document.getElementById('sync-dot');
+    if (!dot) return;
+    if (syncDotState === 'off') { dot.classList.add('hidden'); return; }
+
+    // 연결이 끊긴 상태의 실패는 원인을 정확히 알려 준다
+    const key = (syncDotState === 'error' && !navigator.onLine) ? 'offline' : syncDotState;
+    const info = SYNC_DOT[key] || SYNC_DOT.synced;
+    dot.classList.remove('hidden', 'is-synced', 'is-syncing', 'is-pending', 'is-error');
+    dot.classList.add(info.cls);
+
+    let label = info.text;
+    if (lastSyncedAt) {
+        const t = new Date(lastSyncedAt).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' });
+        label += `\n마지막 동기화: ${t}`;
+    }
+    if (key !== 'syncing') label += '\n(눌러서 지금 동기화)';
+    dot.title = label;
+    dot.setAttribute('aria-label', label.replace(/\n/g, ' · '));
+}
+
+export function setSyncStatus(status) {
+    if (status === 'synced') lastSyncedAt = Date.now();
+    syncDotState = status;
+    renderSyncDot();
+}
+
+// 연결이 돌아오거나 끊기면 표시 문구를 즉시 맞춘다
+window.addEventListener('online', renderSyncDot);
+window.addEventListener('offline', renderSyncDot);
+
 function showSyncWarning(message) {
     // 짧은 시간 내 중복 경고 방지
     if (syncWarningTimer) return;
@@ -413,6 +457,7 @@ export async function handleSignoutClick(callback) {
     dbFileId = null;
     state.currentUser = null;
     state.entries = [];
+    setSyncStatus('off');
     if (refreshTimer) clearTimeout(refreshTimer);
     stopKeepAlive();
     if(callback) callback();
@@ -420,9 +465,11 @@ export async function handleSignoutClick(callback) {
 
 async function checkAuthAndSync(callback, onReady) {
     if (!gapi.client.getToken()) {
+        setSyncStatus('off');
         if(callback) callback(false);
         return;
     }
+    setSyncStatus('syncing');
     try {
         const userInfo = await gapi.client.drive.about.get({ fields: 'user' });
         state.currentUser = userInfo.result.user;
@@ -447,6 +494,7 @@ async function checkAuthAndSync(callback, onReady) {
                         // 갱신 후에도 실패 → 토큰만 제거 (is_faith_logged_in 유지하여 재시도 가능)
                         localStorage.removeItem('faith_token');
                         localStorage.removeItem('faith_token_exp');
+                        setSyncStatus('error');
                         if(callback) callback(false);
                         return;
                     }
@@ -454,12 +502,14 @@ async function checkAuthAndSync(callback, onReady) {
                     // 갱신 실패 → 토큰만 제거 (로그인 상태는 유지)
                     localStorage.removeItem('faith_token');
                     localStorage.removeItem('faith_token_exp');
+                    setSyncStatus('error');
                     if(callback) callback(false);
                     return;
                 }
             } else {
                 localStorage.removeItem('faith_token');
                 localStorage.removeItem('faith_token_exp');
+                setSyncStatus('error');
                 if(callback) callback(false);
                 return;
             }
@@ -497,19 +547,21 @@ function toggleSpinners(active) {
 // 반환값: 동기화가 실제로 완료되면 true, 실패/건너뜀이면 false
 // (로그아웃 전 마지막 동기화처럼 성공 여부 확인이 필요한 호출부에서 사용)
 export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
-    if (localStorage.getItem('is_faith_logged_in') !== 'true') return false;
+    if (localStorage.getItem('is_faith_logged_in') !== 'true') { setSyncStatus('off'); return false; }
     if (isSyncing) { if (!pullOnly) pendingSync = true; return false; }
 
     const isValid = await ensureValidToken(true);
     if (!isValid) {
         console.warn("saveToDrive: 토큰이 유효하지 않아 동기화를 건너뜁니다.");
         showSyncWarning("클라우드 동기화 실패: 로그인이 필요합니다.");
+        setSyncStatus('error');
         return false;
     }
 
     const runId = ++syncRunId;
     isSyncing = true;
     toggleSpinners(true);
+    setSyncStatus('syncing');
 
     // 전체 동기화가 시작되면 대기 중인 디바운스 업로드는 이 실행에 포함되므로 취소 (중복 업로드 방지)
     if (!pullOnly && cloudSyncTimer) { clearTimeout(cloudSyncTimer); cloudSyncTimer = null; }
@@ -521,7 +573,11 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
     if (syncTimeoutTimer) clearTimeout(syncTimeoutTimer);
     syncTimeoutTimer = setTimeout(() => {
         // 세대가 일치할 때만 해제 — 이후 시작된 다른 실행의 플래그를 건드리지 않음
-        if (runId === syncRunId && isSyncing) { isSyncing = false; toggleSpinners(false); }
+        if (runId === syncRunId && isSyncing) {
+            isSyncing = false;
+            toggleSpinners(false);
+            setSyncStatus('error');   // 30초가 지나도 안 끝났다 → 실패로 본다
+        }
     }, 30000);
 
     let baseSnapshot = null; // 병합 전 동기화 기준점 백업 (업로드 실패 시 되돌리기용)
@@ -701,6 +757,7 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
     } catch (err) {
         console.error("구글 드라이브 저장 실패:", err);
         rollbackSyncBase();
+        setSyncStatus('error');
         showSyncWarning("클라우드 동기화에 실패했습니다. 데이터는 기기에 저장되어 있습니다.");
     } finally {
         // 워치독 발동 후 새 실행이 시작된 경우, 늦게 끝난 이전 실행이 새 실행의 상태를 건드리지 않도록 함
@@ -709,8 +766,10 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
             syncTimeoutTimer = null;
             isSyncing = false;
             toggleSpinners(false);
+            if (syncOk) setSyncStatus('synced');
             if (pendingSync) {
                 pendingSync = false;
+                setSyncStatus('pending');   // 동기화 중에 또 바뀐 내용이 있다
                 setTimeout(saveToDrive, 500);
             }
         }
@@ -729,6 +788,7 @@ const CLOUD_SYNC_DELAY = 5000;
 
 export function scheduleCloudSync(delay = CLOUD_SYNC_DELAY) {
     if (localStorage.getItem('is_faith_logged_in') !== 'true') return;
+    setSyncStatus('pending');
     if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
     cloudSyncTimer = setTimeout(() => {
         cloudSyncTimer = null;

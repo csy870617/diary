@@ -3,7 +3,7 @@ import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntr
 import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, renameFolderAction, deleteFolderAction, openFolderAssignModal, createFolderFromAssignModal, addSubfolderAction, closeFolderPopup, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort, bulkDownloadPdf, downloadEntryPdf } from './ui.js';
 import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize, getCleanBodyHtml, addRowAbove, addRowBelow, addColumnLeft, addColumnRight, deleteTable, hideTableTools, updateTableTools, setTableWidth, toggleTableEditSection, repositionTableTools } from './editor.js';
 import { setupAuthListeners } from './auth.js';
-import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, flushCloudSync, flushCloudSyncBeacon, ensureTokenOnResume, startKeepAlive } from './drive.js';
+import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, flushCloudSync, flushCloudSyncBeacon, ensureTokenOnResume, startKeepAlive, setSyncStatus } from './drive.js';
 import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, setTTSStart, setTTSEnd, resetTTSRange, playSelection, updateSpeedDisplay, updatePitchDisplay, updateGapDisplay, initTTS, updateTTSRange, seekTTSByPercent, saveTTSVoice } from './tts.js';
 import { initFaithsSSO } from './faiths-sso.js';
 import { flushEntries } from './storage.js';
@@ -185,6 +185,12 @@ async function init() {
             if (valid) syncFromDrive().catch(err => console.error('복귀 동기화 실패:', err));
         }
     };
+    // 동기화 상태 점을 누르면 지금 바로 동기화 (특히 빨간 점일 때 다시 시도용)
+    document.getElementById('sync-dot')?.addEventListener('click', () => {
+        if (localStorage.getItem('is_faith_logged_in') !== 'true') return;
+        syncFromDrive().catch(err => console.error('수동 동기화 실패:', err));
+    });
+
     window.addEventListener('focus', handleResume);
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') handleResume();
@@ -255,6 +261,8 @@ function updateAuthUI(isLoggedIn) {
     } else {
         if (logoutBtn) logoutBtn.classList.add('hidden');
         if (loginTriggerBtn) loginTriggerBtn.classList.remove('hidden');
+        // 로그인 전에는 동기화할 것이 없으므로 상태 점을 감춘다
+        setSyncStatus('off');
     }
 }
 

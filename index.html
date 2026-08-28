@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <meta name="referrer" content="origin"> 
     <title>신앙일지 | Faith Log</title>
-    <link rel="stylesheet" href="style.css?v=4.9">
+    <link rel="stylesheet" href="style.css?v=5.0">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
     <script>
         // 페이지 로드 전 다크모드 적용 (깜빡임 방지)
@@ -42,6 +42,8 @@
                     <input type="search" id="search-input" name="search_unique_query" autocomplete="off" readonly onfocus="this.removeAttribute('readonly');" placeholder="검색어를 입력하세요">
                 </div>
                 <div class="auth-area">
+                    <!-- 동기화 상태 점: 초록=완료, 주황=진행/대기, 빨강=실패. 누르면 지금 동기화 -->
+                    <button id="sync-dot" class="sync-dot hidden" type="button" aria-live="polite"></button>
                     <button id="theme-toggle-btn" class="theme-toggle-btn" title="다크모드 전환">
                         <i class="ph ph-moon"></i>
                     </button>
@@ -426,6 +428,6 @@
         </div>
     </div>
 
-    <script type="module" src="script.js?v=7.4"></script>
+    <script type="module" src="script.js?v=7.5"></script>
 </body>
 </html>
