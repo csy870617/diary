@@ -40,15 +40,18 @@ let syncDotState = 'off';
 let lastSyncedAt = 0;
 
 function renderSyncDot() {
-    const dot = document.getElementById('sync-dot');
-    if (!dot) return;
-    if (syncDotState === 'off') { dot.classList.add('hidden'); return; }
+    // 목록 화면 헤더와 글 쓰는 화면 헤더 양쪽에 있다 (편집 중에는 뒤쪽 헤더가 가려지므로)
+    const dots = document.querySelectorAll('.sync-dot');
+    if (!dots.length) return;
+
+    if (syncDotState === 'off') {
+        dots.forEach(dot => dot.classList.add('hidden'));
+        return;
+    }
 
     // 연결이 끊긴 상태의 실패는 원인을 정확히 알려 준다
     const key = (syncDotState === 'error' && !navigator.onLine) ? 'offline' : syncDotState;
     const info = SYNC_DOT[key] || SYNC_DOT.synced;
-    dot.classList.remove('hidden', 'is-synced', 'is-syncing', 'is-pending', 'is-error');
-    dot.classList.add(info.cls);
 
     let label = info.text;
     if (lastSyncedAt) {
@@ -56,8 +59,13 @@ function renderSyncDot() {
         label += `\n마지막 동기화: ${t}`;
     }
     if (key !== 'syncing') label += '\n(눌러서 지금 동기화)';
-    dot.title = label;
-    dot.setAttribute('aria-label', label.replace(/\n/g, ' · '));
+
+    dots.forEach(dot => {
+        dot.classList.remove('hidden', 'is-synced', 'is-syncing', 'is-pending', 'is-error');
+        dot.classList.add(info.cls);
+        dot.title = label;
+        dot.setAttribute('aria-label', label.replace(/\n/g, ' · '));
+    });
 }
 
 export function setSyncStatus(status) {

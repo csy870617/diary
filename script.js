@@ -186,7 +186,9 @@ async function init() {
         }
     };
     // 동기화 상태 점을 누르면 지금 바로 동기화 (특히 빨간 점일 때 다시 시도용)
-    document.getElementById('sync-dot')?.addEventListener('click', () => {
+    // 점은 목록 화면과 글 쓰는 화면 양쪽에 있으므로 위임으로 한 번에 처리한다
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.sync-dot')) return;
         if (localStorage.getItem('is_faith_logged_in') !== 'true') return;
         syncFromDrive().catch(err => console.error('수동 동기화 실패:', err));
     });
