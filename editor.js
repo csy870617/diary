@@ -1655,14 +1655,26 @@ export function toggleViewMode(mode) {
     // 편집 모드에서 벗어날 때 보류 중인 자동 저장을 즉시 반영 (디바운스 중 모드 전환으로 인한 편집 유실 방지)
     const wasEditable = state.currentViewMode === 'default' || state.currentViewMode === 'book-edit';
     const willBeEditable = mode === 'default' || mode === 'book-edit';
-    if (wasEditable && !willBeEditable && autoSaveTimer) {
-        clearTimeout(autoSaveTimer);
-        autoSaveTimer = null;
-        // 즉시 로컬 저장 후, 대기 중인 클라우드 업로드도 바로 전송 (편집 종료 시점 → 다른 기기 반영 보장)
+    if (wasEditable && !willBeEditable) {
         // 편집 종료는 의도된 동작이므로 충돌 시 확인창 표시
-        saveEntry()
-            .then(() => { flushCloudSync(true); })
-            .catch(err => console.error('자동 저장 실패:', err));
+        if (autoSaveTimer) {
+            clearTimeout(autoSaveTimer);
+            autoSaveTimer = null;
+            // 자동저장 타이머를 취소하고 직접 저장하는 경로다.
+            // 업로드 예약(scheduleCloudSync)은 그 자동저장 안에서 일어나므로 아직 예약이 없고,
+            // flushCloudSync는 '이미 예약된 것'만 보내므로 이 경우 아무것도 올라가지 않는다.
+            // → 예약이 없으면 직접 올린다. (예전에는 여기서 마지막 편집이 기기에만 남았다)
+            saveEntry()
+                .then(() => {
+                    if (!flushCloudSync(true)) {
+                        saveToDrive(false, true).catch(err => console.error('편집 종료 동기화 실패:', err));
+                    }
+                })
+                .catch(err => console.error('자동 저장 실패:', err));
+        } else {
+            // 로컬 저장은 이미 끝났고 업로드만 대기 중일 수 있다 → 디바운스를 기다리지 않고 바로 전송
+            flushCloudSync(true);
+        }
     }
     state.currentViewMode = mode;
     hideTableTools(); // 모드가 바뀌면 표 도구 바는 닫는다 (읽기 모드에서 뜨지 않도록)
