@@ -25,6 +25,8 @@ let isRefreshing = false; // 토큰 갱신 중복 방지 뮤텍스
 let refreshPromise = null; // 진행 중인 갱신 Promise 공유용
 let lastResumeCheck = 0; // resume 이벤트 디바운스용
 let syncWarningTimer = null; // 동기화 경고 디바운스용
+let appFolderId = null; // 앱 폴더 id 캐시 (동기화마다 폴더를 다시 찾지 않도록)
+let lastUploadedSig = null; // 마지막으로 올린 내용의 서명 (같으면 업로드 생략)
 
 /* ── 동기화 상태 점 (헤더) ───────────────────────────────────────
    초록: 동기화 완료 / 주황: 진행 중이거나 아직 못 올린 변경이 있음 / 빨강: 실패.
@@ -463,6 +465,8 @@ export async function handleSignoutClick(callback) {
     localStorage.removeItem('faithSyncBase');
     syncBaseMap = {};
     dbFileId = null;
+    appFolderId = null;
+    lastUploadedSig = null;
     state.currentUser = null;
     state.entries = [];
     setSyncStatus('off');
@@ -590,14 +594,24 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
 
     let baseSnapshot = null; // 병합 전 동기화 기준점 백업 (업로드 실패 시 되돌리기용)
     const doSync = async () => {
-        const folderId = await ensureAppFolder();
-        const fileMeta = await findDBFileMeta(folderId);
+        let folderId = await ensureAppFolder();
+        let fileMeta;
+        try {
+            fileMeta = await findDBFileMeta(folderId);
+        } catch (lookupErr) {
+            // 캐시해 둔 폴더가 지워졌거나 접근할 수 없게 된 경우 → 캐시를 버리고 한 번 다시 찾는다
+            appFolderId = null;
+            folderId = await ensureAppFolder();
+            fileMeta = await findDBFileMeta(folderId);
+        }
         if (fileMeta) dbFileId = fileMeta.id;
 
         let cloudData = null;
         let cloudParseFailed = false;
+        let cloudChanged = false;   // 이번 실행에서 클라우드가 바뀌어 새로 읽었는가
         if (fileMeta) {
             if (!lastCloudModifiedTime || fileMeta.modifiedTime !== lastCloudModifiedTime) {
+                cloudChanged = true;
                 const response = await gapi.client.drive.files.get({ fileId: fileMeta.id, alt: 'media' });
                 try {
                     cloudData = typeof response.result === 'string' ? JSON.parse(response.result) : response.result;
@@ -718,7 +732,18 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
 
         // pullOnly(주기 폴링) 또는 충돌 시 '다른 기기 내용 불러오기'를 택한 경우 업로드 생략
         if (!skipUpload) {
-            const uploadRes = await uploadToDrive(folderId, fileMeta ? fileMeta.id : null);
+            // 올릴 내용이 지난번과 똑같으면 올리지 않는다.
+            // 사진이 본문에 들어 있어 파일이 수 MB~수십 MB인데, 예전에는 탭을 전환해
+            // 돌아올 때마다(변경이 없어도) 전부 다시 올렸다.
+            // 단, 다른 기기가 클라우드를 바꾼 경우에는 내용이 같아 보여도 반드시 올린다.
+            // (병합 결과가 내가 올렸던 것과 우연히 같아지면, 건너뛸 경우 클라우드에는
+            //  다른 기기의 옛 내용이 그대로 남는다)
+            const content = JSON.stringify(buildDbPayload());
+            const sig = payloadSignature(content);
+            if (!cloudChanged && sig === lastUploadedSig) return true;
+
+            const uploadRes = await uploadToDrive(folderId, fileMeta ? fileMeta.id : null, content);
+            lastUploadedSig = sig;
             if (uploadRes && uploadRes.result) {
                 lastCloudModifiedTime = uploadRes.result.modifiedTime;
                 if (uploadRes.result.id) dbFileId = uploadRes.result.id;
@@ -792,7 +817,7 @@ export async function syncFromDrive(pullOnly = false, promptOnConflict = false) 
 // 클라우드 업로드를 묶어서(디바운스) 보내기 위한 스케줄러.
 // 로컬 저장은 즉시 하되, Drive 업로드는 입력이 멈춘 뒤 한 번만 전송해 전체 파일 반복 업로드를 줄인다.
 let cloudSyncTimer = null;
-const CLOUD_SYNC_DELAY = 5000;
+const CLOUD_SYNC_DELAY = 2000;   // 입력이 멈춘 뒤 올리기까지 (짧을수록 다른 기기에 빨리 반영된다)
 
 export function scheduleCloudSync(delay = CLOUD_SYNC_DELAY) {
     if (localStorage.getItem('is_faith_logged_in') !== 'true') return;
@@ -858,13 +883,27 @@ function buildDbPayload() {
         purgedIds: state.purgedIds || {},
         folders: state.allFolders,
         folderOrder: state.folderOrder,
-        rootOrder: state.rootOrder,
-        lastSync: new Date().toISOString()
+        rootOrder: state.rootOrder
+        // lastSync(업로드 시각)는 여기 넣지 않는다. 매번 달라져서 '내용이 그대로인지'
+        // 판단할 수 없게 만들기 때문. 업로드 직전에 문자열 앞쪽에 끼워 넣는다.
     };
 }
 
-async function uploadToDrive(folderId, fileId) {
-    const fileContent = JSON.stringify(buildDbPayload());
+/**
+ * 올릴 내용의 서명. 지난번에 올린 것과 같으면 업로드를 통째로 건너뛴다.
+ * 사진이 본문에 들어 있어 파일이 수 MB~수십 MB까지 커지는데, 예전에는
+ * 바뀐 게 없어도(탭 전환·복귀마다) 전부 다시 올렸다.
+ * 15MB 기준 해시 계산은 80ms 정도로, 같은 양을 올리는 것보다 훨씬 싸다.
+ */
+function payloadSignature(str) {
+    let h = 5381;
+    for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+    return str.length + ':' + (h >>> 0).toString(36);
+}
+
+async function uploadToDrive(folderId, fileId, content) {
+    // 업로드 시각은 서명 계산이 끝난 뒤에 끼워 넣는다 (본문은 '{'로 시작하는 JSON)
+    const fileContent = '{"lastSync":' + JSON.stringify(new Date().toISOString()) + ',' + content.slice(1);
     const fileMetadata = { name: DB_FILE_NAME, mimeType: 'application/json' };
     if (!fileId) fileMetadata.parents = [folderId];
     const boundary = '-------faith_log_multipart_boundary';
@@ -1040,12 +1079,18 @@ function escapeDriveQuery(value) {
     return String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
+// 앱 폴더 id는 한 번 찾으면 바뀌지 않는다. 동기화마다 조회하면 왕복이 한 번 더 늘어난다.
 async function ensureAppFolder() {
+    if (appFolderId) return appFolderId;
     const q = `mimeType='application/vnd.google-apps.folder' and name='${escapeDriveQuery(APP_FOLDER_NAME)}' and trashed=false`;
     const response = await gapi.client.drive.files.list({ q, fields: 'files(id, name)' });
-    if (response.result.files.length > 0) return response.result.files[0].id;
+    if (response.result.files.length > 0) {
+        appFolderId = response.result.files[0].id;
+        return appFolderId;
+    }
     const res = await gapi.client.drive.files.create({ resource: { name: APP_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' }, fields: 'id' });
-    return res.result.id;
+    appFolderId = res.result.id;
+    return appFolderId;
 }
 
 async function findDBFileMeta(folderId) {
