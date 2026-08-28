@@ -73,10 +73,18 @@ export async function saveEntry() {
         state.entries.unshift(newEntry);
     } else {
         const old = state.entries[index];
+        // 실제로 바뀐 것이 없으면 수정 시각을 건드리지 않는다.
+        // 건드리면 (1) 올릴 내용이 달라져 쓸데없는 업로드가 생기고,
+        // (2) 다른 기기와 병합할 때 이 기기가 부당하게 '더 최신'으로 이겨
+        //     저쪽의 진짜 수정 내용을 밀어낼 수 있다.
+        if (old.title === title && old.subtitle === subtitle && old.body === body
+            && old.fontFamily === state.currentFontFamily && old.fontSize === state.currentFontSize) {
+            return;
+        }
         state.entries[index] = {
             ...old,
             title, subtitle, body,
-            modifiedAt: nowISO, 
+            modifiedAt: nowISO,
             fontFamily: state.currentFontFamily,
             fontSize: state.currentFontSize
         };
