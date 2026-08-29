@@ -23,9 +23,12 @@
     <link rel="preload" href="vendor/phosphor/Phosphor.woff2?v=1" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="vendor/phosphor/regular.css?v=1">
     <link rel="stylesheet" href="vendor/phosphor/fill.css?v=1">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <!-- 아이콘과 같은 이유로 이 세 가지도 저장소에 함께 둔다. CDN이 막히면
+         PDF 저장·ZIP 압축·드래그 정렬이 통째로 동작하지 않았다.
+         defer: 예전에는 이 1MB가 첫 화면을 그리기 전에 내려받힐 때까지 화면이 멈췄다. -->
+    <script defer src="vendor/lib/Sortable.min.js?v=1"></script>
+    <script defer src="vendor/lib/html2pdf.bundle.min.js?v=1"></script>
+    <script defer src="vendor/lib/jszip.min.js?v=1"></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://apis.google.com/js/api.js"></script>
 </head>
@@ -430,6 +433,6 @@
         </div>
     </div>
 
-    <script type="module" src="script.js?v=7.8"></script>
+    <script type="module" src="script.js?v=7.9"></script>
 </body>
 </html>
