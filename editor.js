@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import { saveEntry } from './data.js';
-import { saveToDrive, scheduleCloudSync, flushCloudSync } from './drive.js';
+import { syncNow, syncSoon } from './drive.js';
 import { openModal, hideTransientPopups } from './ui.js';
 import { setupLinkPreservation, autoLink, isSafeUrl } from './utils.js';
 
@@ -296,23 +296,51 @@ function saveInitialState() {
     }
 }
 
+// 지금 편집 중인 내용을 저장해도 되는 상황인가.
+// 에디터가 이미 닫힌 뒤(뒤로가기 등)에 뒤늦게 저장하면, 닫은 직후 삭제한 글이
+// 자동저장으로 되살아난다.
+function canSaveEditorNow() {
+    const editBody = document.getElementById('editor-body');
+    if (!editBody) return false;
+    if (state.currentViewMode !== 'default' && state.currentViewMode !== 'book-edit') return false;
+    const writeModal = document.getElementById('write-modal');
+    if (writeModal && writeModal.classList.contains('hidden')) return false;
+    return true;
+}
+
 export async function triggerAutoSave() {
     if (autoSaveTimer) clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(async () => {
         autoSaveTimer = null;
-        const editBody = document.getElementById('editor-body');
-        if (!editBody || (state.currentViewMode !== 'default' && state.currentViewMode !== 'book-edit')) return;
-        // 에디터가 이미 닫힌 뒤(뒤로가기 등)에는 뒤늦게 저장하지 않음
-        // (닫은 직후 삭제한 글이 자동저장으로 되살아나는 문제 방지)
-        const writeModal = document.getElementById('write-modal');
-        if (writeModal && writeModal.classList.contains('hidden')) return;
+        if (!canSaveEditorNow()) return;
         try {
             await saveEntry(); // 로컬에는 즉시 저장
-            if (window.gapi && gapi.client && gapi.client.getToken()) scheduleCloudSync(); // 클라우드 업로드는 묶어서 전송
+            if (window.gapi && gapi.client && gapi.client.getToken()) syncSoon(); // 클라우드 업로드는 묶어서 전송
         } catch (err) {
             console.error('자동 저장 실패:', err);
         }
     }, 2000);
+}
+
+/**
+ * 대기 중인 자동저장을 지금 반영한다. 탭을 전환하거나 닫기 직전에 부른다.
+ *
+ * 이걸 빼먹으면 그 순간 올라가는 내용에 '마지막에 친 글자'가 통째로 빠진다.
+ * 클라우드로 보내기 전에 반드시 로컬 저장을 먼저 비워야 한다는 뜻이다.
+ *
+ * saveEntry()는 async지만 본문에 await가 없어 state 반영은 동기적으로 끝난다.
+ * 그래서 탭이 닫히는 순간(pagehide)에도 반환을 기다리지 않고 곧바로
+ * 업로드를 시작할 수 있다.
+ */
+export function flushPendingEdit() {
+    if (!autoSaveTimer) return Promise.resolve(false);
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = null;
+    if (!canSaveEditorNow()) return Promise.resolve(false);
+    return saveEntry().then(() => true).catch(err => {
+        console.error('자동 저장 실패:', err);
+        return false;
+    });
 }
 
 /* --- 책 모드 관련 핸들러 --- */
@@ -1660,20 +1688,11 @@ export function toggleViewMode(mode) {
         if (autoSaveTimer) {
             clearTimeout(autoSaveTimer);
             autoSaveTimer = null;
-            // 자동저장 타이머를 취소하고 직접 저장하는 경로다.
-            // 업로드 예약(scheduleCloudSync)은 그 자동저장 안에서 일어나므로 아직 예약이 없고,
-            // flushCloudSync는 '이미 예약된 것'만 보내므로 이 경우 아무것도 올라가지 않는다.
-            // → 예약이 없으면 직접 올린다. (예전에는 여기서 마지막 편집이 기기에만 남았다)
             saveEntry()
-                .then(() => {
-                    if (!flushCloudSync(true)) {
-                        saveToDrive(false, true).catch(err => console.error('편집 종료 동기화 실패:', err));
-                    }
-                })
+                .then(() => syncNow(true))
                 .catch(err => console.error('자동 저장 실패:', err));
         } else {
-            // 로컬 저장은 이미 끝났고 업로드만 대기 중일 수 있다 → 디바운스를 기다리지 않고 바로 전송
-            flushCloudSync(true);
+            syncNow(true);
         }
     }
     state.currentViewMode = mode;

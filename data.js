@@ -1,7 +1,7 @@
 import { state, saveCategoriesToLocal } from './state.js';
 import { saveEntries, loadEntries } from './storage.js';
 import { renderEntries, renderTrash, renderFolders, renderTabs } from './ui.js';
-import { saveToDrive } from './drive.js';
+import { syncSoon } from './drive.js';
 import { getCleanBodyHtml } from './editor.js';
 
 // 같은 밀리초에 여러 번 호출돼도 충돌하지 않도록 임의 접미사를 붙인 ID 생성
@@ -99,7 +99,7 @@ export async function saveEntry() {
 
 export async function saveData() {
     safeLocalSave();
-    await saveToDrive();
+    syncSoon();
 }
 
 export async function updateEntryField(id, fields) {
@@ -110,7 +110,7 @@ export async function updateEntryField(id, fields) {
         safeLocalSave();
         renderEntries();
         renderTrash();
-        await saveToDrive();
+        syncSoon();
     }
 }
 
@@ -122,7 +122,7 @@ export async function moveToTrash(id) {
             entry.modifiedAt = new Date().toISOString();
             safeLocalSave();
             renderEntries();
-            await saveToDrive();
+            syncSoon();
         }
     }
 }
@@ -135,7 +135,7 @@ export async function restoreEntry(id) {
         safeLocalSave();
         renderTrash();
         renderEntries();
-        await saveToDrive();
+        syncSoon();
     }
 }
 
@@ -147,7 +147,7 @@ export async function permanentDelete(id) {
             state.entries[index].modifiedAt = new Date().toISOString();
             safeLocalSave();
             renderTrash();
-            await saveToDrive();
+            syncSoon();
         }
     }
 }
@@ -192,7 +192,7 @@ export async function emptyTrash() {
     }
     safeLocalSave();
     renderTrash(); renderFolders(); renderTabs(); renderEntries();
-    await saveToDrive();
+    syncSoon();
 }
 
 export async function checkOldTrash() {
@@ -234,7 +234,7 @@ export async function checkOldTrash() {
 
     if (metaChanged) { state.categoryUpdatedAt = now.toISOString(); saveCategoriesToLocal(); }
     if (entryChanged) safeLocalSave();
-    if (entryChanged || metaChanged) await saveToDrive();
+    if (entryChanged || metaChanged) syncSoon();
 }
 
 export async function bulkUpdateEntryField(ids, fields) {
@@ -252,7 +252,7 @@ export async function bulkUpdateEntryField(ids, fields) {
         safeLocalSave();
         renderEntries();
         renderTrash();
-        await saveToDrive();
+        syncSoon();
     }
 }
 
@@ -268,5 +268,5 @@ export async function duplicateEntry(id) {
     state.entries.unshift(newEntry);
     safeLocalSave();
     renderEntries();
-    await saveToDrive();
+    syncSoon();
 }
