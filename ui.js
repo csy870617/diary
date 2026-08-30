@@ -1,7 +1,7 @@
 import { state, saveCategoriesToLocal, getCategorySort, migrateRootOrder, isReadOnlyView } from './state.js';
 import { updateEntryField, bulkUpdateEntryField, emptyTrash, saveEntry, restoreEntry, permanentDelete } from './data.js';
 import { openEditor, toggleViewMode, applyFontStyle, turnPage, formatDoc, changeGlobalFontSize, insertSticker, insertImage, sanitizeEntryHtml } from './editor.js';
-import { saveToDrive, syncFromDrive } from './drive.js';
+import { syncNow, syncSoon } from './drive.js';
 import { saveEntries } from './storage.js'; 
 
 const getEl = (id) => document.getElementById(id);
@@ -93,7 +93,7 @@ export function renderEntries(keyword) {
                 const writeModal = getEl('write-modal');
                 const isEditingOpen = writeModal && !writeModal.classList.contains('hidden') && !isReadOnlyView();
                 if (!isEditingOpen && window.gapi && gapi.client && gapi.client.getToken()) {
-                    syncFromDrive();
+                    syncNow();
                 }
             };
         }
@@ -350,7 +350,7 @@ function initFolderRowSortable(row) {
             state.rootOrder = newOrder;
             state.categoryUpdatedAt = new Date().toISOString();
             saveCategoriesToLocal();
-            await saveToDrive();
+            syncSoon();
         }
     });
 }
@@ -523,7 +523,7 @@ function renderFolderPopupContent() {
         saveCategoriesToLocal();
         renderFolderPopupContent();
         renderFolders();
-        saveToDrive();
+        syncSoon();
     };
     list.appendChild(addTopic);
 
@@ -541,7 +541,7 @@ function renderFolderPopupContent() {
         saveCategoriesToLocal();
         renderFolderPopupContent();
         renderFolders();
-        saveToDrive();
+        syncSoon();
     };
     list.appendChild(addFolder);
 
@@ -587,7 +587,7 @@ function initPopupSortable(list) {
 
             state.categoryUpdatedAt = new Date().toISOString();
             saveCategoriesToLocal();
-            await saveToDrive();
+            syncSoon();
         }
     });
 }
@@ -644,7 +644,7 @@ function addRootTopic() {
     state.categoryOrder.push(id);
     (state.rootOrder = state.rootOrder || []).push(id);
     state.categoryUpdatedAt = new Date().toISOString();
-    saveCategoriesToLocal(); renderFolders(); saveToDrive();
+    saveCategoriesToLocal(); renderFolders(); syncSoon();
 }
 
 function addRootFolder() {
@@ -655,7 +655,7 @@ function addRootFolder() {
     state.folderOrder.push(id);
     (state.rootOrder = state.rootOrder || []).push(id);
     state.categoryUpdatedAt = new Date().toISOString();
-    saveCategoriesToLocal(); renderFolders(); saveToDrive();
+    saveCategoriesToLocal(); renderFolders(); syncSoon();
 }
 
 export function addSubfolderAction() {
@@ -671,7 +671,7 @@ export function addSubfolderAction() {
     saveCategoriesToLocal();
     if (popupFolderId) renderFolderPopupContent();
     renderFolders();
-    saveToDrive();
+    syncSoon();
 }
 
 function attachFolderContextMenu(element, folderId) {
@@ -712,7 +712,7 @@ export function renameFolderAction() {
     if (newName && newName.trim()) {
         folder.name = newName.trim();
         state.categoryUpdatedAt = new Date().toISOString();
-        saveCategoriesToLocal(); renderFolders(); saveToDrive();
+        saveCategoriesToLocal(); renderFolders(); syncSoon();
     }
 }
 
@@ -759,7 +759,7 @@ export function deleteFolderAction() {
             if (next) { state.currentCategory = next.id; applyCategorySort(); }
         }
         state.categoryUpdatedAt = now;
-        saveCategoriesToLocal(); renderFolders(); renderTabs(); renderEntries(); saveToDrive();
+        saveCategoriesToLocal(); renderFolders(); renderTabs(); renderEntries(); syncSoon();
     }
 }
 
@@ -785,7 +785,7 @@ export function restoreFolder(id) {
         parentId = parent.parentFolderId;
     }
     state.categoryUpdatedAt = new Date().toISOString();
-    saveCategoriesToLocal(); renderTrash(); renderFolders(); renderTabs(); renderEntries(); saveToDrive();
+    saveCategoriesToLocal(); renderTrash(); renderFolders(); renderTabs(); renderEntries(); syncSoon();
 }
 
 export function permanentDeleteFolder(id) {
@@ -801,7 +801,7 @@ export function permanentDeleteFolder(id) {
     if (!state.purgedIds) state.purgedIds = {};
     state.purgedIds[id] = new Date().toISOString();
     state.categoryUpdatedAt = new Date().toISOString();
-    saveCategoriesToLocal(); renderTrash(); renderFolders(); renderTabs(); renderEntries(); saveToDrive();
+    saveCategoriesToLocal(); renderTrash(); renderFolders(); renderTabs(); renderEntries(); syncSoon();
 }
 
 function renderFolderAssignList() {
@@ -820,7 +820,7 @@ function renderFolderAssignList() {
             state.rootOrder = state.rootOrder || [];
             if (!state.rootOrder.includes(cat.id)) state.rootOrder.push(cat.id);
             state.categoryUpdatedAt = new Date().toISOString();
-            saveCategoriesToLocal(); renderFolders(); saveToDrive();
+            saveCategoriesToLocal(); renderFolders(); syncSoon();
         }
         modal.classList.add('hidden');
     };
@@ -842,7 +842,7 @@ function renderFolderAssignList() {
                     cat.folderId = folder.id;
                     state.rootOrder = (state.rootOrder || []).filter(id => id !== cat.id);
                     state.categoryUpdatedAt = new Date().toISOString();
-                    saveCategoriesToLocal(); renderFolders(); saveToDrive();
+                    saveCategoriesToLocal(); renderFolders(); syncSoon();
                 }
                 modal.classList.add('hidden');
             };
@@ -878,7 +878,7 @@ export function createFolderFromAssignModal() {
 
     saveCategoriesToLocal();
     renderFolders();
-    saveToDrive();
+    syncSoon();
 
     const modal = getEl('folder-assign-modal');
     if (modal) modal.classList.add('hidden');
@@ -892,7 +892,7 @@ export function addNewCategory() {
         state.categoryOrder.push(id);
         (state.rootOrder = state.rootOrder || []).push(id);
         state.categoryUpdatedAt = new Date().toISOString();
-        saveCategoriesToLocal(); renderFolders(); saveToDrive();
+        saveCategoriesToLocal(); renderFolders(); syncSoon();
     }
 }
 
@@ -904,7 +904,7 @@ export function renameCategoryAction() {
     if (newName && newName.trim() !== "") {
         cat.name = newName.trim();
         state.categoryUpdatedAt = new Date().toISOString();
-        saveCategoriesToLocal(); renderTabs(); saveToDrive(); 
+        saveCategoriesToLocal(); renderTabs(); syncSoon(); 
     }
 }
 
@@ -923,7 +923,7 @@ export function deleteCategoryAction() {
             if (next) { state.currentCategory = next.id; applyCategorySort(); }
         }
         state.categoryUpdatedAt = now;
-        saveCategoriesToLocal(); renderFolders(); renderTabs(); renderEntries(); saveToDrive();
+        saveCategoriesToLocal(); renderFolders(); renderTabs(); renderEntries(); syncSoon();
     }
 }
 
@@ -940,7 +940,7 @@ export function restoreCategory(id) {
         parentId = parent.parentFolderId;
     }
     state.categoryUpdatedAt = new Date().toISOString();
-    saveCategoriesToLocal(); renderTrash(); renderFolders(); renderTabs(); renderEntries(); saveToDrive();
+    saveCategoriesToLocal(); renderTrash(); renderFolders(); renderTabs(); renderEntries(); syncSoon();
 }
 
 export function permanentDeleteCategory(id) {
@@ -963,7 +963,7 @@ export function permanentDeleteCategory(id) {
     }).catch(e => console.error(e));
     if (state.currentCategory === id) { state.currentCategory = newCatId; applyCategorySort(); }
     state.categoryUpdatedAt = new Date().toISOString();
-    saveCategoriesToLocal(); renderTrash(); renderFolders(); renderTabs(); renderEntries(); saveToDrive();
+    saveCategoriesToLocal(); renderTrash(); renderFolders(); renderTabs(); renderEntries(); syncSoon();
 }
 
 export async function renameEntryAction() {

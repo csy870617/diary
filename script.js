@@ -1,9 +1,9 @@
 import { state, loadCategoriesFromLocal, saveCategoriesToLocal, isReadOnlyView, loadCategorySortsFromLocal, setCategorySort } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
 import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, renameFolderAction, deleteFolderAction, openFolderAssignModal, createFolderFromAssignModal, addSubfolderAction, closeFolderPopup, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort, bulkDownloadPdf, downloadEntryPdf } from './ui.js';
-import { openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize, getCleanBodyHtml, addRowAbove, addRowBelow, addColumnLeft, addColumnRight, deleteTable, hideTableTools, updateTableTools, setTableWidth, toggleTableEditSection, repositionTableTools } from './editor.js';
+import { flushPendingEdit, openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize, getCleanBodyHtml, addRowAbove, addRowBelow, addColumnLeft, addColumnRight, deleteTable, hideTableTools, updateTableTools, setTableWidth, toggleTableEditSection, repositionTableTools } from './editor.js';
 import { setupAuthListeners } from './auth.js';
-import { initGoogleDrive, handleAuthClick, saveToDrive, syncFromDrive, flushCloudSync, flushCloudSyncBeacon, ensureTokenOnResume, startKeepAlive, setSyncStatus } from './drive.js';
+import { initGoogleDrive, handleAuthClick, syncNow, syncSoon, pullFromDrive, flushCloudSyncBeacon, ensureTokenOnResume, startKeepAlive, setSyncStatus } from './drive.js';
 import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, setTTSStart, setTTSEnd, resetTTSRange, playSelection, updateSpeedDisplay, updatePitchDisplay, updateGapDisplay, initTTS, updateTTSRange, seekTTSByPercent, saveTTSVoice } from './tts.js';
 import { initFaithsSSO } from './faiths-sso.js';
 import { flushEntries } from './storage.js';
@@ -134,7 +134,7 @@ async function init() {
                         try {
                             const valid = await ensureTokenOnResume();
                             // 주기 폴링은 다른 기기 변경분만 받아오는 pull 전용 (불필요한 전체 재업로드 방지)
-                            if (valid) await syncFromDrive(true).catch(err => console.error('주기 동기화 실패:', err));
+                            if (valid) await pullFromDrive().catch(err => console.error('주기 동기화 실패:', err));
                         } finally {
                             window.periodicSyncBusy = false;
                         }
@@ -184,7 +184,7 @@ async function init() {
         if (isReadOnlyView()) return; // 읽기 전용/책 모드에서는 자동 동기화 안 함
         if (localStorage.getItem('is_faith_logged_in') === 'true') {
             const valid = await ensureTokenOnResume();
-            if (valid) syncFromDrive().catch(err => console.error('복귀 동기화 실패:', err));
+            if (valid) syncNow().catch(err => console.error('복귀 동기화 실패:', err));
         }
     };
     // 동기화 상태 점을 누르면 지금 바로 동기화 (특히 빨간 점일 때 다시 시도용)
@@ -192,21 +192,24 @@ async function init() {
     document.addEventListener('click', (e) => {
         if (!e.target.closest('.sync-dot')) return;
         if (localStorage.getItem('is_faith_logged_in') !== 'true') return;
-        syncFromDrive().catch(err => console.error('수동 동기화 실패:', err));
+        syncNow().catch(err => console.error('수동 동기화 실패:', err));
     });
 
     window.addEventListener('focus', handleResume);
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') handleResume();
         // 백그라운드로 전환되기 직전, 대기 중인 클라우드 업로드를 즉시 전송 → 다른 기기에서 최신 상태 확인 가능
-        else flushCloudSync();
+        // 탭이 가려지기 직전 — 편집 중이던 내용을 먼저 저장한 뒤 올린다
+        else flushPendingEdit().then(() => syncNow());
     });
     window.addEventListener('online', handleResume);
     // 탭/창을 닫거나 떠날 때도 미전송 변경분을 즉시 업로드 (모바일에서 신뢰성 높음)
     // keepalive 전송(언로드 후에도 완료 보장)을 우선 시도하고, 조건이 안 되면 기존 방식으로 폴백
     window.addEventListener('pagehide', () => {
+        // 편집 중이던 내용을 먼저 state에 반영해야 그 내용이 올라간다 (동기적으로 끝난다)
+        flushPendingEdit();
         flushEntries().catch(() => {}); // 아직 기록되지 않은 로컬 저장분을 마무리
-        if (!flushCloudSyncBeacon()) flushCloudSync();
+        if (!flushCloudSyncBeacon()) syncNow();
     });
 
     // 사용자 활동 감지 → 토큰 만료 임박 시 자동 갱신 (페이지 활성 상태에서 로그아웃 방지)
@@ -287,7 +290,7 @@ function setupListeners() {
                 if (newOrder.length === 0) return;
                 state.rootOrder = newOrder;
                 state.categoryUpdatedAt = new Date().toISOString();
-                saveCategoriesToLocal(); await saveToDrive();
+                saveCategoriesToLocal(); syncSoon();
             }
         });
     }
@@ -305,7 +308,7 @@ function setupListeners() {
         closeAllModals(false); // 목록으로 즉시 나가기
         // Drive 동기화는 백그라운드로 (UI 지연 방지)
         if (wasEditing && navigator.onLine && window.gapi?.client?.getToken()) {
-            saveToDrive().catch(err => console.error('동기화 실패:', err));
+            syncSoon();
         }
         if (window.location.search.includes('share')) {
             window.history.replaceState({}, document.title, window.location.pathname);
@@ -653,7 +656,7 @@ function setupUIListeners() {
         closeAllModals(true); // 목록으로 즉시 나가기
         // Drive 동기화는 백그라운드로 (UI 지연 방지)
         if (!state.isShareView && navigator.onLine && window.gapi?.client?.getToken()) {
-            saveToDrive().catch(err => console.error('동기화 실패:', err));
+            syncSoon();
         }
         if (window.location.search.includes('share')) {
             window.history.replaceState({}, document.title, window.location.pathname);

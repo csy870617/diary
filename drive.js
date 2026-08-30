@@ -536,7 +536,7 @@ async function checkAuthAndSync(callback, onReady) {
     // 로그인 성공으로 UI 업데이트 (동기화 실패와 무관하게)
     if(callback) callback(true);
     try {
-        await syncFromDrive();
+        await syncNow();
     } catch (syncErr) {
         console.error("초기 동기화 실패:", syncErr);
     }
@@ -558,7 +558,11 @@ function toggleSpinners(active) {
 
 // 반환값: 동기화가 실제로 완료되면 true, 실패/건너뜀이면 false
 // (로그아웃 전 마지막 동기화처럼 성공 여부 확인이 필요한 호출부에서 사용)
-export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
+/**
+ * 실제 동기화 한 번. 이 모듈 밖에서는 직접 부르지 않는다.
+ * 밖에서는 syncNow() / syncSoon() / pullFromDrive() 세 가지만 쓴다.
+ */
+async function saveToDrive(pullOnly = false, promptOnConflict = false) {
     if (localStorage.getItem('is_faith_logged_in') !== 'true') { setSyncStatus('off'); return false; }
     if (isSyncing) { if (!pullOnly) pendingSync = true; return false; }
 
@@ -812,32 +816,44 @@ export async function saveToDrive(pullOnly = false, promptOnConflict = false) {
     return syncOk;
 }
 
-export async function syncFromDrive(pullOnly = false, promptOnConflict = false) { await saveToDrive(pullOnly, promptOnConflict); }
+// 받아오기 전용 — 다른 기기의 변경만 가져오고 올리지는 않는다 (주기 폴링용).
+// 예전 이름(syncFromDrive)은 인자에 따라 올리기도 해서 호출부마다 의미가 달랐다.
+export async function pullFromDrive() { await saveToDrive(true, false); }
 
-// 클라우드 업로드를 묶어서(디바운스) 보내기 위한 스케줄러.
-// 로컬 저장은 즉시 하되, Drive 업로드는 입력이 멈춘 뒤 한 번만 전송해 전체 파일 반복 업로드를 줄인다.
+/* ── 클라우드로 보내는 유일한 입구 ──────────────────────────────────
+ *
+ *   syncSoon() : 잠시 뒤에 보낸다. 연달아 부르면 마지막 한 번으로 합쳐진다.
+ *   syncNow()  : 지금 보낸다. 대기 중인 예약이 있으면 함께 태워 보낸다.
+ *
+ * 예전에는 '예약하기'와 '예약된 것 보내기'가 나뉘어 있었고, 후자는 예약이
+ * 없으면 아무것도 하지 않았다. 그래서 '로컬 저장 → 업로드 예약 → 전송'
+ * 세 단계 중 하나만 어긋나면 마지막 편집이 조용히 이 기기에만 남았다.
+ * 실제로 편집 종료·탭 전환·탭 닫기에서 같은 이유로 세 번 문제가 났다.
+ *
+ * 그래서 syncNow는 '예약이 있든 없든 무조건 올린다'로 바꿨다.
+ * 올릴 게 없을 때의 낭비는 doSync 안의 내용 서명 비교가 막아 준다.
+ */
 let cloudSyncTimer = null;
 const CLOUD_SYNC_DELAY = 2000;   // 입력이 멈춘 뒤 올리기까지 (짧을수록 다른 기기에 빨리 반영된다)
 
-export function scheduleCloudSync(delay = CLOUD_SYNC_DELAY) {
+export function syncNow(promptOnConflict = false) {
+    if (cloudSyncTimer) { clearTimeout(cloudSyncTimer); cloudSyncTimer = null; }
+    if (localStorage.getItem('is_faith_logged_in') !== 'true') return Promise.resolve(false);
+    return saveToDrive(false, promptOnConflict).catch(err => {
+        console.error('동기화 실패:', err);
+        return false;
+    });
+}
+
+export function syncSoon(delay = CLOUD_SYNC_DELAY) {
     if (localStorage.getItem('is_faith_logged_in') !== 'true') return;
     setSyncStatus('pending');
     if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
     cloudSyncTimer = setTimeout(() => {
         cloudSyncTimer = null;
-        // 자동저장 업로드는 충돌 시 묻지 않고 보류 (다음 명시적 저장에서 확인)
-        saveToDrive(false, false).catch(err => console.error('자동 동기화 실패:', err));
+        // 자동 업로드는 충돌 시 묻지 않고 보류 (다음 명시적 저장에서 확인)
+        syncNow(false);
     }, delay);
-}
-
-// 대기 중인 클라우드 업로드를 즉시 전송 (탭이 백그라운드로 가거나 닫히기 직전 호출 → 다른 기기 동기화 보장)
-// promptOnConflict: 명시적 동작(편집 종료 등)에서만 충돌 확인창을 띄움. 언로드/백그라운드 flush는 false.
-export function flushCloudSync(promptOnConflict = false) {
-    if (!cloudSyncTimer) return null;
-    clearTimeout(cloudSyncTimer);
-    cloudSyncTimer = null;
-    if (localStorage.getItem('is_faith_logged_in') !== 'true') return null;
-    return saveToDrive(false, promptOnConflict).catch(err => console.error('동기화 실패:', err));
 }
 
 // 페이지를 떠나는 순간(pagehide) 대기 중인 업로드를 keepalive fetch로 전송.
@@ -846,13 +862,16 @@ export function flushCloudSync(promptOnConflict = false) {
 // 전송했으면 true, 조건이 안 되면(변경 없음/파일 id 미확인/본문이 keepalive 한도 64KB 초과) false를
 // 반환해 호출부가 기존 flushCloudSync로 폴백하게 한다.
 export function flushCloudSyncBeacon() {
-    if (!cloudSyncTimer) return false; // 보낼 변경 없음
     if (localStorage.getItem('is_faith_logged_in') !== 'true') return false;
     if (!dbFileId) return false; // 첫 동기화 전이라 파일 id를 모름
     const token = (typeof gapi !== 'undefined' && gapi.client?.getToken?.()?.access_token)
         || localStorage.getItem('faith_token');
     if (!token) return false;
-    const body = JSON.stringify(buildDbPayload());
+    // 보낼 것이 있는지는 예약 타이머가 아니라 '내용'으로 판단한다.
+    // (예약이 걸리기 전에 탭이 닫히면 마지막 편집이 통째로 누락됐다)
+    const content = JSON.stringify(buildDbPayload());
+    if (payloadSignature(content) === lastUploadedSig) return true; // 이미 다 올라가 있음
+    const body = '{"lastSync":' + JSON.stringify(new Date().toISOString()) + ',' + content.slice(1);
     // keepalive 본문 한도는 64KiB '바이트'다. 한글은 글자당 3바이트라 글자 수로 재면 한참 넘겨서
     // 전송이 조용히 거부된다. 실제 바이트로 재고 여유도 둔다.
     if (new Blob([body]).size > 60 * 1024) return false; // 한도 초과 → 일반 flush에 맡김
@@ -866,8 +885,7 @@ export function flushCloudSyncBeacon() {
     } catch (e) {
         return false; // 전송 시작 실패 → 폴백
     }
-    clearTimeout(cloudSyncTimer);
-    cloudSyncTimer = null;
+    if (cloudSyncTimer) { clearTimeout(cloudSyncTimer); cloudSyncTimer = null; }
     // 병합 없이 올렸으므로 다음 동기화에서 클라우드를 반드시 다시 읽도록 캐시 무효화
     lastCloudModifiedTime = null;
     return true;
