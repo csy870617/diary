@@ -838,6 +838,29 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
         return null;
     }
 
+    /**
+     * 클립보드에 '읽을 글'이 들어 있는가.
+     *
+     * 그림만 복사한 경우(화면 캡처, 웹페이지에서 이미지 복사)와
+     * 글을 복사한 경우(워드·엑셀·한글·브라우저)를 가르는 기준이다.
+     * 웹에서 이미지를 복사하면 text/html이 <img> 하나뿐이고 글자가 없으므로
+     * 태그를 걷어낸 '실제 글자'로 판단한다.
+     */
+    function clipboardHasText(clipboardData) {
+        if (!clipboardData) return false;
+        if ((clipboardData.getData('text/plain') || '').trim()) return true;
+        const html = clipboardData.getData('text/html') || '';
+        if (!html) return false;
+        try {
+            const doc = new DOMParser().parseFromString(html, 'text/html');
+            // 표는 칸이 비어 있어도 '글'로 본다 (빈 표를 그림으로 바꾸지 않도록)
+            if (doc.querySelector('table')) return true;
+            return !!(doc.body.textContent || '').trim();
+        } catch (err) {
+            return false;
+        }
+    }
+
     // ========== 붙여넣기 이벤트 ==========
     editorElement.addEventListener('paste', (e) => {
         const selectedCells = document.querySelectorAll('td.selected-cell');
@@ -891,7 +914,12 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
         e.preventDefault();
         if (callbacks.onBeforePaste) callbacks.onBeforePaste();
 
-        getPastedImageDataUrl(e.clipboardData).then((imageDataUrl) => {
+        // 워드·엑셀·한글에서 복사하면 클립보드에 '글'과 '그 선택 영역을 찍은 그림'이
+        // 함께 담긴다. 그림을 먼저 보면 글이 통째로 그림이 되어(자르기 창까지 뜬다)
+        // 원문이 사라진다. 그래서 글이 함께 들어 있으면 글로 취급한다.
+        const pasteAsImage = !clipboardHasText(e.clipboardData);
+
+        (pasteAsImage ? getPastedImageDataUrl(e.clipboardData) : Promise.resolve(null)).then((imageDataUrl) => {
             if (imageDataUrl) {
                 if (callbacks.onPasteImage) {
                     callbacks.onPasteImage(imageDataUrl);
