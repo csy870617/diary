@@ -31,6 +31,10 @@ let isSelectingCells = false;
 let mobileLongPressTimer = null;
 
 let isColDragging = false;
+let resizeCols = [];        // 끌기 시작할 때 폭을 고정해 둔 첫 행의 칸들
+let resizeHeadCell = null;  // 끄는 선의 왼쪽 열 (첫 행 기준)
+let resizeNextCell = null;  // 끄는 선의 오른쪽 열
+let startNextW = 0;
 let isRowDragging = false;
 let resizeTargetTd = null;
 let startX, startY, startW, startH;
@@ -1111,15 +1115,27 @@ function setupBasicHandling() {
         const td = e.target.closest('td');
         if (td) {
             if (td.style.cursor === 'col-resize') {
+                const table = td.closest('table');
+                const headCell = (table && table.rows[0]) ? table.rows[0].cells[td.cellIndex] : null;
+                if (!headCell) return;
                 saveBeforeChange('resize');
                 isColDragging = true;
                 resizeTargetTd = td;
                 startX = e.clientX;
-                // table-layout: fixed에서는 첫 번째 행 셀의 너비가 열 너비를 결정
-                const table = td.closest('table');
-                const colIdx = td.cellIndex;
-                const firstRowCell = (table && table.rows[0]) ? table.rows[0].cells[colIdx] : td;
-                startW = firstRowCell ? firstRowCell.offsetWidth : td.offsetWidth;
+
+                // 폭이 정해진 표에서 한 열만 크기를 주면, 나머지 열들은 폭이 지정돼
+                // 있지 않아 브라우저가 남은 공간을 자기들끼리 다시 나눠 가진다.
+                // 그래서 선 하나를 끌면 다른 선들까지 따라 움직였다.
+                // → 끌기 시작할 때 모든 열의 지금 폭을 그대로 못박아 둔다.
+                resizeCols = Array.from(table.rows[0].cells);
+                resizeCols.forEach(cell => { cell.style.width = cell.offsetWidth + 'px'; });
+
+                // 끄는 선은 '이 열과 다음 열의 경계'다. 한쪽이 늘면 다른 쪽이 줄어
+                // 표 전체 폭과 나머지 선들은 그대로 유지된다.
+                resizeHeadCell = headCell;
+                resizeNextCell = resizeCols[resizeCols.indexOf(headCell) + 1] || null;
+                startW = headCell.offsetWidth;
+                startNextW = resizeNextCell ? resizeNextCell.offsetWidth : 0;
                 e.preventDefault();
                 return;
             }
@@ -1141,18 +1157,18 @@ function setupBasicHandling() {
     editorBody.ontouchend = () => { clearTimeout(mobileLongPressTimer); isSelectingCells = false; };
 
     window.addEventListener('mousemove', (e) => {
-        if (isColDragging && resizeTargetTd) {
-            const newWidth = startW + (e.clientX - startX);
-            if (newWidth > 30) {
-                const table = resizeTargetTd.closest('table');
-                const colIdx = resizeTargetTd.cellIndex;
-                // table-layout: fixed에서 첫 번째 행 셀의 width가 열 전체 너비를 결정
-                if (table && table.rows[0] && table.rows[0].cells[colIdx]) {
-                    table.rows[0].cells[colIdx].style.width = newWidth + 'px';
-                }
-                resizeTargetTd.style.width = newWidth + 'px';
-                updateSelectionBox();
-            }
+        if (isColDragging && resizeHeadCell) {
+            // CSS의 td { min-width: 80px } 보다 좁게 주면 브라우저가 무시해
+            // 계산이 어긋나므로, 양쪽 모두 그 아래로는 내려가지 않게 막는다
+            const MIN_COL = 80;
+            let delta = e.clientX - startX;
+            if (startW + delta < MIN_COL) delta = MIN_COL - startW;
+            if (resizeNextCell && startNextW - delta < MIN_COL) delta = startNextW - MIN_COL;
+
+            resizeHeadCell.style.width = (startW + delta) + 'px';
+            // 마지막 열에는 오른쪽에 이웃이 없으므로 표가 그만큼 넓어진다
+            if (resizeNextCell) resizeNextCell.style.width = (startNextW - delta) + 'px';
+            updateSelectionBox();
         }
         else if (isRowDragging && resizeTargetTd) {
             const newHeight = startH + (e.clientY - startY);
@@ -1173,7 +1189,7 @@ function setupBasicHandling() {
         }
     });
 
-    window.addEventListener('mouseup', () => { if (isColDragging || isRowDragging) { triggerAutoSave(); } isColDragging = false; isRowDragging = false; resizeTargetTd = null; isSelectingCells = false; document.querySelectorAll('table.selecting-cells').forEach(t => t.classList.remove('selecting-cells')); });
+    window.addEventListener('mouseup', () => { if (isColDragging || isRowDragging) { triggerAutoSave(); } isColDragging = false; isRowDragging = false; resizeTargetTd = null; resizeHeadCell = null; resizeNextCell = null; resizeCols = []; isSelectingCells = false; document.querySelectorAll('table.selecting-cells').forEach(t => t.classList.remove('selecting-cells')); });
 
     editorBody.onclick = (e) => {
         if (!editorBody.isContentEditable) return;
