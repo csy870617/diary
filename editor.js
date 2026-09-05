@@ -2735,6 +2735,51 @@ export function setTableWidth(pct) {
 }
 
 /**
+ * 칸 폭을 모두 같게 맞춘다.
+ * 퍼센트로 넣어 두므로 나중에 표 폭을 25%·50%로 바꿔도 균등이 그대로 유지된다.
+ * 합쳐진 칸은 걸친 칸 수만큼 넓게 잡는다.
+ */
+export function equalizeColumns() {
+    const t = activeTableCell(); if (!t) return;
+    const table = t.table;
+    const { colCount } = buildTableGrid(table);
+    const head = table.rows[0];
+    if (!colCount || !head) return;
+    saveBeforeChange('tableEdit');
+    // 선을 끌어서 잡아 둔 고정 폭을 먼저 걷어낸다 (남아 있으면 퍼센트가 먹지 않는다)
+    table.querySelectorAll('td, th').forEach(cell => { cell.style.width = ''; });
+    Array.from(head.cells).forEach(cell => {
+        const span = Math.max(1, cell.colSpan || 1);
+        cell.style.width = (Math.round(span / colCount * 10000) / 100) + '%';
+    });
+    updateSelectionBox();
+    updateTableTools();
+    triggerAutoSave();
+}
+
+/**
+ * 줄 높이를 모두 같게 맞춘다.
+ * 글이 많은 줄이 눌리지 않도록, 지금 가장 높은 줄에 맞춘다.
+ */
+export function equalizeRows() {
+    const t = activeTableCell(); if (!t) return;
+    const table = t.table;
+    const rows = Array.from(table.rows);
+    if (!rows.length) return;
+    saveBeforeChange('tableEdit');
+    // 먼저 지정된 높이를 걷어내고 글에 맞는 본래 높이를 잰다
+    rows.forEach(tr => {
+        tr.style.height = '';
+        Array.from(tr.cells).forEach(cell => { cell.style.height = ''; });
+    });
+    const tallest = Math.max(...rows.map(tr => tr.offsetHeight));
+    if (tallest > 0) rows.forEach(tr => { tr.style.height = tallest + 'px'; });
+    updateSelectionBox();
+    updateTableTools();
+    triggerAutoSave();
+}
+
+/**
  * 고른 칸들의 합계·평균 등을 계산해 결과 칸에 넣는다.
  * 세로로 골랐으면 바로 아래 칸, 가로로 골랐으면 바로 오른쪽 칸에 넣는다.
  * 그 자리가 표 밖이면 줄이나 칸을 하나 새로 만든다.
