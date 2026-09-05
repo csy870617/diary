@@ -128,8 +128,10 @@ export function sanitizeExternalHtml(html) {
         'a': ['href', 'target', 'title'],
         'img': ['src', 'alt', 'width', 'height'],
         'font': ['color', 'size', 'face'],
-        'td': ['colspan', 'rowspan', 'align', 'valign'],
-        'th': ['colspan', 'rowspan', 'align', 'valign'],
+        // data-formula: 표 계산식. 값을 읽어 계산에만 쓰고 HTML로 넣지 않으므로 안전하다.
+        // 허용하지 않으면 다른 기기에서 받아올 때 계산식이 지워진다.
+        'td': ['colspan', 'rowspan', 'align', 'valign', 'data-formula'],
+        'th': ['colspan', 'rowspan', 'align', 'valign', 'data-formula'],
         'ol': ['start', 'type'],
         'li': ['value']
     };

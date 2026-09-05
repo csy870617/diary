@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <meta name="referrer" content="origin"> 
     <title>신앙일지 | Faith Log</title>
-    <link rel="stylesheet" href="style.css?v=5.0">
+    <link rel="stylesheet" href="style.css?v=5.1">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
     <script>
         // 페이지 로드 전 다크모드 적용 (깜빡임 방지)
@@ -317,6 +317,18 @@
             <button id="tt-toggle-edit" class="tt-btn tt-toggle" aria-expanded="false">표 편집</button>
             <button id="tt-table-del" class="tt-btn danger" title="표 전체 삭제"><i class="ph ph-trash"></i>삭제</button>
         </div>
+        <div id="table-tools-formula" class="table-tools-formula hidden">
+            <span id="tt-formula-text" class="tt-formula-text"></span>
+            <button id="tt-formula-clear" class="tt-btn" title="계산식을 빼고 지금 값만 남깁니다">식 지우기</button>
+        </div>
+        <div class="table-tools-row">
+            <span class="table-tools-label">계산</span>
+            <button class="tt-btn tt-fn" data-fn="SUM">합계</button>
+            <button class="tt-btn tt-fn" data-fn="AVERAGE">평균</button>
+            <button class="tt-btn tt-fn" data-fn="COUNT">개수</button>
+            <button class="tt-btn tt-fn" data-fn="MAX">최대</button>
+            <button class="tt-btn tt-fn" data-fn="MIN">최소</button>
+        </div>
         <div id="table-tools-edit" class="table-tools-edit hidden">
             <div class="table-tools-row">
                 <span class="table-tools-label">줄</span>
@@ -433,6 +445,6 @@
         </div>
     </div>
 
-    <script type="module" src="script.js?v=8.2"></script>
+    <script type="module" src="script.js?v=8.3"></script>
 </body>
 </html>
