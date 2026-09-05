@@ -28,6 +28,7 @@ let lastBookTouchTime = 0;  // 마지막 책 모드 터치 시각 (터치로 발
 let wheelLockTimer = null;    
 
 let selectionStartCell = null;
+let modifierCellPick = false;   // Shift·Ctrl(⌘) 클릭으로 칸을 골랐는가
 let isSelectingCells = false;
 let mobileLongPressTimer = null;
 
@@ -953,9 +954,36 @@ function selectCellRange(startTd, endTd) {
     });
 }
 
-function clearCellSelection() { 
-    document.querySelectorAll('td.selected-cell').forEach(td => td.classList.remove('selected-cell')); 
+function clearCellSelection() {
+    document.querySelectorAll('td.selected-cell').forEach(td => td.classList.remove('selected-cell'));
     document.querySelectorAll('table.selecting-cells').forEach(t => t.classList.remove('selecting-cells'));
+}
+
+/**
+ * 이미 고른 칸은 그대로 두고 이 칸 하나만 넣거나 뺀다 (Ctrl·⌘ 클릭).
+ * 떨어져 있는 칸들을 골라 =SUM(B1, B4, B7) 처럼 계산할 수 있다.
+ */
+function toggleCellSelection(td) {
+    const table = td.closest('table');
+    if (!table) return;
+    // 다른 표에서 고른 칸은 지운다 — 표를 넘나드는 선택은 계산·합치기에서 쓸 수 없다
+    document.querySelectorAll('td.selected-cell').forEach(c => {
+        if (c.closest('table') !== table) c.classList.remove('selected-cell');
+    });
+    td.classList.toggle('selected-cell');
+    table.classList.toggle('selecting-cells', !!table.querySelector('td.selected-cell'));
+}
+
+/** 기준 칸에서 여기까지 네모로 넓혀 고른다 (Shift 클릭) */
+function extendCellSelection(anchor, td) {
+    const sameTable = anchor && anchor.isConnected && anchor.closest('table') === td.closest('table');
+    // 기준 칸이 없거나(처음 누름) 기준 칸을 다시 누르면 이 칸 하나만 고른다
+    if (!sameTable || anchor === td) {
+        clearCellSelection();
+        toggleCellSelection(td);
+        return;
+    }
+    selectCellRange(anchor, td);
 }
 
 function focusCell(cell) {
@@ -1149,6 +1177,32 @@ function setupBasicHandling() {
                 e.preventDefault();
                 return;
             }
+            // Shift·Ctrl(⌘) 클릭으로도 칸을 고를 수 있다.
+            //   Shift  = 기준 칸부터 여기까지 네모로
+            //   Ctrl·⌘ = 이 칸 하나만 넣거나 빼기 (떨어진 칸끼리도 고를 수 있다)
+            if (e.button === 0 && (e.shiftKey || e.metaKey || e.ctrlKey)) {
+                e.preventDefault();                      // 글자 선택으로 넘어가지 않게
+                window.getSelection().removeAllRanges();
+                if (e.shiftKey) {
+                    extendCellSelection(selectionStartCell || lastClickedCell, td);
+                } else {
+                    // 아직 고른 칸이 없다면, 방금 커서를 두었던 칸도 함께 고른다.
+                    // (그냥 클릭은 커서만 옮길 뿐 칸을 고른 상태로 두지 않기 때문에,
+                    //  "10 누르고 → Ctrl로 30, 40 찍기"가 자연스럽게 세 칸이 되도록)
+                    const table = td.closest('table');
+                    if (lastClickedCell && lastClickedCell !== td && lastClickedCell.isConnected
+                        && lastClickedCell.closest('table') === table
+                        && !table.querySelector('td.selected-cell')) {
+                        toggleCellSelection(lastClickedCell);
+                    }
+                    toggleCellSelection(td);
+                    selectionStartCell = td;             // 다음 Shift 클릭의 기준이 된다
+                }
+                lastClickedCell = td;
+                modifierCellPick = true;                 // 곧 이어질 click에서 선택을 지우지 않도록
+                setTimeout(updateTableTools, 0);
+                return;
+            }
             isSelectingCells = true; selectionStartCell = td; clearCellSelection();
         }
     };
@@ -1212,6 +1266,8 @@ function setupBasicHandling() {
         
         if (cell) {
             lastClickedCell = cell;
+            // Shift·Ctrl(⌘)로 고른 직후라면 방금 고른 것을 지우지 않는다
+            if (modifierCellPick) { modifierCellPick = false; updateTableTools(); return; }
             // 단일 셀 클릭 시 선택 해제하고 일반 편집 모드 유지
             clearCellSelection();
             // 셀 클릭 시 해당 표를 자동으로 선택하여 플로팅 UI 표시
@@ -2696,7 +2752,7 @@ export function insertTableFunction(fn) {
             if (c && !cells.includes(c)) cells.push(c);
         }
         if (cells.length === 0) {
-            alert('계산할 칸을 먼저 드래그해서 골라주세요.');
+            alert('계산할 칸을 먼저 골라주세요.\n끌어서 고르거나, Shift+클릭(여기까지) · Ctrl(⌘)+클릭(하나씩)으로 고를 수 있습니다.');
             return;
         }
     }
@@ -2768,7 +2824,7 @@ export function addColumn() { addColumnRight(); }
 export function mergeCells() {
     const selectedCells = document.querySelectorAll('td.selected-cell');
     if (selectedCells.length < 2) {
-        alert('합칠 셀을 2개 이상 선택해 주세요.\n표 안에서 셀을 드래그하면 여러 칸을 고를 수 있습니다.');
+        alert('합칠 셀을 2개 이상 선택해 주세요.\n끌어서 고르거나, Shift+클릭(여기까지) · Ctrl(⌘)+클릭(하나씩)으로 고를 수 있습니다.');
         return;
     }
     
