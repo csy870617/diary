@@ -3,6 +3,7 @@ import { saveEntry } from './data.js';
 import { syncNow, syncSoon } from './drive.js';
 import { openModal, hideTransientPopups } from './ui.js';
 import { setupLinkPreservation, autoLink, isSafeUrl } from './utils.js';
+import { recalcTable, recalcAll, applyFormula, clearFormula, buildRangeFormula, targetCellFor, columnLabel, buildGrid } from './formula.js';
 
 let currentSelectedElement = null; 
 let lastClickedCell = null; 
@@ -1154,7 +1155,14 @@ function setupBasicHandling() {
 
     editorBody.ontouchstart = (e) => { if (!editorBody.isContentEditable) return; const cell = e.target.closest('td'); if (cell) { mobileLongPressTimer = setTimeout(() => { isSelectingCells = true; selectionStartCell = cell; clearCellSelection(); if (navigator.vibrate) navigator.vibrate(50); }, 600); } };
     editorBody.ontouchmove = (e) => { if (isSelectingCells && selectionStartCell) { e.preventDefault(); const touch = e.touches[0]; const cell = document.elementFromPoint(touch.clientX, touch.clientY)?.closest('td'); if (cell) selectCellRange(selectionStartCell, cell); } else { clearTimeout(mobileLongPressTimer); } };
-    editorBody.ontouchend = () => { clearTimeout(mobileLongPressTimer); isSelectingCells = false; };
+    editorBody.ontouchend = () => {
+        clearTimeout(mobileLongPressTimer);
+        // 손가락으로 칸을 고르고 뗐을 때도 표 도구 바를 띄운다 (계산 버튼을 쓸 수 있도록)
+        if (isSelectingCells && editorBody.querySelector('td.selected-cell')) {
+            setTimeout(updateTableTools, 0);
+        }
+        isSelectingCells = false;
+    };
 
     window.addEventListener('mousemove', (e) => {
         if (isColDragging && resizeHeadCell) {
@@ -1189,7 +1197,13 @@ function setupBasicHandling() {
         }
     });
 
-    window.addEventListener('mouseup', () => { if (isColDragging || isRowDragging) { triggerAutoSave(); } isColDragging = false; isRowDragging = false; resizeTargetTd = null; resizeHeadCell = null; resizeNextCell = null; resizeCols = []; isSelectingCells = false; document.querySelectorAll('table.selecting-cells').forEach(t => t.classList.remove('selecting-cells')); });
+    window.addEventListener('mouseup', () => {
+        // 드래그로 칸을 고르고 나면 표 도구 바를 띄운다.
+        // (여기서 안 띄우면 계산 버튼이 보이지 않아 고른 칸으로 합계를 낼 수 없다)
+        if (isSelectingCells && document.querySelector('#editor-body td.selected-cell')) {
+            setTimeout(updateTableTools, 0);
+        }
+        if (isColDragging || isRowDragging) { triggerAutoSave(); } isColDragging = false; isRowDragging = false; resizeTargetTd = null; resizeHeadCell = null; resizeNextCell = null; resizeCols = []; isSelectingCells = false; document.querySelectorAll('table.selecting-cells').forEach(t => t.classList.remove('selecting-cells')); });
 
     editorBody.onclick = (e) => {
         if (!editorBody.isContentEditable) return;
@@ -1470,8 +1484,101 @@ function setupBasicHandling() {
         lastInputType = 'typing';
     });
 
-    editorBody.addEventListener('input', () => {
+    editorBody.addEventListener('input', (e) => {
+        // 숫자를 고치면 같은 표의 계산 결과도 따라 바뀌어야 한다
+        const table = (e.target.closest ? e.target.closest('table') : null)
+            || (window.getSelection().anchorNode?.parentElement?.closest?.('table'));
+        if (table) recalcTable(table);
         updateSelectionBox();
+        triggerAutoSave();
+    });
+
+    /* ── 계산식이 든 칸을 눌렀을 때 ──────────────────────────────
+       엑셀처럼, 그 칸에 들어가면 결과 대신 식이 보이고 고칠 수 있다.
+       칸을 벗어나면 다시 계산해 결과를 보여준다. */
+    const showFormulaForEditing = (cell) => {
+        if (!cell || cell.dataset.editingFormula === '1') return;
+        const f = cell.getAttribute('data-formula');
+        if (!f) return;
+        cell.dataset.editingFormula = '1';
+        cell.textContent = f;
+    };
+    const commitFormulaCell = (cell) => {
+        if (!cell) return;
+        const table = cell.closest('table');
+        const typed = (cell.textContent || '').trim();
+        if (cell.dataset.editingFormula === '1') delete cell.dataset.editingFormula;
+        if (typed.startsWith('=')) {
+            cell.setAttribute('data-formula', typed);
+        } else {
+            // 식을 지우고 다른 값을 적었으면 계산식도 함께 걷어낸다
+            cell.removeAttribute('data-formula');
+        }
+        if (table) recalcTable(table);
+    };
+
+    let formulaEditingCell = null;
+    let syncingFormulaCell = false;
+
+    /** 글자 커서가 지금 어느 칸에 있는가 (본문 밖이면 null) */
+    const caretCell = () => {
+        const sel = window.getSelection();
+        if (!sel || !sel.rangeCount) return null;
+        let node = sel.anchorNode;
+        if (node && node.nodeType === 3) node = node.parentElement;
+        if (!node || !node.closest || !editorBody.contains(node)) return null;
+        return node.closest('td, th');
+    };
+
+    /**
+     * 커서가 들어간 칸의 식을 펼치고, 빠져나온 칸은 다시 계산해 결과로 되돌린다.
+     * td는 포커스를 받지 않아 focusin으로는 칸 이동을 알 수 없으므로 커서 위치로 판단한다.
+     */
+    const syncFormulaEditing = () => {
+        if (syncingFormulaCell) return;          // 글자를 바꾸면 커서도 움직여 다시 불린다
+        const cell = caretCell();
+        if (cell === formulaEditingCell) return;
+        syncingFormulaCell = true;
+        try {
+            if (formulaEditingCell && formulaEditingCell.isConnected) {
+                commitFormulaCell(formulaEditingCell);
+            }
+            formulaEditingCell = null;
+            if (cell && cell.hasAttribute('data-formula')) {
+                showFormulaForEditing(cell);
+                formulaEditingCell = cell;
+            }
+        } finally {
+            syncingFormulaCell = false;
+        }
+    };
+    document.addEventListener('selectionchange', () => {
+        if (!editorBody.isConnected) return;
+        syncFormulaEditing();
+    });
+    // 편집기를 아예 벗어나면(다른 곳 클릭) 남아 있던 식을 확정한다
+    editorBody.addEventListener('focusout', () => {
+        setTimeout(() => {
+            if (!formulaEditingCell) return;
+            if (editorBody.contains(document.activeElement)) return;
+            syncingFormulaCell = true;
+            try { commitFormulaCell(formulaEditingCell); } finally { syncingFormulaCell = false; }
+            formulaEditingCell = null;
+            triggerAutoSave();
+        }, 0);
+    });
+    // 표 안에서 '=' 로 시작하는 글자를 직접 쳐 넣고 Enter를 누르면 바로 계산한다
+    editorBody.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' || e.shiftKey) return;
+        const cell = window.getSelection().anchorNode?.parentElement?.closest?.('td, th');
+        if (!cell) return;
+        if (!(cell.textContent || '').trim().startsWith('=')) return;
+        e.preventDefault();
+        commitFormulaCell(cell);
+        // Enter를 누른 직후에는 결과를 보여준다.
+        // 이 칸을 "이미 펼쳐 본 칸"으로 기억해 두면, 커서가 그대로 있어도 식이 다시 펼쳐지지 않는다.
+        formulaEditingCell = cell.hasAttribute('data-formula') ? cell : null;
+        updateTableTools();
         triggerAutoSave();
     });
     
@@ -1572,10 +1679,13 @@ export function getCleanBodyHtml(bodyEl) {
     if (!bodyEl) return '';
     // 책 모드 흔적(data-book-*)이 없으면 전체 복제 없이 innerHTML을 그대로 사용
     // (일반 편집 중 매 저장마다 대용량 본문을 깊은 복제하던 비용 제거 → 타이핑 끊김 완화)
+    // 계산식을 고치는 중인 칸은 화면에 식이 보이고 있다. 그대로 저장하면
+    // 결과가 아니라 식 글자가 저장되므로, 저장본에서는 결과로 되돌린다.
+    const editingFormula = bodyEl.querySelector('[data-editing-formula="1"]');
     const hasBookArtifacts = state.currentViewMode === 'book'
         || state.currentViewMode === 'book-edit'
         || !!bodyEl.querySelector('[data-book-orig-width]');
-    if (!hasBookArtifacts) return bodyEl.innerHTML;
+    if (!hasBookArtifacts && !editingFormula) return bodyEl.innerHTML;
     const clone = bodyEl.cloneNode(true);
     clone.querySelectorAll('img').forEach(img => {
         if (img.dataset.bookOrigWidth !== undefined) {
@@ -1585,6 +1695,10 @@ export function getCleanBodyHtml(bodyEl) {
             img.style.maxHeight = '';
         }
     });
+    clone.querySelectorAll('[data-editing-formula]').forEach(cell => {
+        delete cell.dataset.editingFormula;
+    });
+    clone.querySelectorAll('table').forEach(recalcTable);
     clone.querySelectorAll('*').forEach(el => {
         Array.from(el.attributes).forEach(attr => {
             if (attr.name.startsWith('data-book-')) el.removeAttribute(attr.name);
@@ -1608,6 +1722,7 @@ export function openEditor(isEdit, entryData) {
         editTitle.value = entryData.title || '';
         editSubtitle.value = entryData.subtitle || ''; 
         editBody.innerHTML = sanitizeEntryHtml(entryData.body || '');
+        recalcAll(editBody);   // 저장된 결과가 지금 숫자와 어긋나지 않도록
         linkifyContents(editBody, true);
         setupTableWrapperScroll(editBody);
         state.currentFontFamily = entryData.fontFamily || 'Pretendard';
@@ -2406,6 +2521,19 @@ export function updateTableTools() {
         btn.classList.toggle('active', curW === btn.dataset.w + '%');
     });
 
+    // 이 칸에 계산식이 들어 있으면 무엇인지 보여준다
+    const fBox = document.getElementById('table-tools-formula');
+    const fText = document.getElementById('tt-formula-text');
+    const formula = t.cell.getAttribute('data-formula');
+    if (fBox && fText) {
+        if (formula) {
+            fText.textContent = `${columnLabel(t.col)}${t.row + 1} = ${formula.replace(/^=/, '')}`;
+            fBox.classList.remove('hidden');
+        } else {
+            fBox.classList.add('hidden');
+        }
+    }
+
     highlightActiveCells(t.table, t.row, t.col);
     tools.classList.remove('hidden');
     positionTableTools(t.table);
@@ -2456,7 +2584,15 @@ function positionTableTools(table) {
 
 // ── 표 편집 동작 (표 도구 바에서 호출) ──────────────────────────
 function activeTableCell() {
-    const table = currentSelectedElement && currentSelectedElement.tagName === 'TABLE' ? currentSelectedElement : null;
+    let table = (currentSelectedElement && currentSelectedElement.tagName === 'TABLE'
+                 && currentSelectedElement.isConnected) ? currentSelectedElement : null;
+    // 드래그로 칸만 골랐을 때는 표가 "선택된 요소"로 잡혀 있지 않다.
+    // 그래도 고른 칸이 있으면 그 칸이 든 표를 대상으로 삼는다 — 안 그러면 계산 버튼이 뜨지 않는다.
+    if (!table) {
+        const picked = document.querySelector('#editor-body td.selected-cell, #editor-body th.selected-cell')
+            || (lastClickedCell && lastClickedCell.isConnected ? lastClickedCell : null);
+        table = picked ? picked.closest('table') : null;
+    }
     if (!table) return null;
     const cell = (lastClickedCell && table.contains(lastClickedCell)) ? lastClickedCell : table.rows[0]?.cells[0];
     if (!cell) return null;
@@ -2538,6 +2674,60 @@ export function setTableWidth(pct) {
     // 칸을 직접 끌어서 잡아둔 고정 폭이 남아 있으면 표 폭을 바꿔도 줄지 않으므로 정리한다
     table.querySelectorAll('td').forEach(td => { td.style.width = ''; });
     updateSelectionBox();
+    updateTableTools();
+    triggerAutoSave();
+}
+
+/**
+ * 고른 칸들의 합계·평균 등을 계산해 결과 칸에 넣는다.
+ * 세로로 골랐으면 바로 아래 칸, 가로로 골랐으면 바로 오른쪽 칸에 넣는다.
+ * 그 자리가 표 밖이면 줄이나 칸을 하나 새로 만든다.
+ */
+export function insertTableFunction(fn) {
+    const t = activeTableCell();
+    if (!t) return;
+    const table = t.table;
+    let cells = Array.from(table.querySelectorAll('td.selected-cell'));
+    // 아무것도 고르지 않았으면 지금 칸이 속한 세로줄에서 위쪽 숫자들을 잡는다
+    if (cells.length === 0) {
+        const grid = buildGrid(table);
+        for (let r = 0; r < t.row; r++) {
+            const c = (grid[r] || [])[t.col];
+            if (c && !cells.includes(c)) cells.push(c);
+        }
+        if (cells.length === 0) {
+            alert('계산할 칸을 먼저 드래그해서 골라주세요.');
+            return;
+        }
+    }
+
+    saveBeforeChange('tableEdit');
+    const formula = buildRangeFormula(table, cells, fn);
+    if (!formula) return;
+
+    let spot = targetCellFor(table, cells);
+    if (spot && !spot.cell) {
+        // 결과를 넣을 자리가 없으면 줄(또는 칸)을 하나 늘린다
+        if (spot.vertical) insertRowAt(table, spot.at.row);
+        else insertColumnAt(table, spot.at.col);
+        spot = targetCellFor(table, cells);
+    }
+    const target = spot && spot.cell;
+    if (!target) return;
+
+    applyFormula(target, formula);
+    clearCellSelection();
+    // 결과 칸으로 커서를 옮기지는 않는다 — 옮기면 결과 대신 식이 펼쳐져 보인다.
+    lastClickedCell = target;
+    afterTableEdit();
+}
+
+/** 결과 칸에서 계산식을 빼고 지금 보이는 값만 남긴다 */
+export function clearTableFunction() {
+    const t = activeTableCell();
+    if (!t || !t.cell.hasAttribute('data-formula')) return;
+    saveBeforeChange('tableEdit');
+    clearFormula(t.cell);
     updateTableTools();
     triggerAutoSave();
 }
