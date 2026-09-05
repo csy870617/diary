@@ -239,22 +239,36 @@ export function saveCurrentSelection() {
 /**
  * Undo 실행
  */
+/** 두 스냅샷의 내용(제목·부제·본문)이 같은가 — 커서 위치·시각은 따지지 않는다 */
+function sameSnapshotContent(a, b) {
+    if (!a || !b) return false;
+    return a.title === b.title && a.subtitle === b.subtitle
+        && (a.body || '').length === (b.body || '').length && a.body === b.body;
+}
+
 function performUndo() {
     const editorBody = document.getElementById('editor-body');
     if (!editorBody) return false;
-    
-    if (undoStack.length === 0) return false;
-    
-    // 현재 상태를 redo 스택에 저장
+
     const currentSnapshot = createSnapshot();
+
+    // 지금 화면과 똑같은 스냅샷은 되돌려도 눈에 보이는 변화가 없어 "먹통"처럼 느껴진다.
+    // (예: 표를 고친 뒤 제목 칸을 누르면 그 시점 상태가 한 번 더 쌓인다)
+    // 그런 단계는 건너뛰고 실제로 달라지는 지점까지 간다.
+    while (undoStack.length > 0 && sameSnapshotContent(undoStack[undoStack.length - 1], currentSnapshot)) {
+        undoStack.pop();
+    }
+    if (undoStack.length === 0) return false;
+
+    // 현재 상태를 redo 스택에 저장
     if (currentSnapshot) {
         redoStack.push(currentSnapshot);
     }
-    
+
     // 이전 상태 복원
     const prevSnapshot = undoStack.pop();
     restoreSnapshot(prevSnapshot);
-    
+
     return true;
 }
 
@@ -265,10 +279,14 @@ function performRedo() {
     const editorBody = document.getElementById('editor-body');
     if (!editorBody) return false;
     
-    if (redoStack.length === 0) return false;
-    
-    // 현재 상태를 undo 스택에 저장
     const currentSnapshot = createSnapshot();
+    // 되돌리기와 같은 이유로, 지금과 똑같은 단계는 건너뛴다
+    while (redoStack.length > 0 && sameSnapshotContent(redoStack[redoStack.length - 1], currentSnapshot)) {
+        redoStack.pop();
+    }
+    if (redoStack.length === 0) return false;
+
+    // 현재 상태를 undo 스택에 저장
     if (currentSnapshot) {
         undoStack.push(currentSnapshot);
     }
@@ -1304,20 +1322,32 @@ function setupBasicHandling() {
         openImageFullscreen(img.src);
     });
 
-    editorBody.onkeydown = (e) => {
-        // Ctrl+Z / Cmd+Z: Undo
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
-            e.preventDefault(); 
-            formatDoc('undo'); 
-            return; 
-        }
-        // Ctrl+Y / Cmd+Y 또는 Ctrl+Shift+Z / Cmd+Shift+Z: Redo
-        if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) {
-            e.preventDefault(); 
-            formatDoc('redo'); 
-            return; 
-        }
+    /* ── 되돌리기·다시하기 (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z, Cmd/Ctrl+Y) ──────────
+       예전에는 이 단축키를 본문(#editor-body)에서만 받았다. 그래서 표 도구 바의
+       버튼(줄 추가·칸 폭 균등·합계 등)을 누른 뒤에는 포커스가 그 버튼에 있어
+       Cmd+Z가 아무 일도 하지 않았다. 표를 고치고 되돌리려는 순간이 바로 그때다.
+       → 글 쓰는 화면이 열려 있는 동안에는 어디에 포커스가 있든 받는다. */
+    document.addEventListener('keydown', (e) => {
+        if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+        const k = e.key.toLowerCase();
+        const isUndo = k === 'z' && !e.shiftKey;
+        const isRedo = k === 'y' || (k === 'z' && e.shiftKey);
+        if (!isUndo && !isRedo) return;
 
+        const modal = document.getElementById('write-modal');
+        if (!modal || modal.classList.contains('hidden')) return;   // 글 쓰는 화면일 때만
+        // 읽기·책 모드에서는 되돌릴 편집이 없다
+        if (state.currentViewMode !== 'default' && state.currentViewMode !== 'book-edit') return;
+
+        // 글 쓰는 화면 안에서는 입력칸(글자 크기 등)에 있더라도 우리 되돌리기로 받는다.
+        // 브라우저 기본 되돌리기에 맡기면 본문이 망가진다 — 우리가 되돌릴 때
+        // 본문을 통째로 갈아 끼우기 때문에 브라우저가 기억하는 순서와 어긋나고,
+        // 그 상태에서 기본 되돌리기가 돌면 글이 겹쳐 들어간다.
+        e.preventDefault();
+        formatDoc(isUndo ? 'undo' : 'redo');
+    }, true);   // 본문 핸들러보다 먼저 받는다
+
+    editorBody.onkeydown = (e) => {
         // 서식 단축키 (Cmd/Ctrl + B / I / U, Cmd/Ctrl+Shift+X = 취소선)
         // 브라우저 기본 동작에 맡기면 '셀을 여러 개 선택한 상태'에서는 아무 일도 일어나지 않는다.
         // 그 상태에서는 텍스트 선택(Range)이 없어서 기본 동작이 적용될 대상이 없기 때문이다.
