@@ -1,6 +1,6 @@
 import { state, loadCategoriesFromLocal, saveCategoriesToLocal, isReadOnlyView, loadCategorySortsFromLocal, setCategorySort } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
-import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, renameFolderAction, deleteFolderAction, openFolderAssignModal, createFolderFromAssignModal, addSubfolderAction, closeFolderPopup, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort, bulkDownloadPdf, downloadEntryPdf } from './ui.js';
+import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, renameFolderAction, deleteFolderAction, openTopicMoveModal, openFolderMoveModal, addTopicInFolderAction, addSubfolderAction, closeFolderPopup, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort, bulkDownloadPdf, downloadEntryPdf } from './ui.js';
 import { equalizeColumns, equalizeRows, insertTableFunction, clearTableFunction, flushPendingEdit, openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize, getCleanBodyHtml, addRowAbove, addRowBelow, addColumnLeft, addColumnRight, deleteTable, hideTableTools, updateTableTools, setTableWidth, toggleTableEditSection, repositionTableTools } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, handleAuthClick, syncNow, syncSoon, pullFromDrive, flushCloudSyncBeacon, ensureTokenOnResume, startKeepAlive, setSyncStatus } from './drive.js';
@@ -706,13 +706,13 @@ function setupUIListeners() {
     document.getElementById('ctx-copy')?.addEventListener('click', () => { duplicateEntry(state.contextTargetId); document.getElementById('context-menu')?.classList.add('hidden'); });
     document.getElementById('ctx-delete')?.addEventListener('click', () => { moveToTrash(state.contextTargetId); document.getElementById('context-menu')?.classList.add('hidden'); });
     document.getElementById('ctx-cat-rename')?.addEventListener('click', renameCategoryAction);
-    document.getElementById('ctx-cat-assign-folder')?.addEventListener('click', openFolderAssignModal);
+    document.getElementById('ctx-cat-move')?.addEventListener('click', openTopicMoveModal);
     document.getElementById('ctx-cat-delete')?.addEventListener('click', deleteCategoryAction);
     document.getElementById('ctx-folder-rename')?.addEventListener('click', renameFolderAction);
     document.getElementById('ctx-folder-delete')?.addEventListener('click', deleteFolderAction);
     document.getElementById('ctx-folder-add-sub')?.addEventListener('click', addSubfolderAction);
-    document.getElementById('close-folder-assign-btn')?.addEventListener('click', () => document.getElementById('folder-assign-modal')?.classList.add('hidden'));
-    document.getElementById('new-folder-inline-btn')?.addEventListener('click', createFolderFromAssignModal);
+    document.getElementById('ctx-folder-add-topic')?.addEventListener('click', addTopicInFolderAction);
+    document.getElementById('ctx-folder-move')?.addEventListener('click', openFolderMoveModal);
 }
 
 function openColorPalette() {

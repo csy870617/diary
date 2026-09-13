@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <meta name="referrer" content="origin"> 
     <title>신앙일지 | Faith Log</title>
-    <link rel="stylesheet" href="style.css?v=5.1">
+    <link rel="stylesheet" href="style.css?v=5.2">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
     <script>
         // 페이지 로드 전 다크모드 적용 (깜빡임 방지)
@@ -79,11 +79,13 @@
                 </button>
             </div>
         </div>
+        <!-- 지금 보고 있는 자리: 폴더 › 하위폴더 › 주제 -->
+        <div id="location-bar" class="location-bar hidden"></div>
         <main id="entry-list" class="entry-list"></main>
         <div id="bulk-action-bar" class="bulk-action-bar hidden">
             <button id="bulk-select-all-btn" class="bulk-bar-btn"><i class="ph ph-check-square"></i> 전체선택</button>
             <span id="bulk-selected-count" class="bulk-selected-count">0개 선택</span>
-            <button id="bulk-move-btn" class="bulk-bar-btn primary" disabled><i class="ph ph-folder-open"></i> 주제 이동</button>
+            <button id="bulk-move-btn" class="bulk-bar-btn primary" disabled><i class="ph ph-arrow-elbow-down-right"></i> 이동</button>
             <button id="bulk-pdf-btn" class="bulk-bar-btn" disabled><i class="ph ph-file-pdf"></i> PDF 저장</button>
             <button id="bulk-cancel-btn" class="bulk-bar-btn"><i class="ph ph-x"></i> 취소</button>
         </div>
@@ -396,36 +398,35 @@
         </div>
         <div class="trash-container" id="trash-list"></div>
     </div>
+    <!-- 글·주제·폴더를 모두 이 한 창에서 옮긴다 (예전에는 셋이 제각각이었다) -->
     <div id="move-modal" class="modal-overlay hidden">
-        <div class="simple-modal" style="width: 280px;">
-            <h3 id="move-modal-title">주제 이동</h3>
-            <div id="move-category-list" class="category-select-list"></div>
+        <div class="simple-modal move-modal-inner">
+            <h3 id="move-modal-title">이동</h3>
+            <p id="move-modal-hint" class="move-hint"></p>
+            <div id="move-category-list" class="move-tree"></div>
+            <button id="move-new-btn" class="new-folder-inline-btn"></button>
             <button id="close-move-btn" class="cancel-btn" style="width:100%;">취소</button>
         </div>
     </div>
     <div id="context-menu" class="context-menu hidden">
         <button class="ctx-item" id="ctx-rename"><i class="ph ph-pencil-line"></i> 제목 변경</button>
-        <button class="ctx-item" id="ctx-move"><i class="ph ph-folder-open"></i> 주제 이동</button>
+        <button class="ctx-item" id="ctx-move"><i class="ph ph-arrow-elbow-down-right"></i> 이동</button>
         <button class="ctx-item" id="ctx-copy"><i class="ph ph-copy"></i> 복제하기</button>
         <button class="ctx-item danger" id="ctx-delete"><i class="ph ph-trash"></i> 삭제하기</button>
     </div>
     <div id="category-context-menu" class="context-menu hidden">
+        <div class="ctx-head"><i class="ph ph-tag"></i> 주제 <span class="ctx-head-note">글을 담는 곳</span></div>
         <button class="ctx-item" id="ctx-cat-rename"><i class="ph ph-pencil-line"></i> 이름 변경</button>
-        <button class="ctx-item" id="ctx-cat-assign-folder"><i class="ph ph-folder-open"></i> 폴더 배정</button>
-        <button class="ctx-item danger" id="ctx-cat-delete"><i class="ph ph-trash"></i> 주제 삭제</button>
+        <button class="ctx-item" id="ctx-cat-move"><i class="ph ph-arrow-elbow-down-right"></i> 이동</button>
+        <button class="ctx-item danger" id="ctx-cat-delete"><i class="ph ph-trash"></i> 삭제</button>
     </div>
     <div id="folder-context-menu" class="context-menu hidden">
-        <button class="ctx-item" id="ctx-folder-add-sub"><i class="ph ph-folder-plus"></i> 새 하위 폴더 만들기</button>
-        <button class="ctx-item" id="ctx-folder-rename"><i class="ph ph-pencil-line"></i> 폴더 이름 변경</button>
-        <button class="ctx-item danger" id="ctx-folder-delete"><i class="ph ph-trash"></i> 폴더 삭제</button>
-    </div>
-    <div id="folder-assign-modal" class="modal-overlay hidden">
-        <div class="simple-modal" style="width: 280px;">
-            <h3>폴더 배정</h3>
-            <div id="folder-assign-list" class="category-select-list"></div>
-            <button id="new-folder-inline-btn" class="new-folder-inline-btn"><i class="ph ph-folder-plus"></i> 새 폴더 만들기</button>
-            <button id="close-folder-assign-btn" class="cancel-btn" style="width:100%;">취소</button>
-        </div>
+        <div class="ctx-head"><i class="ph ph-folder-simple"></i> 폴더 <span class="ctx-head-note">주제를 담는 곳</span></div>
+        <button class="ctx-item" id="ctx-folder-add-topic"><i class="ph ph-tag"></i> 새 주제</button>
+        <button class="ctx-item" id="ctx-folder-add-sub"><i class="ph ph-folder-plus"></i> 새 하위 폴더</button>
+        <button class="ctx-item" id="ctx-folder-rename"><i class="ph ph-pencil-line"></i> 이름 변경</button>
+        <button class="ctx-item" id="ctx-folder-move"><i class="ph ph-arrow-elbow-down-right"></i> 이동</button>
+        <button class="ctx-item danger" id="ctx-folder-delete"><i class="ph ph-trash"></i> 삭제</button>
     </div>
     <div id="folder-popup" class="folder-popup hidden">
         <div id="folder-popup-back" class="folder-popup-back hidden">
@@ -435,8 +436,8 @@
         <div id="folder-popup-list" class="folder-popup-list"></div>
     </div>
     <div id="add-menu-popup" class="add-menu-popup hidden">
-        <button class="add-menu-item" data-action="topic"><i class="ph ph-tag"></i> 새 주제</button>
-        <button class="add-menu-item" data-action="folder"><i class="ph ph-folder-plus"></i> 새 폴더</button>
+        <button class="add-menu-item" data-action="topic"><i class="ph ph-tag"></i> 새 주제<span class="add-menu-note">글을 담는 곳</span></button>
+        <button class="add-menu-item" data-action="folder"><i class="ph ph-folder-plus"></i> 새 폴더<span class="add-menu-note">주제를 담는 곳</span></button>
     </div>
     <div id="modal-overlay" class="modal-overlay hidden"></div>
 
@@ -450,6 +451,6 @@
         </div>
     </div>
 
-    <script type="module" src="script.js?v=8.6"></script>
+    <script type="module" src="script.js?v=8.7"></script>
 </body>
 </html>
