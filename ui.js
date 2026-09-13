@@ -105,6 +105,51 @@ export function renderEntries(keyword) {
     });
 }
 
+/**
+ * 지금 보고 있는 자리를 위에 보여 준다 — 폴더 › 하위폴더 › 주제.
+ * 예전에는 주제 안에 들어와도 그 주제가 어느 폴더에 있는지 알 수 없었다.
+ * 폴더 이름을 누르면 그 폴더가 열리고, 맨 끝 ⋯ 로 이름 변경·이동·삭제를 할 수 있다.
+ */
+export function renderLocationBar() {
+    const bar = getEl('location-bar');
+    if (!bar) return;
+    bar.innerHTML = '';
+    const cat = state.allCategories.find(c => c.id === state.currentCategory && !c.isDeleted);
+    if (!cat) { bar.classList.add('hidden'); return; }
+    bar.classList.remove('hidden');
+
+    folderPath(cat.folderId).forEach(f => {
+        const seg = document.createElement('button');
+        seg.className = 'loc-seg loc-folder';
+        seg.innerHTML = `<i class="ph ph-folder-simple"></i><span>${escapeHtml(f.name)}</span>`;
+        seg.onclick = (e) => { e.stopPropagation(); showFolderPopup(f.id, seg); };
+        attachFolderContextMenu(seg, f.id);
+        bar.appendChild(seg);
+        const sep = document.createElement('span');
+        sep.className = 'loc-sep';
+        sep.textContent = '\u203A';
+        bar.appendChild(sep);
+    });
+
+    const cur = document.createElement('span');
+    cur.className = 'loc-seg loc-topic';
+    cur.innerHTML = `<i class="ph ph-tag"></i><span>${escapeHtml(cat.name)}</span>`
+        + `<em class="loc-count">글 ${topicEntryCount(cat.id)}개</em>`;
+    bar.appendChild(cur);
+
+    const more = document.createElement('button');
+    more.className = 'loc-more';
+    more.title = '이름 변경 · 이동 · 삭제';
+    more.setAttribute('aria-label', '이 주제 메뉴');
+    more.innerHTML = '<i class="ph ph-dots-three-outline"></i>';
+    more.onclick = (e) => {
+        e.stopPropagation();
+        const r = more.getBoundingClientRect();
+        showCatContextMenu(r.left, r.bottom + 4, cat.id);
+    };
+    bar.appendChild(more);
+}
+
 export function renderTabs() { renderFolders(); }
 
 export function renderTrash() {
@@ -177,7 +222,7 @@ export function hideTransientPopups() {
 
 export function closeAllModals(goBack = true) {
     hideTransientPopups();
-    const ids = ['write-modal', 'trash-modal', 'login-modal', 'move-modal', 'folder-assign-modal'];
+    const ids = ['write-modal', 'trash-modal', 'login-modal', 'move-modal'];
     ids.forEach(id => {
         const el = getEl(id);
         if(el) el.classList.add('hidden');
@@ -330,6 +375,7 @@ export function renderFolders() {
 
     initFolderRowSortable(row); // 폴더/주제 칩 드래그 순서 변경 (렌더마다 재부착)
 
+    renderLocationBar();
     if (popupFolderId) renderFolderPopupContent();
 }
 
@@ -423,6 +469,22 @@ export function closeFolderPopup() {
     if (wasOpen) renderFolders();
 }
 
+/** 팝업 줄에 붙는 ⋯ 버튼. 우클릭·길게누르기를 모르는 사람도 쓸 수 있도록 눈에 보이게 둔다. */
+function appendRowMenuButton(row, onOpen) {
+    const btn = document.createElement('button');
+    btn.className = 'popup-item-more';
+    btn.title = '이름 변경 · 이동 · 삭제';
+    btn.setAttribute('aria-label', '메뉴');
+    btn.innerHTML = '<i class="ph ph-dots-three-outline"></i>';
+    btn.onclick = (e) => {
+        e.stopPropagation();
+        const r = btn.getBoundingClientRect();
+        onOpen(r.left, r.bottom + 4);
+    };
+    row.appendChild(btn);
+    return btn;
+}
+
 function renderFolderPopupContent() {
     const popup = getEl('folder-popup');
     const list = getEl('folder-popup-list');
@@ -451,7 +513,20 @@ function renderFolderPopupContent() {
     }
 
     if (header) {
-        header.innerHTML = `<i class="ph ph-folder-open"></i> <span>${escapeHtml(folder.name)}</span>`;
+        // 폴더 이름만 있으면 어디까지 들어왔는지 알 수 없어 경로를 통째로 보여 준다
+        const path = folderPath(folder.id).map(f => escapeHtml(f.name)).join(' \u203A ');
+        header.innerHTML = `<i class="ph ph-folder-open"></i> <span class="popup-header-path">${path}</span>`;
+        const more = document.createElement('button');
+        more.className = 'popup-more';
+        more.title = '이름 변경 · 이동 · 삭제';
+        more.setAttribute('aria-label', '이 폴더 메뉴');
+        more.innerHTML = '<i class="ph ph-dots-three-outline"></i>';
+        more.onclick = (e) => {
+            e.stopPropagation();
+            const r = more.getBoundingClientRect();
+            showFolderContextMenu(r.left, r.bottom + 4, folder.id);
+        };
+        header.appendChild(more);
     }
 
     const subFolders = state.allFolders
@@ -484,6 +559,7 @@ function renderFolderPopupContent() {
             positionFolderPopup();
         };
         attachFolderContextMenu(item, f.id);
+        appendRowMenuButton(item, (x, y) => showFolderContextMenu(x, y, f.id));
         list.appendChild(item);
     });
 
@@ -499,9 +575,11 @@ function renderFolderPopupContent() {
             applyCategorySort();
             if (state.isSelectMode) exitSelectMode();
             closeFolderPopup();
+            renderLocationBar();
             renderEntries();
         };
         attachCatContextMenu(item, c.id);
+        appendRowMenuButton(item, (x, y) => showCatContextMenu(x, y, c.id));
         list.appendChild(item);
     });
 
@@ -557,7 +635,8 @@ function initPopupSortable(list) {
         delayOnTouchOnly: true,
         touchStartThreshold: 5,
         draggable: '.folder-popup-item, .topic-popup-item',
-        filter: '.popup-add-item, .popup-divider, .popup-empty',
+        // ⋯ 버튼에서 시작한 손짓은 끌기로 보지 않는다 (메뉴가 열려야 한다)
+        filter: '.popup-add-item, .popup-divider, .popup-empty, .popup-item-more',
         preventOnFilter: false,
         onEnd: async () => {
             const newFolderIds = [];
@@ -656,6 +735,23 @@ function addRootFolder() {
     (state.rootOrder = state.rootOrder || []).push(id);
     state.categoryUpdatedAt = new Date().toISOString();
     saveCategoriesToLocal(); renderFolders(); syncSoon();
+}
+
+/** 폴더 메뉴의 '새 주제' — 그 폴더 안에 주제를 만든다 */
+export function addTopicInFolderAction() {
+    getEl('folder-context-menu')?.classList.add('hidden');
+    const folder = state.allFolders.find(f => f.id === state.contextFolderId && !f.isDeleted);
+    if (!folder) return;
+    const name = prompt(`'${folder.name}' 안에 새 주제 이름:`);
+    if (!name || !name.trim()) return;
+    const id = 'custom_' + Date.now();
+    state.allCategories.push({ id, name: name.trim(), folderId: folder.id });
+    state.categoryOrder.push(id);
+    state.categoryUpdatedAt = new Date().toISOString();
+    saveCategoriesToLocal();
+    if (popupFolderId) renderFolderPopupContent();
+    renderFolders();
+    syncSoon();
 }
 
 export function addSubfolderAction() {
@@ -804,86 +900,6 @@ export function permanentDeleteFolder(id) {
     saveCategoriesToLocal(); renderTrash(); renderFolders(); renderTabs(); renderEntries(); syncSoon();
 }
 
-function renderFolderAssignList() {
-    const modal = getEl('folder-assign-modal');
-    const list = getEl('folder-assign-list');
-    if (!modal || !list) return;
-    list.innerHTML = '';
-
-    const noneDiv = document.createElement('div');
-    noneDiv.className = 'cat-select-item';
-    noneDiv.textContent = '없음 (폴더 없음)';
-    noneDiv.onclick = () => {
-        const cat = state.allCategories.find(c => c.id === state.contextCatId);
-        if (cat) {
-            delete cat.folderId;
-            state.rootOrder = state.rootOrder || [];
-            if (!state.rootOrder.includes(cat.id)) state.rootOrder.push(cat.id);
-            state.categoryUpdatedAt = new Date().toISOString();
-            saveCategoriesToLocal(); renderFolders(); syncSoon();
-        }
-        modal.classList.add('hidden');
-    };
-    list.appendChild(noneDiv);
-
-    const sortedFolders = [];
-    state.folderOrder.forEach(id => { const f = state.allFolders.find(f => f.id === id); if (f && !f.isDeleted) sortedFolders.push(f); });
-    state.allFolders.forEach(f => { if (!f.isDeleted && !state.folderOrder.includes(f.id)) sortedFolders.push(f); });
-
-    const renderLevel = (parentId, depth) => {
-        sortedFolders.filter(f => (f.parentFolderId || null) === parentId).forEach(folder => {
-            const div = document.createElement('div');
-            div.className = 'cat-select-item';
-            if (depth > 0) div.style.paddingLeft = `${12 + depth * 18}px`;
-            div.innerHTML = `<i class="ph ph-folder-simple"></i> ${escapeHtml(folder.name)}`;
-            div.onclick = () => {
-                const cat = state.allCategories.find(c => c.id === state.contextCatId);
-                if (cat) {
-                    cat.folderId = folder.id;
-                    state.rootOrder = (state.rootOrder || []).filter(id => id !== cat.id);
-                    state.categoryUpdatedAt = new Date().toISOString();
-                    saveCategoriesToLocal(); renderFolders(); syncSoon();
-                }
-                modal.classList.add('hidden');
-            };
-            list.appendChild(div);
-            renderLevel(folder.id, depth + 1);
-        });
-    };
-    renderLevel(null, 0);
-}
-
-export function openFolderAssignModal() {
-    getEl('category-context-menu')?.classList.add('hidden');
-    const modal = getEl('folder-assign-modal');
-    if (!modal) return;
-    renderFolderAssignList();
-    openModal(modal);
-}
-
-export function createFolderFromAssignModal() {
-    const name = prompt("새 폴더 이름");
-    if (!name || !name.trim()) return;
-    const id = 'folder_' + Date.now();
-    state.allFolders.push({ id, name: name.trim() });
-    state.folderOrder.push(id);
-    (state.rootOrder = state.rootOrder || []).push(id);
-    state.categoryUpdatedAt = new Date().toISOString();
-
-    const cat = state.allCategories.find(c => c.id === state.contextCatId);
-    if (cat) {
-        cat.folderId = id;
-        state.rootOrder = state.rootOrder.filter(rid => rid !== cat.id);
-    }
-
-    saveCategoriesToLocal();
-    renderFolders();
-    syncSoon();
-
-    const modal = getEl('folder-assign-modal');
-    if (modal) modal.classList.add('hidden');
-}
-
 export function addNewCategory() {
     const name = prompt("새 주제 이름");
     if (name && name.trim()) {
@@ -976,40 +992,240 @@ export async function renameEntryAction() {
     }
 }
 
-export function openMoveModal() {
-    getEl('context-menu')?.classList.add('hidden');
-    const moveModal = getEl('move-modal');
-    const moveCategoryList = getEl('move-category-list');
-    const moveTitle = getEl('move-modal-title');
-    openModal(moveModal);
-    moveCategoryList.innerHTML = '';
+/* ── 이동: 글·주제·폴더를 모두 같은 창에서 옮긴다 ──────────────────────
+   예전에는 셋이 제각각이었다. 글은 "주제 이동"(평평한 목록이라 어느 폴더
+   안인지 알 수 없었다), 주제는 "폴더 배정"(다른 창·다른 말), 폴더는 옮길
+   방법 자체가 없었다. 이제 같은 트리 창에서 같은 말("이동")로 고른다. */
+let movePickerKind = null;   // 'entry' | 'topic' | 'folder'
 
-    const isBulk = state.isSelectMode && state.selectedEntries.length > 0;
-    if (moveTitle) {
-        moveTitle.textContent = isBulk ? `주제 이동 (${state.selectedEntries.length}개 선택)` : '주제 이동';
+/** 이 폴더 밑에 딸린 모든 폴더 id (자기 자신은 뺀다) */
+function descendantFolderIds(folderId) {
+    const direct = state.allFolders.filter(f => f.parentFolderId === folderId && !f.isDeleted);
+    return direct.reduce((acc, f) => acc.concat([f.id], descendantFolderIds(f.id)), []);
+}
+
+/** 이 주제에 들어 있는 글 수 */
+function topicEntryCount(topicId) {
+    return state.entries.filter(e => !e.isDeleted && !e.isPurged && e.category === topicId).length;
+}
+
+/** 맨 위에서 이 폴더까지의 경로 [바깥폴더, …, 이폴더] */
+function folderPath(folderId) {
+    const path = [];
+    const seen = new Set();
+    let cur = folderId;
+    while (cur && !seen.has(cur)) {          // 데이터가 꼬여 고리가 생겨도 멈춘다
+        seen.add(cur);
+        const f = state.allFolders.find(fo => fo.id === cur);
+        if (!f) break;
+        path.unshift(f);
+        cur = f.parentFolderId;
+    }
+    return path;
+}
+
+/** 정해진 순서대로 줄 세운다 (같은 자리 것들끼리) */
+function sortByOrder(arr, primary, fallback) {
+    const idx = (id) => {
+        let i = primary.indexOf(id);
+        if (i >= 0) return i;
+        i = fallback.indexOf(id);
+        return i >= 0 ? 10000 + i : 99999;
+    };
+    return arr.slice().sort((a, b) => idx(a.id) - idx(b.id));
+}
+function foldersUnder(parentId) {
+    const arr = state.allFolders.filter(f => !f.isDeleted && (f.parentFolderId || null) === parentId);
+    return sortByOrder(arr, parentId === null ? (state.rootOrder || []) : state.folderOrder, state.folderOrder);
+}
+function topicsUnder(parentId) {
+    const arr = state.allCategories.filter(c => !c.isDeleted && (c.folderId || null) === parentId);
+    return sortByOrder(arr, parentId === null ? (state.rootOrder || []) : state.categoryOrder, state.categoryOrder);
+}
+
+export function openMoveModal() { openMovePicker('entry'); }
+export function openTopicMoveModal() { openMovePicker('topic'); }
+export function openFolderMoveModal() { openMovePicker('folder'); }
+
+function openMovePicker(kind) {
+    getEl('context-menu')?.classList.add('hidden');
+    getEl('category-context-menu')?.classList.add('hidden');
+    getEl('folder-context-menu')?.classList.add('hidden');
+    movePickerKind = kind;
+    const modal = getEl('move-modal');
+    if (!modal) return;
+    if (!renderMovePicker()) return;     // 옮길 대상이 없으면 열지 않는다
+    openModal(modal);
+}
+
+/** 이동 창 한 줄 */
+function buildMoveRow({ label, icon, depth, selectable, isCurrent, note, onPick }) {
+    const row = document.createElement('div');
+    row.className = 'move-row' + (selectable ? '' : ' muted') + (isCurrent ? ' current' : '');
+    row.style.paddingLeft = `${12 + depth * 18}px`;
+    row.innerHTML = `<i class="ph ${icon}"></i><span class="move-row-label">${escapeHtml(label)}</span>`
+        + (isCurrent ? '<em class="move-row-note">지금 여기</em>'
+                     : (note ? `<em class="move-row-note">${escapeHtml(note)}</em>` : ''));
+    if (selectable && !isCurrent) row.onclick = onPick;
+    return row;
+}
+
+function renderMovePicker() {
+    const list = getEl('move-category-list');
+    const title = getEl('move-modal-title');
+    const hint = getEl('move-modal-hint');
+    const newBtn = getEl('move-new-btn');
+    if (!list) return false;
+
+    const kind = movePickerKind;
+    const isBulk = kind === 'entry' && state.isSelectMode && state.selectedEntries.length > 0;
+
+    let movingName = '';
+    let here = null;                 // 지금 있는 자리 (글이면 주제 id, 그 밖이면 폴더 id·null)
+    let blocked = new Set();         // 고를 수 없는 폴더 (자기 자신과 그 안쪽)
+
+    if (kind === 'entry') {
+        if (isBulk) movingName = `글 ${state.selectedEntries.length}개`;
+        else {
+            const e = state.entries.find(x => x.id === state.contextTargetId);
+            if (!e) return false;
+            movingName = e.title || '제목 없음';
+            here = e.category || null;
+        }
+    } else if (kind === 'topic') {
+        const c = state.allCategories.find(x => x.id === state.contextCatId && !x.isDeleted);
+        if (!c) return false;
+        movingName = c.name;
+        here = c.folderId || null;
+    } else {
+        const f = state.allFolders.find(x => x.id === state.contextFolderId && !x.isDeleted);
+        if (!f) return false;
+        movingName = f.name;
+        here = f.parentFolderId || null;
+        blocked = new Set([f.id, ...descendantFolderIds(f.id)]);
     }
 
-    const sortedCats = [];
-    state.categoryOrder.forEach(id => { const found = state.allCategories.find(c => c.id === id); if(found && !found.isDeleted) sortedCats.push(found); });
-    state.allCategories.forEach(c => { if(!c.isDeleted && !state.categoryOrder.includes(c.id)) sortedCats.push(c); });
+    if (title) title.textContent = `${movingName} 이동`;
+    if (hint) hint.textContent = kind === 'entry'
+        ? '글을 담을 주제를 고르세요. 글은 주제에만 담깁니다.'
+        : '들어갈 폴더를 고르세요.';
+    if (newBtn) {
+        newBtn.innerHTML = kind === 'entry'
+            ? '<i class="ph ph-tag"></i> 맨 위에 새 주제 만들어 옮기기'
+            : '<i class="ph ph-folder-plus"></i> 맨 위에 새 폴더 만들어 옮기기';
+        newBtn.onclick = createFromMovePicker;
+    }
 
-    sortedCats.forEach(cat => {
-        const div = document.createElement('div');
-        div.className = `cat-select-item ${state.currentCategory === cat.id ? 'current' : ''}`;
-        div.innerText = cat.name;
-        if (state.currentCategory !== cat.id) {
-            div.onclick = async () => {
-                if (isBulk) {
-                    await bulkUpdateEntryField([...state.selectedEntries], { category: cat.id });
-                    exitSelectMode();
-                } else {
-                    await updateEntryField(state.contextTargetId, { category: cat.id });
-                }
-                closeAllModals(true);
-            };
+    list.innerHTML = '';
+
+    // 폴더 밖(맨 위)으로 빼기 — 주제·폴더만 해당
+    if (kind !== 'entry') {
+        list.appendChild(buildMoveRow({
+            label: '맨 위 (폴더 밖)', icon: 'ph-house', depth: 0,
+            selectable: true, isCurrent: here === null,
+            onPick: () => applyMove(null)
+        }));
+    }
+
+    const renderLevel = (parentId, depth) => {
+        foldersUnder(parentId).forEach(f => {
+            const isSelf = blocked.has(f.id);
+            list.appendChild(buildMoveRow({
+                label: f.name, icon: 'ph-folder-simple', depth,
+                // 글은 폴더에 바로 담기지 않는다 — 폴더는 길만 보여 준다
+                selectable: kind !== 'entry' && !isSelf,
+                isCurrent: kind !== 'entry' && here === f.id,
+                note: isSelf ? '자기 안으로는 못 옮김' : '',
+                onPick: () => applyMove(f.id)
+            }));
+            renderLevel(f.id, depth + 1);
+        });
+        topicsUnder(parentId).forEach(c => {
+            list.appendChild(buildMoveRow({
+                label: c.name, icon: 'ph-tag', depth,
+                selectable: kind === 'entry',
+                isCurrent: kind === 'entry' && here === c.id,
+                note: kind === 'entry' ? `글 ${topicEntryCount(c.id)}개` : '',
+                onPick: () => applyMove(c.id)
+            }));
+        });
+    };
+    renderLevel(null, 0);
+
+    if (kind !== 'entry' && list.children.length <= 1) {
+        const empty = document.createElement('div');
+        empty.className = 'move-empty';
+        empty.textContent = '아직 만든 폴더가 없습니다.';
+        list.appendChild(empty);
+    }
+    return true;
+}
+
+async function applyMove(targetId) {
+    const kind = movePickerKind;
+
+    if (kind === 'entry') {
+        const isBulk = state.isSelectMode && state.selectedEntries.length > 0;
+        if (isBulk) {
+            await bulkUpdateEntryField([...state.selectedEntries], { category: targetId });
+            exitSelectMode();
+        } else {
+            await updateEntryField(state.contextTargetId, { category: targetId });
         }
-        moveCategoryList.appendChild(div);
-    });
+        closeAllModals(true);
+        return;
+    }
+
+    // 주제·폴더는 어느 폴더에 속하는지를 바꾼다. 맨 위로 뺄 때는 루트 순서에도 넣어 준다.
+    const moveInto = (item, parentKey) => {
+        if (targetId) {
+            item[parentKey] = targetId;
+            state.rootOrder = (state.rootOrder || []).filter(id => id !== item.id);
+        } else {
+            delete item[parentKey];
+            state.rootOrder = state.rootOrder || [];
+            if (!state.rootOrder.includes(item.id)) state.rootOrder.push(item.id);
+        }
+    };
+
+    if (kind === 'topic') {
+        const c = state.allCategories.find(x => x.id === state.contextCatId);
+        if (!c) return;
+        moveInto(c, 'folderId');
+    } else {
+        const f = state.allFolders.find(x => x.id === state.contextFolderId);
+        if (!f) return;
+        // 자기 안으로 넣으면 트리가 고리가 되어 화면이 멈춘다. 창에서 이미 막지만 한 번 더 확인한다.
+        if (targetId && (targetId === f.id || descendantFolderIds(f.id).includes(targetId))) return;
+        moveInto(f, 'parentFolderId');
+    }
+
+    state.categoryUpdatedAt = new Date().toISOString();
+    saveCategoriesToLocal();
+    closeAllModals(true);
+    closeFolderPopup();
+    renderFolders();
+    renderEntries();
+    syncSoon();
+}
+
+/** 이동 창에서 바로 새 주제·새 폴더를 만들어 그리로 옮긴다 */
+function createFromMovePicker() {
+    const kind = movePickerKind;
+    const name = prompt(kind === 'entry' ? '새 주제 이름:' : '새 폴더 이름:');
+    if (!name || !name.trim()) return;
+    const id = (kind === 'entry' ? 'custom_' : 'folder_') + Date.now();
+    if (kind === 'entry') {
+        state.allCategories.push({ id, name: name.trim() });
+        state.categoryOrder.push(id);
+    } else {
+        state.allFolders.push({ id, name: name.trim() });
+        state.folderOrder.push(id);
+    }
+    (state.rootOrder = state.rootOrder || []).push(id);
+    state.categoryUpdatedAt = new Date().toISOString();
+    saveCategoriesToLocal();
+    applyMove(id);
 }
 
 function toggleEntrySelection(id) {

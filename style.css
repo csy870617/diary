@@ -893,3 +893,43 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
 .tt-formula-text { flex: 1; min-width: 0; font-family: var(--text-sans); font-size: 12px; color: var(--gray-700, var(--gray-900)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 계산 결과가 든 칸임을 옅은 표시로 알려준다 */
 #editor-body td[data-formula], #editor-body th[data-formula] { background-image: linear-gradient(135deg, transparent 0 6px, var(--accent) 6px 7px, transparent 7px); background-repeat: no-repeat; background-position: top right; }
+
+/* ── 지금 보고 있는 자리 (폴더 › 하위폴더 › 주제) ───────────────────── */
+.location-bar { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 6px 20px 10px; font-family: var(--text-sans); }
+.location-bar.hidden { display: none; }
+.loc-seg { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--gray-500); background: none; border: none; padding: 3px 6px; border-radius: 6px; font-family: inherit; }
+button.loc-seg { cursor: pointer; }
+button.loc-seg:hover { background: var(--gray-100); color: var(--gray-900); }
+.loc-seg i { font-size: 14px; }
+.loc-topic { color: var(--gray-900); font-weight: 600; }
+.loc-sep { color: var(--gray-400); font-size: 13px; }
+.loc-count { font-style: normal; font-size: 11px; color: var(--gray-400); font-weight: 400; margin-left: 2px; }
+.loc-more { background: none; border: none; color: var(--gray-400); cursor: pointer; padding: 3px 6px; border-radius: 6px; display: inline-flex; align-items: center; font-size: 15px; }
+.loc-more:hover { background: var(--gray-100); color: var(--gray-900); }
+
+/* ── 이동 창 (글·주제·폴더 공용) ─────────────────────────────────────── */
+.move-modal-inner { width: 340px; max-width: calc(100vw - 40px); }
+.move-hint { font-size: 12px; color: var(--gray-500); margin: -4px 0 10px; font-family: var(--text-sans); line-height: 1.5; }
+.move-tree { max-height: 46vh; overflow-y: auto; margin-bottom: 10px; }
+.move-row { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: 6px; font-size: 14px; color: var(--gray-900); cursor: pointer; font-family: var(--text-sans); }
+.move-row:hover { background: var(--gray-100); }
+.move-row i { font-size: 15px; color: var(--gray-400); flex-shrink: 0; }
+.move-row-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.move-row-note { font-style: normal; font-size: 11px; color: var(--gray-400); flex-shrink: 0; }
+/* 고를 수 없는 줄 — 글을 옮길 때의 폴더처럼 '길'만 보여 주는 경우 */
+.move-row.muted { color: var(--gray-400); cursor: default; }
+.move-row.muted:hover { background: none; }
+.move-row.current { background: var(--active-bg); color: var(--active-text); font-weight: 600; cursor: default; }
+.move-row.current i { color: var(--active-text); }
+.move-row.current .move-row-note { color: var(--active-text); opacity: 0.75; }
+.move-empty { padding: 16px 12px; text-align: center; font-size: 13px; color: var(--gray-400); font-family: var(--text-sans); }
+
+/* ── 메뉴·팝업의 ⋯ 버튼과 안내 문구 ─────────────────────────────────── */
+.popup-item-more, .popup-more { background: none; border: none; color: var(--gray-400); cursor: pointer; padding: 2px 4px; border-radius: 5px; display: inline-flex; align-items: center; font-size: 14px; flex-shrink: 0; }
+.popup-item-more:hover, .popup-more:hover { background: var(--gray-200); color: var(--gray-900); }
+.popup-more { margin-left: auto; }
+.popup-header-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctx-head { font-size: 11px; font-weight: 600; color: var(--gray-500); padding: 8px 16px 6px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--gray-100); font-family: var(--text-sans); }
+.ctx-head i { font-size: 13px; }
+.ctx-head-note { font-weight: 400; color: var(--gray-400); }
+.add-menu-note { margin-left: auto; font-size: 11px; color: var(--gray-400); padding-left: 10px; }
