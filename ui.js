@@ -387,15 +387,18 @@ function initFolderRowSortable(row) {
         animation: 150, delay: 200, delayOnTouchOnly: true, touchStartThreshold: 5,
         filter: '.nav-add-btn',
         preventOnFilter: false,
+        onStart: () => { chipDragging = true; closeFolderPopup(); },   // 끌기 시작하면 펼친 화면을 접는다
         onEnd: async () => {
+            chipDragging = false;
             const newOrder = [];
             row.querySelectorAll('[data-item-id]').forEach(el => {
                 if (el.dataset.itemId) newOrder.push(el.dataset.itemId);
             });
-            if (newOrder.length === 0) return;
+            if (newOrder.length === 0) { renderFolders(); return; }
             state.rootOrder = newOrder;
             state.categoryUpdatedAt = new Date().toISOString();
             saveCategoriesToLocal();
+            renderFolders();     // 접힌 뒤 칩의 '열림' 표시를 정리한다
             syncSoon();
         }
     });
@@ -444,7 +447,56 @@ function buildTopicNavItem(cat) {
     return btn;
 }
 
+/**
+ * 이 폴더 안에서 맨 위에 있는 주제를 찾는다.
+ * 바로 아래에 주제가 없으면 하위 폴더 안까지 차례로 들어가 찾는다.
+ * (폴더를 눌렀는데 아무 글도 안 보이면 헛걸음이 되므로)
+ */
+function firstTopicInFolder(folderId, seen) {
+    const guard = seen || new Set();
+    if (guard.has(folderId)) return null;      // 데이터가 꼬여 고리가 생겨도 멈춘다
+    guard.add(folderId);
+    const topics = topicsUnder(folderId);
+    if (topics.length > 0) return topics[0].id;
+    for (const sub of foldersUnder(folderId)) {
+        const found = firstTopicInFolder(sub.id, guard);
+        if (found) return found;
+    }
+    return null;
+}
+
+/* 펼친 폴더 화면은 다른 행동이 시작되면 접는다.
+   모바일에서 목록을 쓸어 내리거나 칩 줄을 옆으로 밀 때 덮은 채로 남아 있으면
+   화면을 가리고, 칩에 붙여 둔 자리도 어긋난다. */
+let popupDismissWired = false;
+let popupOpenedAt = 0;
+// 칩을 끌고 있는 동안에는 칩 줄을 다시 그리지 않는다. 다시 그리면 끌고 있던
+// 요소가 통째로 교체되어 끌기가 중간에 끊긴다.
+let chipDragging = false;
+
+function wirePopupDismiss() {
+    if (popupDismissWired) return;
+    popupDismissWired = true;
+
+    const dismiss = (e) => {
+        const popup = getEl('folder-popup');
+        if (!popup || popup.classList.contains('hidden')) return;
+        // 팝업 안에서 미는 것은 그 안의 목록을 넘기는 것이므로 놔둔다
+        if (e && e.target && e.target.closest && e.target.closest('#folder-popup')) return;
+        // 팝업을 여는 그 손짓의 잔여 이벤트로 곧바로 닫히지 않게 한 박자 둔다
+        if (Date.now() - popupOpenedAt < 250) return;
+        closeFolderPopup();
+    };
+
+    document.addEventListener('touchmove', dismiss, { passive: true, capture: true });
+    document.addEventListener('scroll', dismiss, { passive: true, capture: true });
+    window.addEventListener('wheel', dismiss, { passive: true });
+    window.addEventListener('resize', () => closeFolderPopup());
+}
+
 export function showFolderPopup(folderId, anchor) {
+    wirePopupDismiss();
+    popupOpenedAt = Date.now();
     getEl('add-menu-popup')?.classList.add('hidden');
     getEl('context-menu')?.classList.add('hidden');
     getEl('category-context-menu')?.classList.add('hidden');
@@ -452,6 +504,17 @@ export function showFolderPopup(folderId, anchor) {
     popupFolderId = folderId;
     popupHistory = [];
     popupAnchor = anchor;
+
+    // 폴더를 열면 그 안 맨 위 주제의 글이 바로 보이게 한다.
+    // 이미 이 폴더 안의 주제를 보고 있다면 건드리지 않는다.
+    const first = firstTopicInFolder(folderId);
+    if (first && !topicInFolderTree(state.currentCategory, folderId)) {
+        state.currentCategory = first;
+        applyCategorySort();
+        if (state.isSelectMode) exitSelectMode();
+        renderEntries();
+    }
+
     renderFolderPopupContent();
     positionFolderPopup();
     getEl('folder-popup').classList.remove('hidden');
@@ -466,7 +529,7 @@ export function closeFolderPopup() {
     popupFolderId = null;
     popupHistory = [];
     popupAnchor = null;
-    if (wasOpen) renderFolders();
+    if (wasOpen && !chipDragging) renderFolders();
 }
 
 /** 팝업 줄에 붙는 ⋯ 버튼. 우클릭·길게누르기를 모르는 사람도 쓸 수 있도록 눈에 보이게 둔다. */
@@ -583,46 +646,6 @@ function renderFolderPopupContent() {
         list.appendChild(item);
     });
 
-    const divider = document.createElement('div');
-    divider.className = 'popup-divider';
-    list.appendChild(divider);
-
-    const addTopic = document.createElement('div');
-    addTopic.className = 'popup-item popup-add-item';
-    addTopic.innerHTML = '<i class="ph ph-plus"></i><span class="popup-item-label">새 주제</span>';
-    addTopic.onclick = (e) => {
-        e.stopPropagation();
-        const name = prompt(`'${folder.name}' 안에 새 주제 이름:`);
-        if (!name || !name.trim()) return;
-        const id = 'custom_' + Date.now();
-        state.allCategories.push({ id, name: name.trim(), folderId: popupFolderId });
-        state.categoryOrder.push(id);
-        state.categoryUpdatedAt = new Date().toISOString();
-        saveCategoriesToLocal();
-        renderFolderPopupContent();
-        renderFolders();
-        syncSoon();
-    };
-    list.appendChild(addTopic);
-
-    const addFolder = document.createElement('div');
-    addFolder.className = 'popup-item popup-add-item';
-    addFolder.innerHTML = '<i class="ph ph-folder-plus"></i><span class="popup-item-label">새 하위 폴더</span>';
-    addFolder.onclick = (e) => {
-        e.stopPropagation();
-        const name = prompt(`'${folder.name}' 안에 새 하위 폴더 이름:`);
-        if (!name || !name.trim()) return;
-        const id = 'folder_' + Date.now();
-        state.allFolders.push({ id, name: name.trim(), parentFolderId: popupFolderId });
-        state.folderOrder.push(id);
-        state.categoryUpdatedAt = new Date().toISOString();
-        saveCategoriesToLocal();
-        renderFolderPopupContent();
-        renderFolders();
-        syncSoon();
-    };
-    list.appendChild(addFolder);
-
     initPopupSortable(list);
 }
 
@@ -636,7 +659,8 @@ function initPopupSortable(list) {
         touchStartThreshold: 5,
         draggable: '.folder-popup-item, .topic-popup-item',
         // ⋯ 버튼에서 시작한 손짓은 끌기로 보지 않는다 (메뉴가 열려야 한다)
-        filter: '.popup-add-item, .popup-divider, .popup-empty, .popup-item-more',
+        // ⋯ 버튼에서 시작한 손짓은 끌기로 보지 않는다 (메뉴가 열려야 한다)
+        filter: '.popup-empty, .popup-item-more',
         preventOnFilter: false,
         onEnd: async () => {
             const newFolderIds = [];
