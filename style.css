@@ -102,10 +102,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .popup-item.active { background: var(--active-bg); color: var(--active-text); font-weight: 600; }
 .popup-item .popup-item-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .popup-item .popup-item-arrow { font-size: 11px; opacity: 0.6; }
-.popup-item.popup-add-item { color: var(--gray-500); }
-.popup-item.popup-add-item:hover { color: var(--gray-900); }
 .popup-empty { text-align: center; color: var(--gray-400); font-size: 12px; padding: 12px 0; }
-.popup-divider { height: 1px; background: var(--gray-100); margin: 4px 0; }
 
 .add-menu-popup { position: fixed; background: var(--surface-color); border: 1px solid var(--gray-200); border-radius: 10px; box-shadow: 0 8px 24px var(--shadow-color); z-index: 3100; min-width: 150px; padding: 6px; display: flex; flex-direction: column; gap: 2px; font-family: var(--text-sans); }
 .add-menu-popup.hidden { display: none; }
