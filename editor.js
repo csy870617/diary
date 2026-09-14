@@ -3,7 +3,7 @@ import { saveEntry } from './data.js';
 import { syncNow, syncSoon } from './drive.js';
 import { openModal, hideTransientPopups } from './ui.js';
 import { setupLinkPreservation, autoLink, isSafeUrl } from './utils.js';
-import { recalcTable, recalcAll, applyFormula, clearFormula, buildRangeFormula, targetCellFor, columnLabel, buildGrid } from './formula.js';
+import { recalcTable, recalcAll, applyFormula, clearFormula, buildRangeFormula, targetCellFor, columnLabel, buildGrid, parseNumber, formatResult } from './formula.js';
 
 let currentSelectedElement = null; 
 let lastClickedCell = null; 
@@ -1004,7 +1004,56 @@ function extendCellSelection(anchor, td) {
     selectCellRange(anchor, td);
 }
 
-function focusCell(cell) {
+/* ── 표 안에서의 키 조작 도우미 ──────────────────────────────────── */
+
+/** 지금 커서가 놓인 칸 (표 밖이면 null) */
+function caretCellNow() {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return null;
+    let node = sel.getRangeAt(0).startContainer;
+    if (node && node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+    return (node && node.closest) ? node.closest('td, th') : null;
+}
+
+/** 이 칸의 글자가 이미 통째로 잡혀 있는가 (빈 칸은 잡을 게 없으므로 그렇다고 본다) */
+function isWholeCellSelected(cell) {
+    if (!cell.textContent.trim()) return true;
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return false;
+    const r = sel.getRangeAt(0);
+    const whole = document.createRange();
+    whole.selectNodeContents(cell);
+    return r.compareBoundaryPoints(Range.START_TO_START, whole) <= 0
+        && r.compareBoundaryPoints(Range.END_TO_END, whole) >= 0;
+}
+
+/** 어떤 요소의 글자를 통째로 잡는다 */
+function selectContentsOf(el) {
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+}
+
+function isWholeTablePicked(table) {
+    const all = table.querySelectorAll('td');
+    return all.length > 0 && Array.from(all).every(c => c.classList.contains('selected-cell'));
+}
+
+/** 표의 모든 칸을 고른 상태로 만든다 */
+function pickWholeTable(table) {
+    window.getSelection().removeAllRanges();
+    clearCellSelection();
+    table.classList.add('selecting-cells');
+    table.querySelectorAll('td').forEach(c => c.classList.add('selected-cell'));
+    if (!lastClickedCell || !table.contains(lastClickedCell)) {
+        lastClickedCell = table.rows[0] && table.rows[0].cells[0];
+    }
+    updateTableTools();
+}
+
+function focusCell(cell, selectContent) {
     if (!cell) return;
 
     // 셀 선택 해제
@@ -1012,7 +1061,13 @@ function focusCell(cell) {
 
     // 셀에 포커스
     cell.focus();
-    
+
+    // Tab으로 옮겨 온 경우에는 칸의 글자를 통째로 잡아 둔다.
+    // 그래야 바로 쳐서 덮어쓸 수 있다 (엑셀·워드와 같은 동작).
+    if (selectContent) {
+        try { selectContentsOf(cell); lastClickedCell = cell; return; } catch (e) {}
+    }
+
     // 커서를 셀의 시작점에 위치
     const sel = window.getSelection();
     const range = document.createRange();
@@ -1364,6 +1419,41 @@ function setupBasicHandling() {
             }
         }
         
+        /* 표 안에서의 Cmd/Ctrl+A: 칸 → 표 전체 → 글 전체 순으로 넓혀 잡는다.
+           예전에는 칸을 무시하고 곧바로 글 전체가 잡혀서, 칸 하나만 고쳐 쓰려 해도
+           표가 통째로 지워질 위험이 있었다. */
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'a') {
+            const caret = caretCellNow();
+            const picked = editorBody.querySelector('td.selected-cell');
+            const table = (caret && caret.closest('table')) || (picked && picked.closest('table'));
+            if (table) {
+                e.preventDefault();
+                if (picked && isWholeTablePicked(table)) {
+                    // 3단계: 글 전체
+                    clearCellSelection();
+                    hideTableTools();
+                    selectContentsOf(editorBody);
+                } else if (caret && !isWholeCellSelected(caret)) {
+                    // 1단계: 이 칸 안의 글자
+                    clearCellSelection();
+                    selectContentsOf(caret);
+                } else {
+                    // 2단계: 표의 모든 칸
+                    pickWholeTable(table);
+                }
+                return;
+            }
+            // 표 밖이라면 예전처럼 글 전체 (브라우저 기본 동작)
+        }
+
+        // Escape: 골라 둔 칸을 푼다
+        if (e.key === 'Escape' && editorBody.querySelector('td.selected-cell')) {
+            e.preventDefault();
+            clearCellSelection();
+            hideTableTools();
+            return;
+        }
+
         // 표 셀 내에서 Tab과 화살표 키 처리
         let currentCell = null;
         const sel = window.getSelection();
@@ -1412,7 +1502,7 @@ function setupBasicHandling() {
             }
 
             if (nextCell) {
-                focusCell(nextCell);
+                focusCell(nextCell, true);   // 바로 쳐서 덮어쓸 수 있게 글자를 잡아 준다
             }
             return;
         }
@@ -1431,7 +1521,7 @@ function setupBasicHandling() {
             }
 
             if (prevCell) {
-                focusCell(prevCell);
+                focusCell(prevCell, true);
             }
             return;
         }
@@ -2591,7 +2681,22 @@ export function updateTableTools() {
 
     const { rowCount, colCount } = buildTableGrid(t.table);
     const posEl = document.getElementById('table-tools-pos');
-    if (posEl) posEl.textContent = `${t.row + 1}번째 줄 · ${t.col + 1}번째 칸  (${rowCount}×${colCount})`;
+    const picked = Array.from(t.table.querySelectorAll('td.selected-cell'));
+    if (posEl) {
+        if (picked.length >= 2) {
+            // 여러 칸을 골랐을 때는 자리 대신 고른 것의 요약을 보여 준다.
+            // 버튼을 누르기 전에 값이 맞는지 눈으로 확인할 수 있다.
+            const nums = picked.map(c => parseNumber(c.textContent)).filter(n => n !== null);
+            let text = `${picked.length}칸 선택`;
+            if (nums.length > 0) {
+                const sum = nums.reduce((a, b) => a + b, 0);
+                text += ` · 합 ${formatResult(sum)} · 평균 ${formatResult(sum / nums.length)}`;
+            }
+            posEl.textContent = text;
+        } else {
+            posEl.textContent = `${t.row + 1}번째 줄 · ${t.col + 1}번째 칸  (${rowCount}×${colCount})`;
+        }
+    }
 
     // 마지막 하나는 지울 수 없으므로 버튼을 흐리게 해 미리 알려준다
     const rowDel = document.getElementById('tt-row-del');
@@ -2599,7 +2704,7 @@ export function updateTableTools() {
     if (rowDel) rowDel.disabled = rowCount <= 1;
     if (colDel) colDel.disabled = colCount <= 1;
     const merge = document.getElementById('tt-merge');
-    if (merge) merge.disabled = document.querySelectorAll('td.selected-cell').length < 2;
+    if (merge) merge.disabled = picked.length < 2;
 
     // 현재 표 폭을 버튼에 표시 (직접 끌어서 조절한 경우 등 해당 없으면 아무것도 선택하지 않음)
     const curW = (t.table.style.width || '').trim();
@@ -2810,6 +2915,53 @@ export function equalizeRows() {
 }
 
 /**
+ * 고른 칸이 없을 때, 지금 칸에서 위쪽으로 이어지는 숫자 칸들을 잡는다.
+ * 머리글("1주")이나 빈 칸을 만나면 거기서 멈추므로 숫자 덩어리만 정확히 잡힌다.
+ * 위쪽에 숫자가 없으면 같은 줄의 왼쪽을 본다 (가로로 늘어놓은 표).
+ * 이미 계산식이 든 칸은 건너뛴다 — 합계를 또 더하면 두 배가 된다.
+ */
+function autoRangeCells(table, row, col) {
+    const grid = buildGrid(table);
+    const self = (grid[row] || [])[col];
+
+    // 어디까지가 숫자 덩어리인지 가릴 때는 계산할 때보다 깐깐하게 본다.
+    // 계산은 "12명"도 12로 읽지만, 여기서는 "1월"·"1주" 같은 이름표에서 멈춰야 한다.
+    // (그러지 않으면 "1월"이 1로 읽혀 합계에 슬쩍 끼어든다)
+    const looksLikePlainNumber = (text) => {
+        const t = String(text == null ? '' : text).trim();
+        return t !== '' && /^-?[\d,]+(\.\d+)?\s*(원|₩|\$|%)?$/.test(t);
+    };
+
+    const at = (i, step) => {
+        const r = step === 'up' ? row - i : row;
+        const c = step === 'up' ? col : col - i;
+        if (r < 0 || c < 0) return null;
+        const cell = (grid[r] || [])[c];
+        return (!cell || cell === self) ? null : cell;
+    };
+
+    const scan = (step) => {
+        const first = at(1, step);
+        if (!first) return [];
+        // 바로 위(옆)가 이미 계산 칸이면 그 계산 칸들만 모은다 — 소계들의 총계.
+        // 숫자까지 같이 더하면 소계에 든 값을 두 번 더하게 된다.
+        const wantFormula = first.hasAttribute('data-formula');
+        const found = [];
+        for (let i = 1; i < 200; i++) {
+            const cell = at(i, step);
+            if (!cell) break;
+            const isFormula = cell.hasAttribute('data-formula');
+            if (wantFormula ? !isFormula : (isFormula || !looksLikePlainNumber(cell.textContent))) break;
+            found.unshift(cell);
+        }
+        return found;
+    };
+
+    const up = scan('up');
+    return up.length > 0 ? up : scan('left');
+}
+
+/**
  * 고른 칸들의 합계·평균 등을 계산해 결과 칸에 넣는다.
  * 세로로 골랐으면 바로 아래 칸, 가로로 골랐으면 바로 오른쪽 칸에 넣는다.
  * 그 자리가 표 밖이면 줄이나 칸을 하나 새로 만든다.
@@ -2819,15 +2971,11 @@ export function insertTableFunction(fn) {
     if (!t) return;
     const table = t.table;
     let cells = Array.from(table.querySelectorAll('td.selected-cell'));
-    // 아무것도 고르지 않았으면 지금 칸이 속한 세로줄에서 위쪽 숫자들을 잡는다
+    // 아무것도 고르지 않았으면 엑셀처럼 바로 위(없으면 왼쪽)로 이어지는 숫자들을 잡는다
     if (cells.length === 0) {
-        const grid = buildGrid(table);
-        for (let r = 0; r < t.row; r++) {
-            const c = (grid[r] || [])[t.col];
-            if (c && !cells.includes(c)) cells.push(c);
-        }
+        cells = autoRangeCells(table, t.row, t.col);
         if (cells.length === 0) {
-            alert('계산할 칸을 먼저 골라주세요.\n끌어서 고르거나, Shift+클릭(여기까지) · Ctrl(⌘)+클릭(하나씩)으로 고를 수 있습니다.');
+            alert('계산할 칸을 먼저 골라 주세요.\n끌어서 고르거나, Shift+클릭(여기까지) · Ctrl(⌘)+클릭(하나씩)으로 고를 수 있습니다.\n\n숫자가 늘어선 바로 아래(또는 오른쪽) 빈 칸에서 누르면 저절로 잡힙니다.');
             return;
         }
     }
