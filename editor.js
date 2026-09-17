@@ -1053,6 +1053,56 @@ function pickWholeTable(table) {
     updateTableTools();
 }
 
+/* ── 줄 단위 들여쓰기 ───────────────────────────────────────────────
+   본문은 white-space: pre-wrap 이라 줄 앞 공백이 그대로 보인다. */
+const INDENT_TEXT = '   ';          // 3칸
+const LINE_BLOCK_SEL = 'p,div,li,h1,h2,h3,h4,h5,h6,blockquote,pre';
+
+/** 지금 고른 범위에 걸친 '줄'들 (가장 안쪽 블록만, 표 안은 제외) */
+function selectedLineBlocks() {
+    const editorBody = document.getElementById('editor-body');
+    const sel = window.getSelection();
+    if (!editorBody || !sel || !sel.rangeCount) return [];
+    const range = sel.getRangeAt(0);
+    const lines = [];
+    editorBody.querySelectorAll(LINE_BLOCK_SEL).forEach(el => {
+        if (el.closest('table')) return;                  // 표 안에서는 Tab이 칸 이동이다
+        if (el.querySelector(LINE_BLOCK_SEL)) return;     // 블록을 감싸는 바깥 블록은 건너뛴다
+        if (el.querySelector('table')) return;            // 표를 감싼 칸(.table-wrapper)도 줄이 아니다
+        if (range.intersectsNode(el)) lines.push(el);
+    });
+    return lines;
+}
+
+function indentLine(el) {
+    el.insertBefore(document.createTextNode(INDENT_TEXT), el.firstChild);
+    el.normalize();   // 앞 공백을 한 덩어리로 합쳐 둔다 (저장본도 깔끔해진다)
+}
+
+/** 줄 앞의 공백을 최대 3칸까지 걷어낸다 */
+function outdentLine(el) {
+    // 앞서 걷어내고 남은 빈 글자 조각이 맨 앞에 있으면 거기서 막힌다. 먼저 합친다.
+    el.normalize();
+    let node = el.firstChild;
+    while (node && node.nodeType !== Node.TEXT_NODE && node.firstChild) node = node.firstChild;
+    if (!node || node.nodeType !== Node.TEXT_NODE) return;
+    const m = /^[ \t\u00A0]{1,3}/.exec(node.textContent);
+    if (m) node.textContent = node.textContent.slice(m[0].length);
+}
+
+/** 손본 줄들을 다시 고른 상태로 둔다 (Tab을 이어서 눌러 더 들여쓸 수 있게) */
+function reselectLines(lines) {
+    try {
+        const first = lines[0], last = lines[lines.length - 1];
+        const range = document.createRange();
+        range.setStart(first, 0);
+        range.setEnd(last, last.childNodes.length);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+    } catch (e) { /* 범위를 다시 잡지 못해도 들여쓰기 자체는 끝났다 */ }
+}
+
 function focusCell(cell, selectContent) {
     if (!cell) return;
 
@@ -1586,11 +1636,27 @@ function setupBasicHandling() {
     function handleNonCellKeys(e) {
         const selectedCells = document.querySelectorAll('td.selected-cell');
 
-        // 본문에서 Tab 입력 시 3칸 들여쓰기
+        /* Tab: 들여쓰기 (Shift+Tab: 내어쓰기)
+           여러 줄을 고른 채로 Tab을 누르면 고른 글이 3칸 공백으로 바뀌어 사라졌다.
+           insertText가 '고른 것을 지우고 그 자리에 넣는' 동작이기 때문이다.
+           → 고른 줄이 여럿이면 줄마다 앞에 들여쓰기를 붙인다. */
         if (e.key === 'Tab') {
             e.preventDefault();
+            const sel = window.getSelection();
+            const lines = selectedLineBlocks();
+            const manyLines = lines.length > 1 && sel && !sel.isCollapsed;
+
+            if (manyLines || (e.shiftKey && lines.length > 0)) {
+                saveBeforeChange('indent');
+                if (e.shiftKey) lines.forEach(outdentLine);
+                else lines.forEach(indentLine);
+                if (manyLines) reselectLines(lines);   // 이어서 또 누를 수 있게 고른 상태를 유지
+                triggerAutoSave();
+                return;
+            }
+
             saveBeforeChange('typing');
-            document.execCommand('insertText', false, '   ');
+            document.execCommand('insertText', false, INDENT_TEXT);
             return;
         }
         
