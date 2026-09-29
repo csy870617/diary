@@ -1491,6 +1491,11 @@ function pdfBaseOptions(filename) {
             scale: 2,
             useCORS: true,
             backgroundColor: '#ffffff',   // 다크모드 잔재로 배경이 비치지 않도록
+            // 캡처 틀은 화면에 고정(position:fixed)돼 있는데, html2canvas는 창이 스크롤된
+            // 만큼을 더해 그린다. 그래서 글을 읽다가(=스크롤된 채) 저장하면 첫 장 위쪽에
+            // 스크롤한 높이만큼 빈 공간이 생겼다. 스크롤을 0으로 못박아 창 위치와 무관하게 한다.
+            scrollX: 0,
+            scrollY: 0,
             // 다크모드에서도 항상 라이트모드 스타일로 저장 (캡처용 복제본에서만 테마 제거 → 화면 깜빡임 없음)
             onclone: (clonedDoc) => { clonedDoc.documentElement.removeAttribute('data-theme'); }
         },
