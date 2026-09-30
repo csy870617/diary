@@ -326,6 +326,8 @@ function saveInitialState() {
 function canSaveEditorNow() {
     const editBody = document.getElementById('editor-body');
     if (!editBody) return false;
+    // 공유 링크로 연 남의 글은 편집 모드로 바꿔도 내 일지에 저장하지 않는다
+    if (state.isShareView) return false;
     if (state.currentViewMode !== 'default' && state.currentViewMode !== 'book-edit') return false;
     const writeModal = document.getElementById('write-modal');
     if (writeModal && writeModal.classList.contains('hidden')) return false;
@@ -1580,8 +1582,10 @@ function setupBasicHandling() {
         if (e.key === 'ArrowDown') {
             e.preventDefault();
             e.stopPropagation();
-            if (rowIdx < maxRow) {
-                const nextCell = getCellAt(table, rowIdx + 1, logicalColIdx);
+            // 세로로 합친 칸이면 합친 높이만큼 건너뛴다 (안 그러면 자기 자신이 다시 잡힌다)
+            const belowRow = rowIdx + Math.max(1, currentCell.rowSpan || 1);
+            if (belowRow <= maxRow) {
+                const nextCell = getCellAt(table, belowRow, logicalColIdx);
                 if (nextCell) {
                     focusCell(nextCell);
                 }
@@ -1667,7 +1671,11 @@ function setupBasicHandling() {
                 saveBeforeChange('delete');
                 selectedCells.forEach(cell => {
                     cell.innerHTML = '<br>';
+                    cell.removeAttribute('data-formula');   // 지운 계산 칸이 다음 계산 때 되살아나지 않도록
                 });
+                // 지운 칸을 참조하던 합계 등을 다시 계산
+                const clearedTable = selectedCells[0].closest('table');
+                if (clearedTable) recalcTable(clearedTable);
                 triggerAutoSave();
                 return;
             }
@@ -1693,6 +1701,13 @@ function setupBasicHandling() {
     }
 
     // IME 조합 이벤트 (한글 등)
+    // 이미지를 눌러 선택한 뒤 글자를 입력했다면 이미지 선택은 끝난 것이다.
+    // (선택이 남아 있으면 오타를 지우려고 누른 Backspace가 이미지를 지운다.
+    //  한글 입력은 keydown이 'Process'로 와서 keydown으로는 잡을 수 없어 input에서 처리)
+    editorBody.addEventListener('input', () => {
+        if (currentSelectedElement && currentSelectedElement.tagName !== 'TABLE') hideSelection();
+    });
+
     editorBody.addEventListener('compositionstart', () => {
         isComposing = true;
         // 조합 시작 전 상태 저장 — 단, 음절마다 조합이 반복되는 IME(안드로이드 등)에서
@@ -1778,7 +1793,8 @@ function setupBasicHandling() {
      */
     const syncFormulaEditing = () => {
         if (syncingFormulaCell) return;          // 글자를 바꾸면 커서도 움직여 다시 불린다
-        const cell = caretCell();
+        // 읽기·책 모드에서는 식을 펼치지 않는다 (탭만 해도 결과 대신 '=SUM(…)'이 보이던 문제)
+        const cell = editorBody.isContentEditable ? caretCell() : null;
         if (cell === formulaEditingCell) return;
         syncingFormulaCell = true;
         try {
@@ -1898,7 +1914,8 @@ function setupBasicHandling() {
 export function sanitizeEntryHtml(html) {
     if (!html) return '';
     const doc = new DOMParser().parseFromString(html, 'text/html');
-    doc.querySelectorAll('script, iframe, object, embed, form, meta, link, style, base').forEach(el => el.remove());
+    // svg/math: <animate>·<set>이 href를 javascript: 로 바꿀 수 있어 통째로 제거 (앱은 본문에 SVG를 쓰지 않음)
+    doc.querySelectorAll('script, iframe, object, embed, form, meta, link, style, base, svg, math').forEach(el => el.remove());
     doc.body.querySelectorAll('*').forEach(el => {
         Array.from(el.attributes).forEach(attr => {
             const name = attr.name.toLowerCase();
@@ -2040,7 +2057,8 @@ export function refreshEditorContent() {
             editBody.innerHTML = sanitizeEntryHtml(latestEntry.body || '');
             linkifyContents(editBody);
             setupTableWrapperScroll(editBody);
-            if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') updateBookNav();
+            // 새 본문의 이미지 크기·쪽 나눔을 다시 계산해야 쪽 밖으로 넘치지 않는다 (reloadEntryIntoEditor와 동일)
+            if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') { updateBookLayout(); updateBookNav(); }
         }
     }
 }
@@ -2056,7 +2074,7 @@ export function toggleViewMode(mode) {
     // 편집 모드에서 벗어날 때 보류 중인 자동 저장을 즉시 반영 (디바운스 중 모드 전환으로 인한 편집 유실 방지)
     const wasEditable = state.currentViewMode === 'default' || state.currentViewMode === 'book-edit';
     const willBeEditable = mode === 'default' || mode === 'book-edit';
-    if (wasEditable && !willBeEditable) {
+    if (wasEditable && !willBeEditable && !state.isShareView) {
         // 편집 종료는 의도된 동작이므로 충돌 시 확인창 표시
         if (autoSaveTimer) {
             clearTimeout(autoSaveTimer);
@@ -2191,7 +2209,8 @@ export function changeGlobalFontSize(newSize) {
     const size = parseInt(newSize);
     if (isNaN(size) || size < 1) return;
 
-    state.currentFontSize = size;
+    // 글 전체 기본 크기(state)는 선택 없이 바꿀 때만 바꾼다.
+    // 일부 글자만 바꿨는데 state까지 바뀌면, 저장 후 다시 열 때 글 전체가 그 크기로 열린다.
     saveBeforeChange('fontSize');
 
     // 글자 크기 입력칸 업데이트
@@ -2220,6 +2239,7 @@ export function changeGlobalFontSize(newSize) {
             selection.addRange(newRange);
         }
     } else {
+        state.currentFontSize = size;
         const body = document.getElementById('editor-body');
         if(body) body.style.fontSize = size + 'px';
     }
@@ -2228,7 +2248,7 @@ export function changeGlobalFontSize(newSize) {
 
 export function changeGlobalFontFamily(newFont) {
     const selection = window.getSelection();
-    state.currentFontFamily = newFont;
+    // 일부 글자만 바꿀 때는 글 전체 기본 글꼴(state)을 건드리지 않는다 (applyFontStyle이 전체 변경 시 갱신)
     saveBeforeChange('fontFamily');
 
     if (selection.rangeCount > 0 && selection.toString().length > 0) {
@@ -2680,7 +2700,9 @@ function insertColumnAt(table, colIdx, where) {
             if (!widened.has(left)) { left.colSpan = Math.max(1, left.colSpan || 1) + 1; widened.add(left); }
             continue;
         }
-        const refCell = right && right.parentElement === row ? right : null;
+        // 그 자리가 위 줄에서 내려온 세로 병합 칸이면, 이 줄에 속한 다음 칸 앞에 넣는다
+        // (null이면 줄 끝에 붙어 아래 칸들이 한 칸씩 밀린다)
+        const refCell = (grid[r] || []).slice(at).find(x => x && x.parentElement === row) || null;
         const sample = (grid[r] || [])[colIdx] || null;
         row.insertBefore(makeCell(sample), refCell);
     }
@@ -3037,6 +3059,8 @@ export function insertTableFunction(fn) {
     if (!t) return;
     const table = t.table;
     let cells = Array.from(table.querySelectorAll('td.selected-cell'));
+    // 자동으로 잡은 범위는 커서 칸의 위(또는 왼쪽)이므로 결과는 커서 칸에 넣는다
+    const autoPicked = cells.length === 0;
     // 아무것도 고르지 않았으면 엑셀처럼 바로 위(없으면 왼쪽)로 이어지는 숫자들을 잡는다
     if (cells.length === 0) {
         cells = autoRangeCells(table, t.row, t.col);
@@ -3050,7 +3074,7 @@ export function insertTableFunction(fn) {
     const formula = buildRangeFormula(table, cells, fn);
     if (!formula) return;
 
-    let spot = targetCellFor(table, cells);
+    let spot = autoPicked ? { cell: t.cell } : targetCellFor(table, cells);
     if (spot && !spot.cell) {
         // 결과를 넣을 자리가 없으면 줄(또는 칸)을 하나 늘린다
         if (spot.vertical) insertRowAt(table, spot.at.row);
@@ -3186,7 +3210,10 @@ export function mergeCells() {
     firstCell.classList.remove('selected-cell');
 
     // 병합 후 셀이 하나도 남지 않은 행은 제거 (이후 행/열 편집 인덱스 어긋남 방지)
-    Array.from(table.rows).forEach(row => { if (row.cells.length === 0) row.remove(); });
+    let removedRows = 0;
+    Array.from(table.rows).forEach(row => { if (row.cells.length === 0) { row.remove(); removedRows++; } });
+    // 지워진 행만큼 세로 병합 칸 수도 줄인다 (그대로 두면 아래 행까지 덮어 표가 밀린다)
+    if (removedRows > 0) firstCell.rowSpan = Math.max(1, rowsToMerge - removedRows);
 
     // 선택 해제
     clearCellSelection();
@@ -3198,41 +3225,24 @@ export function mergeCells() {
  * 셀의 실제 열 인덱스 계산 (colspan 고려)
  */
 function getCellColumnIndex(cell) {
-    const row = cell.parentElement;
+    // 위 줄에서 내려온 세로 병합 칸까지 반영한 논리적 열 번호 (같은 줄 colSpan 합계만으로는 어긋난다)
+    const table = cell.closest('table');
+    const pos = table ? getCellPosition(table, cell) : null;
+    if (pos) return pos.col;
     let colIndex = 0;
-    
-    for (let i = 0; i < row.cells.length; i++) {
-        if (row.cells[i] === cell) {
-            return colIndex;
-        }
-        colIndex += row.cells[i].colSpan || 1;
+    for (const c of cell.parentElement.cells) {
+        if (c === cell) break;
+        colIndex += c.colSpan || 1;
     }
-    
     return colIndex;
 }
 
 /**
- * 특정 행/열 위치의 셀 찾기
+ * 논리 좌표(행, 열)에 있는 셀 (위에서 내려온 세로 병합 칸 포함)
  */
 function getCellAt(table, rowIndex, colIndex) {
-    const row = table.rows[rowIndex];
-    if (!row) return null;
-    
-    let currentCol = 0;
-    for (let i = 0; i < row.cells.length; i++) {
-        const cell = row.cells[i];
-        const colspan = cell.colSpan || 1;
-        
-        if (currentCol === colIndex) {
-            return cell;
-        }
-        if (currentCol < colIndex && currentCol + colspan > colIndex) {
-            return cell; // colspan 범위 내
-        }
-        currentCol += colspan;
-    }
-    
-    return null;
+    const { grid } = buildTableGrid(table);
+    return (grid[rowIndex] || [])[colIndex] || null;
 }
 
 

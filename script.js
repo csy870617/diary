@@ -76,7 +76,8 @@ function updateThemeIcon(pref) {
 // utils.js의 sanitizeExternalHtml은 export되지 않아 최소한의 로컬 구현을 사용
 function sanitizeSharedHtml(html) {
     const doc = new DOMParser().parseFromString(html || '', 'text/html');
-    doc.querySelectorAll('script, iframe, object, embed, form, input, textarea, select, button, meta, link, style, base').forEach(el => el.remove());
+    // svg/math: <animate>·<set>이 href를 javascript: 로 바꿀 수 있어 통째로 제거
+    doc.querySelectorAll('script, iframe, object, embed, form, input, textarea, select, button, meta, link, style, base, svg, math').forEach(el => el.remove());
     doc.body.querySelectorAll('*').forEach(el => {
         Array.from(el.attributes).forEach(attr => {
             const name = attr.name.toLowerCase();
@@ -235,7 +236,8 @@ async function init() {
     // 브라우저 닫기/새로고침 시 미저장 데이터 경고
     window.addEventListener('beforeunload', (e) => {
         const writeModal = document.getElementById('write-modal');
-        if (writeModal && !writeModal.classList.contains('hidden')) {
+        // 읽기·책 보기·공유 보기는 고칠 수 없으니 경고하지 않는다
+        if (writeModal && !writeModal.classList.contains('hidden') && !isReadOnlyView() && !state.isShareView) {
             e.preventDefault();
             e.returnValue = '';
         }
@@ -500,7 +502,10 @@ function setupUIListeners() {
             subtitle: document.getElementById('edit-subtitle').value || '',
             body: bodyEl ? getCleanBodyHtml(bodyEl) : '',
             date: document.getElementById('display-date')?.textContent || '',
-            fontFamily: state.currentFontFamily
+            fontFamily: state.currentFontFamily,
+            // 선택 모드 PDF와 같은 모양이 되도록 글자 크기·주제명도 함께 넘긴다
+            fontSize: state.currentFontSize,
+            category: state.entries.find(e => e.id === state.editingId)?.category ?? state.currentCategory
         };
         downloadEntryPdf(entry);
     });
@@ -809,10 +814,12 @@ function openCropModal(dataUrl, onConfirm) {
     cropState = { dataUrl, onConfirm, naturalWidth: 0, naturalHeight: 0, displayWidth: 0, displayHeight: 0 };
 
     imgEl.onload = () => {
+        if (!cropState) return;   // 불러오기 전에 창을 닫았으면 할 일 없음
         cropState.naturalWidth = imgEl.naturalWidth;
         cropState.naturalHeight = imgEl.naturalHeight;
         // Wait a frame so layout settles
         requestAnimationFrame(() => {
+            if (!cropState) return;
             const imgRect = imgEl.getBoundingClientRect();
             const stageRect = stage.getBoundingClientRect();
             cropState.displayWidth = imgRect.width;
@@ -967,6 +974,8 @@ function setupCropModalHandlers() {
     document.addEventListener('touchend', endDrag);
 
     confirmBtn?.addEventListener('click', () => {
+        // 사진을 다 불러오기 전에 누르면 1×1 빈 이미지가 들어가므로 무시한다
+        if (!cropState?.naturalWidth) return;
         const cb = cropState?.onConfirm;
         const result = performCrop();
         closeCropModal();

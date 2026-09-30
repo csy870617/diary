@@ -139,12 +139,21 @@ export async function restoreEntry(id) {
     }
 }
 
+// 영구 삭제: 동기화용 표식(isPurged)만 남기고 내용은 비운다.
+// 예전에는 표식만 바꿔 '영구 삭제'한 글의 본문·사진이 기기와 드라이브 파일에 계속 남았다.
+function purgeEntry(e, nowISO) {
+    e.isPurged = true;
+    e.modifiedAt = nowISO;
+    e.title = '';
+    e.subtitle = '';
+    e.body = '';
+}
+
 export async function permanentDelete(id) {
     if(confirm('영구 삭제하시겠습니까? 되돌릴 수 없습니다.')) {
         const index = state.entries.findIndex(e => e.id === id);
         if(index !== -1) {
-            state.entries[index].isPurged = true;
-            state.entries[index].modifiedAt = new Date().toISOString();
+            purgeEntry(state.entries[index], new Date().toISOString());
             safeLocalSave();
             renderTrash();
             syncSoon();
@@ -161,7 +170,7 @@ export async function emptyTrash() {
     if (!confirm(`휴지통의 ${total}개 항목을 모두 영구 삭제하시겠습니까?`)) return;
 
     const now = new Date().toISOString();
-    trashEntries.forEach(e => { e.isPurged = true; e.modifiedAt = now; });
+    trashEntries.forEach(e => purgeEntry(e, now));
 
     const deletedFolderIds = new Set(trashFolders.map(f => f.id));
     if (deletedFolderIds.size > 0) {
@@ -202,7 +211,7 @@ export async function checkOldTrash() {
 
     state.entries.forEach(e => {
         if(e.isDeleted && !e.isPurged && cutoff(e.modifiedAt || e.timestamp)) {
-            e.isPurged = true; e.modifiedAt = now.toISOString(); entryChanged = true;
+            purgeEntry(e, now.toISOString()); entryChanged = true;
         }
     });
 

@@ -163,7 +163,7 @@ const NATURAL_VOICE_RE = /natural|neural|online|enhanced|premium|wavenet|studio|
 
 export function loadVoices() {
     const sel = document.getElementById('tts-voice-select');
-    if (!sel) return;
+    if (!sel || !('speechSynthesis' in window)) return;
 
     const populate = () => {
         ttsVoices = speechSynthesis.getVoices();
@@ -747,9 +747,13 @@ export function pauseTTS() {
 export function stopTTS() {
     ttsGen++; // 이전 발화의 stale 이벤트 무효화
     ttsGapInterrupted = false;
-    speechSynthesis.cancel();
-    // 일시정지 중 정지하면 Chrome이 paused 상태를 유지해 다음 재생이 무음이 되므로 해제
-    speechSynthesis.resume();
+    // 음성 읽기를 지원하지 않는 브라우저(일부 앱 내 WebView)에서는 여기서 예외가 나
+    // 편집기 닫기·저장까지 멈췄다. 엔진이 있을 때만 호출한다.
+    if ('speechSynthesis' in window) {
+        speechSynthesis.cancel();
+        // 일시정지 중 정지하면 Chrome이 paused 상태를 유지해 다음 재생이 무음이 되므로 해제
+        speechSynthesis.resume();
+    }
     clearTimeout(ttsGapTimer);
     ttsGapTimer = null;
     isTTSSpeaking = false;

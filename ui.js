@@ -36,6 +36,9 @@ export function renderEntries(keyword) {
     // 호출부가 키워드를 넘기지 않아도 현재 검색어를 유지해,
     // 선택 모드 전환 등 재렌더링 시 검색 결과가 풀리는 문제를 방지
     if (keyword === undefined) keyword = getEl('search-input')?.value || '';
+    // 글을 쓰거나 지우거나 옮기면 목록만 다시 그려지므로, 위치 표시줄의 '글 N개'도 여기서 맞춘다
+    const locCount = document.querySelector('#location-bar .loc-count');
+    if (locCount) locCount.textContent = `글 ${topicEntryCount(state.currentCategory)}개`;
     const entryList = getEl('entry-list');
     if(!entryList) return;
     entryList.innerHTML = '';
@@ -121,6 +124,7 @@ export function renderLocationBar() {
     folderPath(cat.folderId).forEach(f => {
         const seg = document.createElement('button');
         seg.className = 'loc-seg loc-folder';
+        seg.dataset.folderId = f.id;
         seg.innerHTML = `<i class="ph ph-folder-simple"></i><span>${escapeHtml(f.name)}</span>`;
         seg.onclick = (e) => { e.stopPropagation(); showFolderPopup(f.id, seg); };
         attachFolderContextMenu(seg, f.id);
@@ -698,6 +702,13 @@ function initPopupSortable(list) {
 function positionFolderPopup() {
     const popup = getEl('folder-popup');
     if (!popup || !popupAnchor) return;
+    // 팝업을 연 뒤 폴더 줄/위치 표시줄이 다시 그려지면 기준 버튼이 문서에서 떨어져 나가
+    // 위치가 (0,0)으로 계산된다. 같은 자리의 새 버튼을 찾아 기준으로 삼는다.
+    if (!popupAnchor.isConnected && popupAnchor.dataset.folderId) {
+        const scope = popupAnchor.classList.contains('loc-folder') ? '#location-bar' : '#folder-row';
+        const fresh = document.querySelector(`${scope} [data-folder-id="${CSS.escape(popupAnchor.dataset.folderId)}"]`);
+        if (fresh) popupAnchor = fresh;
+    }
     const margin = 10;
     const rect = popupAnchor.getBoundingClientRect();
     popup.style.visibility = 'hidden';
@@ -871,6 +882,7 @@ export function deleteFolderAction() {
             if (!allFolderIds.has(f.id)) return;
             f.isDeleted = true; f.deletedAt = now;
             if (f.id !== folder.id) f.deletedWith = folder.id;
+            else delete f.deletedWith;   // 직접 지운 폴더에는 예전 표식이 남지 않게
         });
         affectedCats.forEach(c => { c.isDeleted = true; c.deletedAt = now; c.deletedWith = folder.id; });
         // state.currentFolder는 renderFolders에서 항상 null로 초기화되므로 별도 처리 불필요
@@ -901,7 +913,7 @@ export function restoreFolder(id) {
     while (parentId) {
         const parent = state.allFolders.find(f => f.id === parentId);
         if (!parent) { delete folder.parentFolderId; break; }
-        if (parent.isDeleted) { delete parent.isDeleted; delete parent.deletedAt; }
+        if (parent.isDeleted) { delete parent.isDeleted; delete parent.deletedAt; delete parent.deletedWith; }
         parentId = parent.parentFolderId;
     }
     state.categoryUpdatedAt = new Date().toISOString();
@@ -958,6 +970,7 @@ export function deleteCategoryAction() {
         const now = new Date().toISOString();
         cat.isDeleted = true;
         cat.deletedAt = now;
+        delete cat.deletedWith;   // 따로 지운 주제는 폴더를 복구해도 함께 되살아나지 않아야 한다
         if (state.currentCategory === cat.id) {
             const next = state.allCategories.find(c => !c.isDeleted);
             if (next) { state.currentCategory = next.id; applyCategorySort(); }
@@ -972,11 +985,12 @@ export function restoreCategory(id) {
     if (!cat) return;
     delete cat.isDeleted;
     delete cat.deletedAt;
+    delete cat.deletedWith;   // 되살렸으니 '폴더와 함께 삭제됨' 표식도 지운다
     let parentId = cat.folderId;
     while (parentId) {
         const parent = state.allFolders.find(f => f.id === parentId);
         if (!parent) { delete cat.folderId; break; }
-        if (parent.isDeleted) { delete parent.isDeleted; delete parent.deletedAt; }
+        if (parent.isDeleted) { delete parent.isDeleted; delete parent.deletedAt; delete parent.deletedWith; }
         parentId = parent.parentFolderId;
     }
     state.categoryUpdatedAt = new Date().toISOString();
@@ -1753,11 +1767,11 @@ function sanitizeFilename(name) {
     return String(name || '신앙일지').replace(/[\\/:*?"<>|]/g, '_').trim() || '신앙일지';
 }
 
-// 글 하나를 단일 PDF로 다운로드 (선택 모드의 1개 선택, 에디터 다운로드 버튼 공용)
+// 글 하나를 단일 PDF로 다운로드 (선택 모드의 1개 선택, 에디터 다운로드 버튼 공용). 성공 여부를 돌려준다.
 export async function downloadEntryPdf(entry) {
     if (typeof html2pdf === 'undefined') {
         alert('PDF 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해주세요.');
-        return;
+        return false;
     }
     const filename = `${sanitizeFilename(entry.title)}.pdf`;
     showPdfProgress('PDF 만드는 중');
@@ -1770,9 +1784,11 @@ export async function downloadEntryPdf(entry) {
         setPdfProgress('파일로 저장하는 중…', 1, 1);
         await paintFrame();
         await doc.save(filename, { returnPromise: true });
+        return true;
     } catch (err) {
         console.error('PDF 저장 실패', err);
         alert('PDF 저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
+        return false;
     } finally {
         await hidePdfProgress();
     }
@@ -1804,7 +1820,8 @@ export async function bulkDownloadPdf() {
     try {
         if (selected.length === 1) {
             // 단일 글: 그대로 PDF 다운로드 (에디터 다운로드와 동일한 스타일)
-            await downloadEntryPdf(selected[0]);
+            // 실패했으면 선택을 그대로 두어 다시 시도할 수 있게 한다
+            if (!(await downloadEntryPdf(selected[0]))) return;
         } else {
             // 여러 글: 각각 개별 PDF 생성 → ZIP으로 압축
             const zip = new JSZip();
@@ -1856,7 +1873,8 @@ export async function bulkDownloadPdf() {
             document.body.appendChild(a);
             a.click();
             a.remove();
-            URL.revokeObjectURL(url);
+            // 일부 브라우저(iOS Safari 등)는 다운로드를 비동기로 시작하므로 바로 해제하면 받기가 끊긴다
+            setTimeout(() => URL.revokeObjectURL(url), 10000);
         }
         exitSelectMode();
     } catch (err) {
