@@ -3,7 +3,7 @@ import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntr
 import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, renameFolderAction, deleteFolderAction, openTopicMoveModal, openFolderMoveModal, addTopicInFolderAction, addSubfolderAction, closeFolderPopup, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort, bulkDownloadPdf, downloadEntryPdf } from './ui.js';
 import { equalizeColumns, equalizeRows, insertTableFunction, clearTableFunction, flushPendingEdit, openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize, getCleanBodyHtml, addRowAbove, addRowBelow, addColumnLeft, addColumnRight, deleteTable, hideTableTools, updateTableTools, setTableWidth, toggleTableEditSection, repositionTableTools } from './editor.js';
 import { setupAuthListeners } from './auth.js';
-import { initGoogleDrive, handleAuthClick, syncNow, syncSoon, pullFromDrive, flushCloudSyncBeacon, ensureTokenOnResume, startKeepAlive, setSyncStatus } from './drive.js';
+import { initGoogleDrive, handleAuthClick, syncNow, syncSoon, pullFromDrive, ensureTokenOnResume, startKeepAlive, setSyncStatus } from './drive.js';
 import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, setTTSStart, setTTSEnd, resetTTSRange, playSelection, updateSpeedDisplay, updatePitchDisplay, updateGapDisplay, initTTS, updateTTSRange, seekTTSByPercent, saveTTSVoice } from './tts.js';
 import { initFaithsSSO } from './faiths-sso.js';
 import { flushEntries } from './storage.js';
@@ -76,7 +76,8 @@ function updateThemeIcon(pref) {
 // utils.js의 sanitizeExternalHtml은 export되지 않아 최소한의 로컬 구현을 사용
 function sanitizeSharedHtml(html) {
     const doc = new DOMParser().parseFromString(html || '', 'text/html');
-    doc.querySelectorAll('script, iframe, object, embed, form, input, textarea, select, button, meta, link, style, base').forEach(el => el.remove());
+    // svg/math: <animate>·<set>이 href를 javascript: 로 바꿀 수 있어 통째로 제거
+    doc.querySelectorAll('script, iframe, object, embed, form, input, textarea, select, button, meta, link, style, base, svg, math').forEach(el => el.remove());
     doc.body.querySelectorAll('*').forEach(el => {
         Array.from(el.attributes).forEach(attr => {
             const name = attr.name.toLowerCase();
@@ -203,13 +204,15 @@ async function init() {
         else flushPendingEdit().then(() => syncNow());
     });
     window.addEventListener('online', handleResume);
-    // 탭/창을 닫거나 떠날 때도 미전송 변경분을 즉시 업로드 (모바일에서 신뢰성 높음)
-    // keepalive 전송(언로드 후에도 완료 보장)을 우선 시도하고, 조건이 안 되면 기존 방식으로 폴백
+    // 탭/창을 닫거나 떠날 때도 미전송 변경분을 올린다.
+    // 예전에는 병합 없이 파일을 통째로 덮어쓰는 keepalive 전송을 먼저 썼는데, 다른 기기에서
+    // 같은 글을 막 고친 경우 그 편집이 충돌 사본도 없이 사라졌다. 항상 병합하는 일반 동기화를 쓴다.
+    // (여기서 끝까지 못 올려도 글은 기기에 저장되어 있고, 다음에 열 때 올라간다)
     window.addEventListener('pagehide', () => {
         // 편집 중이던 내용을 먼저 state에 반영해야 그 내용이 올라간다 (동기적으로 끝난다)
         flushPendingEdit();
         flushEntries().catch(() => {}); // 아직 기록되지 않은 로컬 저장분을 마무리
-        if (!flushCloudSyncBeacon()) syncNow();
+        syncNow();
     });
 
     // 사용자 활동 감지 → 토큰 만료 임박 시 자동 갱신 (페이지 활성 상태에서 로그아웃 방지)
@@ -235,7 +238,8 @@ async function init() {
     // 브라우저 닫기/새로고침 시 미저장 데이터 경고
     window.addEventListener('beforeunload', (e) => {
         const writeModal = document.getElementById('write-modal');
-        if (writeModal && !writeModal.classList.contains('hidden')) {
+        // 읽기·책 보기·공유 보기는 고칠 수 없으니 경고하지 않는다
+        if (writeModal && !writeModal.classList.contains('hidden') && !isReadOnlyView() && !state.isShareView) {
             e.preventDefault();
             e.returnValue = '';
         }
@@ -500,7 +504,10 @@ function setupUIListeners() {
             subtitle: document.getElementById('edit-subtitle').value || '',
             body: bodyEl ? getCleanBodyHtml(bodyEl) : '',
             date: document.getElementById('display-date')?.textContent || '',
-            fontFamily: state.currentFontFamily
+            fontFamily: state.currentFontFamily,
+            // 선택 모드 PDF와 같은 모양이 되도록 글자 크기·주제명도 함께 넘긴다
+            fontSize: state.currentFontSize,
+            category: state.entries.find(e => e.id === state.editingId)?.category ?? state.currentCategory
         };
         downloadEntryPdf(entry);
     });
@@ -809,10 +816,12 @@ function openCropModal(dataUrl, onConfirm) {
     cropState = { dataUrl, onConfirm, naturalWidth: 0, naturalHeight: 0, displayWidth: 0, displayHeight: 0 };
 
     imgEl.onload = () => {
+        if (!cropState) return;   // 불러오기 전에 창을 닫았으면 할 일 없음
         cropState.naturalWidth = imgEl.naturalWidth;
         cropState.naturalHeight = imgEl.naturalHeight;
         // Wait a frame so layout settles
         requestAnimationFrame(() => {
+            if (!cropState) return;
             const imgRect = imgEl.getBoundingClientRect();
             const stageRect = stage.getBoundingClientRect();
             cropState.displayWidth = imgRect.width;
@@ -967,6 +976,8 @@ function setupCropModalHandlers() {
     document.addEventListener('touchend', endDrag);
 
     confirmBtn?.addEventListener('click', () => {
+        // 사진을 다 불러오기 전에 누르면 1×1 빈 이미지가 들어가므로 무시한다
+        if (!cropState?.naturalWidth) return;
         const cb = cropState?.onConfirm;
         const result = performCrop();
         closeCropModal();

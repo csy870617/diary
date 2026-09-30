@@ -83,7 +83,8 @@ export function isSafeUrl(value) {
     return true;
 }
 
-export function sanitizeExternalHtml(html) {
+// extraStyleProps: 호출한 쪽에서 더 허용할 CSS 속성 (예: 동기화로 받은 내 글의 서식)
+export function sanitizeExternalHtml(html, extraStyleProps = []) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
 
@@ -119,7 +120,8 @@ export function sanitizeExternalHtml(html) {
         'border-color', 'border-width', 'border-style', 'border-collapse',
         'width', 'height', 'min-width', 'max-width',
         'list-style-type', 'list-style',
-        'white-space', 'word-break', 'overflow-wrap'
+        'white-space', 'word-break', 'overflow-wrap',
+        ...extraStyleProps
     ]);
 
     // 허용할 속성 목록
