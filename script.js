@@ -3,7 +3,7 @@ import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntr
 import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, renameFolderAction, deleteFolderAction, openTopicMoveModal, openFolderMoveModal, addTopicInFolderAction, addSubfolderAction, closeFolderPopup, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort, bulkDownloadPdf, downloadEntryPdf } from './ui.js';
 import { equalizeColumns, equalizeRows, insertTableFunction, clearTableFunction, flushPendingEdit, openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize, getCleanBodyHtml, addRowAbove, addRowBelow, addColumnLeft, addColumnRight, deleteTable, hideTableTools, updateTableTools, setTableWidth, toggleTableEditSection, repositionTableTools } from './editor.js';
 import { setupAuthListeners } from './auth.js';
-import { initGoogleDrive, handleAuthClick, syncNow, syncSoon, pullFromDrive, flushCloudSyncBeacon, ensureTokenOnResume, startKeepAlive, setSyncStatus } from './drive.js';
+import { initGoogleDrive, handleAuthClick, syncNow, syncSoon, pullFromDrive, ensureTokenOnResume, startKeepAlive, setSyncStatus } from './drive.js';
 import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, setTTSStart, setTTSEnd, resetTTSRange, playSelection, updateSpeedDisplay, updatePitchDisplay, updateGapDisplay, initTTS, updateTTSRange, seekTTSByPercent, saveTTSVoice } from './tts.js';
 import { initFaithsSSO } from './faiths-sso.js';
 import { flushEntries } from './storage.js';
@@ -204,13 +204,15 @@ async function init() {
         else flushPendingEdit().then(() => syncNow());
     });
     window.addEventListener('online', handleResume);
-    // 탭/창을 닫거나 떠날 때도 미전송 변경분을 즉시 업로드 (모바일에서 신뢰성 높음)
-    // keepalive 전송(언로드 후에도 완료 보장)을 우선 시도하고, 조건이 안 되면 기존 방식으로 폴백
+    // 탭/창을 닫거나 떠날 때도 미전송 변경분을 올린다.
+    // 예전에는 병합 없이 파일을 통째로 덮어쓰는 keepalive 전송을 먼저 썼는데, 다른 기기에서
+    // 같은 글을 막 고친 경우 그 편집이 충돌 사본도 없이 사라졌다. 항상 병합하는 일반 동기화를 쓴다.
+    // (여기서 끝까지 못 올려도 글은 기기에 저장되어 있고, 다음에 열 때 올라간다)
     window.addEventListener('pagehide', () => {
         // 편집 중이던 내용을 먼저 state에 반영해야 그 내용이 올라간다 (동기적으로 끝난다)
         flushPendingEdit();
         flushEntries().catch(() => {}); // 아직 기록되지 않은 로컬 저장분을 마무리
-        if (!flushCloudSyncBeacon()) syncNow();
+        syncNow();
     });
 
     // 사용자 활동 감지 → 토큰 만료 임박 시 자동 갱신 (페이지 활성 상태에서 로그아웃 방지)

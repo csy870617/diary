@@ -298,11 +298,47 @@ export async function ensureTokenOnResume() {
     return false;
 }
 
+// 오프라인으로 앱을 열면 index.html의 구글 스크립트 요청이 실패한 채 끝나고, 브라우저는 다시 받지 않는다.
+// 그래서 인터넷이 돌아와도 새로고침 전까지 동기화가 되지 않았다. 빠진 스크립트만 새로 붙여 다시 받는다.
+const GOOGLE_SCRIPTS = [
+    { src: 'https://accounts.google.com/gsi/client', loaded: () => typeof google !== 'undefined' && !!google.accounts },
+    { src: 'https://apis.google.com/js/api.js', loaded: () => typeof gapi !== 'undefined' }
+];
+function reloadGoogleScripts() {
+    GOOGLE_SCRIPTS.forEach(({ src, loaded }) => {
+        if (loaded()) return;
+        document.querySelectorAll(`script[src="${src}"]`).forEach(el => el.remove());
+        const el = document.createElement('script');
+        el.src = src;
+        el.async = true;
+        document.head.appendChild(el);
+    });
+}
+let googleInitWaits = 0;
+let waitingForOnline = false;
+
 export function initGoogleDrive(callback, onReady) {
-    if (typeof gapi === 'undefined' || typeof google === 'undefined' || !google.accounts) {
-        setTimeout(() => initGoogleDrive(callback, onReady), 100);
+    if (!GOOGLE_SCRIPTS.every(sc => sc.loaded())) {
+        const retry = () => initGoogleDrive(callback, onReady);
+        if (!navigator.onLine) {
+            // 오프라인: 헛돌며 기다리지 말고, 연결되면 스크립트를 다시 받아 이어서 초기화한다
+            if (!waitingForOnline) {
+                waitingForOnline = true;
+                window.addEventListener('online', () => {
+                    waitingForOnline = false;
+                    googleInitWaits = 0;
+                    reloadGoogleScripts();
+                    retry();
+                }, { once: true });
+            }
+            return;
+        }
+        // 온라인인데 10초가 지나도 준비되지 않으면(첫 요청이 실패한 경우 등) 다시 받는다
+        if (++googleInitWaits % 100 === 0) reloadGoogleScripts();
+        setTimeout(retry, 100);
         return;
     }
+    googleInitWaits = 0;
 
     gapi.load('client', async () => {
         try {
@@ -572,6 +608,9 @@ function toggleSpinners(active) {
  */
 async function saveToDrive(pullOnly = false, promptOnConflict = false) {
     if (localStorage.getItem('is_faith_logged_in') !== 'true') { setSyncStatus('off'); return false; }
+    // 구글 스크립트가 아직 없으면(오프라인으로 시작 등) 여기서 예외가 났다.
+    // 준비되면 initGoogleDrive가 이어서 동기화하므로 지금은 대기로만 표시한다 (오프라인이면 '오프라인' 표시).
+    if (typeof gapi === 'undefined' || !gapi.client) { setSyncStatus(navigator.onLine ? 'pending' : 'error'); return false; }
     if (isSyncing) { if (!pullOnly) pendingSync = true; return false; }
 
     const isValid = await ensureValidToken(true);
@@ -875,42 +914,7 @@ export function syncSoon(delay = CLOUD_SYNC_DELAY) {
     }, delay);
 }
 
-// 페이지를 떠나는 순간(pagehide) 대기 중인 업로드를 keepalive fetch로 전송.
-// 일반 flushCloudSync는 gapi 비동기 요청이라 언로드 시 브라우저가 중단시켜
-// 마지막 몇 초의 편집분이 클라우드에 못 갈 수 있다. keepalive 요청은 언로드 후에도 전송이 보장된다.
-// 전송했으면 true, 조건이 안 되면(변경 없음/파일 id 미확인/본문이 keepalive 한도 64KB 초과) false를
-// 반환해 호출부가 기존 flushCloudSync로 폴백하게 한다.
-export function flushCloudSyncBeacon() {
-    if (localStorage.getItem('is_faith_logged_in') !== 'true') return false;
-    if (!dbFileId) return false; // 첫 동기화 전이라 파일 id를 모름
-    const token = (typeof gapi !== 'undefined' && gapi.client?.getToken?.()?.access_token)
-        || localStorage.getItem('faith_token');
-    if (!token) return false;
-    // 보낼 것이 있는지는 예약 타이머가 아니라 '내용'으로 판단한다.
-    // (예약이 걸리기 전에 탭이 닫히면 마지막 편집이 통째로 누락됐다)
-    const content = JSON.stringify(buildDbPayload());
-    if (payloadSignature(content) === lastUploadedSig) return true; // 이미 다 올라가 있음
-    const body = '{"lastSync":' + JSON.stringify(new Date().toISOString()) + ',' + content.slice(1);
-    // keepalive 본문 한도는 64KiB '바이트'다. 한글은 글자당 3바이트라 글자 수로 재면 한참 넘겨서
-    // 전송이 조용히 거부된다. 실제 바이트로 재고 여유도 둔다.
-    if (new Blob([body]).size > 60 * 1024) return false; // 한도 초과 → 일반 flush에 맡김
-    try {
-        fetch(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(dbFileId)}?uploadType=media`, {
-            method: 'PATCH',
-            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-            body,
-            keepalive: true
-        }).catch(() => {});
-    } catch (e) {
-        return false; // 전송 시작 실패 → 폴백
-    }
-    if (cloudSyncTimer) { clearTimeout(cloudSyncTimer); cloudSyncTimer = null; }
-    // 병합 없이 올렸으므로 다음 동기화에서 클라우드를 반드시 다시 읽도록 캐시 무효화
-    lastCloudModifiedTime = null;
-    return true;
-}
-
-// 클라우드에 올리는 DB 파일 내용 (일반 업로드와 pagehide 즉시 업로드가 공용)
+// 클라우드에 올리는 DB 파일 내용
 function buildDbPayload() {
     return {
         entries: state.entries,
