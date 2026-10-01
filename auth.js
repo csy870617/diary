@@ -27,12 +27,19 @@ export function setupAuthListeners() {
 
     // [추가] drive.js에서 인증이 성공했을 때 호출될 글로벌 함수
     // history.back() 대신 replaceState로 히스토리 정리 (모바일 popstate 루프 방지)
+    // 로그인 창만 닫는다. 예전에는 열린 창을 모두 닫아서, 재접속 직후 백그라운드로
+    // 토큰을 갱신·동기화하는 1~2초 사이에 열어 둔 글이 목록으로 튕겨 나갔다.
     window.onAuthSuccess = () => {
-        closeAllModals(false);
-        if (history.state && history.state.modal === 'open') {
+        const loginModal = document.getElementById('login-modal');
+        if (!loginModal || loginModal.classList.contains('hidden')) return;
+        loginModal.classList.add('hidden');
+        // 글·휴지통 등 다른 창이 열려 있으면 그 창의 뒤로가기 기록은 그대로 둔다
+        const otherOpen = ['write-modal', 'trash-modal', 'move-modal']
+            .some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); });
+        if (!otherOpen && history.state && history.state.modal === 'open') {
             history.replaceState({ modal: 'main' }, null, '');
         }
-        console.log("구글 인증 성공: 모달을 닫습니다.");
+        console.log("구글 인증 성공: 로그인 창을 닫습니다.");
     };
 
     // 로그아웃 버튼
