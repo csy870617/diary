@@ -705,6 +705,11 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
     flex-shrink: 0;
 }
 .tts-divider { height: 1px; background: var(--gray-200); margin: 6px 0 10px; }
+/* 자연스러운 음성 내려받기 줄 */
+.tts-neural-box { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.tts-neural-progress { height: 4px; background: var(--gray-200); border-radius: 2px; overflow: hidden; }
+.tts-neural-progress-fill { height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
+.tts-row-disabled { opacity: 0.45; }
 .tts-hint {
     font-size: 11px;
     color: var(--gray-400);

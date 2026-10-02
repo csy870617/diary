@@ -9,8 +9,9 @@
  *
  * 메시지:
  *   → { type:'init', base, cacheName }            ← { type:'ready', backend } | { type:'error' }
- *   → { type:'synth', id, text, lang, style, speed, steps }
- *                                                  ← { type:'audio', id, wav, sampleRate } | { type:'error', id }
+ *   → { type:'synth', id, gen, text, lang, style, speed, steps }
+ *                                                  ← { type:'audio', id, wav, sampleRate } | { type:'error', id } | { type:'skipped', id }
+ *   → { type:'cancelBefore', gen }                 (이 세대보다 오래된 대기 요청은 건너뜀)
  */
 
 let O = null;            // onnxruntime-web (전역 ort와 이름이 겹치지 않게 O로 둔다)
@@ -55,9 +56,15 @@ async function init(msg) {
         try { useGpu = !!(await navigator.gpu.requestAdapter()); } catch (e) { useGpu = false; }
     }
     if (!O) {
-        importScripts(base + (useGpu ? 'ort/ort.webgpu.min.js' : 'ort/ort.wasm.min.js'));
+        // 실행 엔진도 내려받아 둔 사본에서 읽는다 (인터넷 없이도 동작하도록)
+        const blobUrl = async (path, type) => URL.createObjectURL(new Blob([await (await readCached(path)).arrayBuffer()], { type }));
+        const flavor = useGpu ? 'ort-wasm-simd-threaded.asyncify' : 'ort-wasm-simd-threaded';
+        importScripts(await blobUrl(useGpu ? 'ort/ort.webgpu.min.js' : 'ort/ort.wasm.min.js', 'text/javascript'));
         O = self.ort;
-        O.env.wasm.wasmPaths = base + 'ort/';
+        O.env.wasm.wasmPaths = {
+            mjs: await blobUrl(`ort/${flavor}.mjs`, 'text/javascript'),
+            wasm: await blobUrl(`ort/${flavor}.wasm`, 'application/wasm')
+        };
         // GitHub Pages는 다중 스레드에 필요한 헤더를 줄 수 없어 단일 스레드로 고정 (경고·실패 방지)
         O.env.wasm.numThreads = 1;
     }
@@ -166,9 +173,16 @@ async function synth({ text, lang, style, speed, steps }) {
 
 // 한 번에 하나씩 처리 (모델 세션은 동시 실행을 보장하지 않는다)
 let queue = Promise.resolve();
+// 정지·탐색으로 버려진 재생 세대의 요청은 만들지 않고 건너뛴다 (느린 기기에서 헛계산 방지)
+let minGen = 0;
 self.onmessage = (e) => {
     const msg = e.data || {};
+    if (msg.type === 'cancelBefore') { minGen = Math.max(minGen, msg.gen || 0); return; }
     queue = queue.then(async () => {
+        if (msg.type === 'synth' && (msg.gen || 0) < minGen) {
+            self.postMessage({ type: 'skipped', id: msg.id });
+            return;
+        }
         try {
             if (msg.type === 'init') {
                 const backend = await init(msg);
