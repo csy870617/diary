@@ -4,7 +4,7 @@ import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, op
 import { equalizeColumns, equalizeRows, insertTableFunction, clearTableFunction, flushPendingEdit, openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize, getCleanBodyHtml, addRowAbove, addRowBelow, addColumnLeft, addColumnRight, deleteTable, hideTableTools, updateTableTools, setTableWidth, toggleTableEditSection, repositionTableTools } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, handleAuthClick, syncNow, syncSoon, pullFromDrive, ensureTokenOnResume, startKeepAlive, setSyncStatus } from './drive.js';
-import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, setTTSStart, setTTSEnd, resetTTSRange, playSelection, updateSpeedDisplay, updatePitchDisplay, updateGapDisplay, initTTS, updateTTSRange, seekTTSByPercent, saveTTSVoice } from './tts.js';
+import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, updateSpeedDisplay, updatePitchDisplay, updateGapDisplay, initTTS, seekTTSByPercent, saveTTSVoice } from './tts.js';
 import { initFaithsSSO } from './faiths-sso.js';
 import { flushEntries } from './storage.js';
 import { isSafeUrl } from './utils.js';
@@ -519,10 +519,6 @@ function setupUIListeners() {
     document.getElementById('tts-play-btn')?.addEventListener('click', playTTS);
     document.getElementById('tts-pause-btn')?.addEventListener('click', pauseTTS);
     document.getElementById('tts-stop-btn')?.addEventListener('click', stopTTS);
-    document.getElementById('tts-set-start')?.addEventListener('click', setTTSStart);
-    document.getElementById('tts-set-end')?.addEventListener('click', setTTSEnd);
-    document.getElementById('tts-reset-range')?.addEventListener('click', resetTTSRange);
-    document.getElementById('tts-play-selection')?.addEventListener('click', playSelection);
     document.getElementById('tts-speed-slider')?.addEventListener('input', updateSpeedDisplay);
     document.getElementById('tts-pitch-slider')?.addEventListener('input', updatePitchDisplay);
     document.getElementById('tts-gap-slider')?.addEventListener('input', updateGapDisplay);

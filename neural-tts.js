@@ -189,7 +189,7 @@ function spawnWorker(forceWasm) {
         if (!p) return;
         pending.delete(d.id);
         if (d.type === 'audio') {
-            adaptSteps(d.wav.length / d.sampleRate, (d.ms || 0) / 1000);
+            adaptSteps(d.wav.length / d.sampleRate, (d.ms || 0) / 1000, d.steps);
             p.resolve({ wav: d.wav, sampleRate: d.sampleRate });
         }
         else if (d.type === 'skipped') p.resolve(null);
@@ -211,11 +211,26 @@ function spawnWorker(forceWasm) {
  * 만드는 속도가 읽는 속도를 못 따라가면 품질 단계를 낮추고, 여유가 많으면 다시 올린다.
  * (지금 문장을 읽는 동안 다음 문장을 만들기 때문에 1배보다 조금만 빠르면 끊기지 않는다)
  */
-function adaptSteps(audioSec, genSec) {
-    if (!(audioSec > 0.5) || !(genSec > 0)) return;     // 아주 짧은 문장은 판단 근거로 쓰지 않는다
-    const ratio = audioSec / genSec;
-    if (ratio < 1.2 && denoiseSteps > MIN_STEPS) denoiseSteps--;
-    else if (ratio > 2.5 && denoiseSteps < MAX_STEPS) denoiseSteps++;
+function adaptSteps(audioSec, genSec, stepsUsed) {
+    if (!(audioSec > 0.5) || !(genSec > 0) || !stepsUsed) return;   // 아주 짧은 문장은 판단 근거로 쓰지 않는다
+    // 만드는 시간 ≈ 고정 부분(약 17%) + 단계 수 × 단계당 시간 (측정: 단계 8→11.4초, 5→7.6초, 4→6.5초)
+    const fixed = genSec * 0.17;
+    const perStep = (genSec - fixed) / stepsUsed;
+    // 읽는 시간보다 30% 빨리 만들 수 있는 가장 높은 단계
+    const sustainable = Math.floor((audioSec / 1.3 - fixed) / perStep);
+    const target = Math.max(MIN_STEPS, Math.min(MAX_STEPS, sustainable));
+    if (target < denoiseSteps) denoiseSteps = target;         // 못 따라가면 곧바로 낮춘다
+    else if (target > denoiseSteps) denoiseSteps++;           // 여유가 있으면 한 단계씩만 올린다
+}
+
+/** 재생이 다음 문장을 기다려야 했을 때(끊김) 품질을 한 단계 바로 낮춘다 */
+export function lowerNeuralQuality() {
+    if (denoiseSteps > MIN_STEPS) denoiseSteps--;
+}
+
+/** 진단용: 계산 장치와 지금 품질 단계 */
+export function getNeuralInfo() {
+    return { backend: backendName, steps: denoiseSteps };
 }
 
 export function isNeuralLoaded() {
