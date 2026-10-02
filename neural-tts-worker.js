@@ -21,6 +21,10 @@ let sessions = null;          // { dp, te, ve, voc }
 const styles = new Map();     // 'F1' → { ttl, dp }
 let base = '';
 let cacheName = '';
+let modelName = '';
+// 역할: 'full'(전부) | 'acoustic'(길이예측·글자처리·음성생성까지, 결과는 잠재값) | 'vocoder'(잠재값 → 소리)
+// CPU로 계산할 때는 작업자 여러 개가 나눠 맡아 휴대폰의 여러 코어를 함께 쓴다.
+let role = 'full';
 
 const AVAILABLE_LANGS = ['en', 'ko', 'ja', 'ar', 'bg', 'cs', 'da', 'de', 'el', 'es', 'et', 'fi', 'fr', 'hi', 'hr', 'hu', 'id', 'it', 'lt', 'lv', 'nl', 'pl', 'pt', 'ro', 'ru', 'sk', 'sl', 'sv', 'tr', 'uk', 'vi', 'na'];
 
@@ -33,28 +37,45 @@ async function readCached(path) {
 }
 
 async function readJson(path) { return (await readCached(path)).json(); }
+async function hasCached(path) {
+    const cache = await caches.open(cacheName);
+    return !!(await cache.match(base + path));
+}
 async function readBytes(path) { return new Uint8Array(await (await readCached(path)).arrayBuffer()); }
 
-async function createSessions(providers) {
-    const opts = { executionProviders: providers, graphOptimizationLevel: 'all' };
+async function createSessions(providers, vePath) {
+    // 메모리 미리 잡아 두기(arena·패턴)를 끈다 — 휴대폰에서 작업자 여러 개를 띄울 수 있도록
+    const opts = { executionProviders: providers, graphOptimizationLevel: 'all', enableCpuMemArena: false, enableMemPattern: false };
+    const open = async (path) => O.InferenceSession.create(await readBytes(path), opts);
     // 큰 파일을 하나씩 열고 바로 놓아 주어, 수백 MB가 한꺼번에 메모리에 올라가지 않게 한다
-    const dp = await O.InferenceSession.create(await readBytes('onnx/duration_predictor.onnx'), opts);
-    const te = await O.InferenceSession.create(await readBytes('onnx/text_encoder.onnx'), opts);
-    const ve = await O.InferenceSession.create(await readBytes('onnx/vector_estimator.onnx'), opts);
-    const voc = await O.InferenceSession.create(await readBytes('onnx/vocoder.onnx'), opts);
-    return { dp, te, ve, voc };
+    // 역할에 필요한 모델만 연다 (작업자마다 메모리를 아끼기 위해)
+    const out = {};
+    if (role !== 'vocoder') {
+        out.dp = await open('onnx/duration_predictor.onnx');
+        out.te = await open('onnx/text_encoder.onnx');
+        out.ve = await open(vePath);
+    }
+    if (role !== 'acoustic') out.voc = await open('onnx/vocoder.onnx');
+    return out;
 }
 
 async function init(msg) {
     base = msg.base;
     cacheName = msg.cacheName;
+    role = msg.role || 'full';
     // WebGPU 빌드와 WASM 빌드는 서로 다른 엔진 파일을 쓰고, 한 번 초기화에 실패하면
     // 같은 작업자에서는 다른 쪽으로 다시 열 수 없다. 그래서 먼저 GPU를 확인하고 하나만 불러온다.
     // (WebGPU로 열다 실패하면 앱이 forceWasm으로 작업자를 새로 띄운다)
     let useGpu = false;
-    if (!msg.forceWasm && self.navigator && navigator.gpu) {
+    if (role === 'full' && !msg.forceWasm && self.navigator && navigator.gpu) {
         try { useGpu = !!(await navigator.gpu.requestAdapter()); } catch (e) { useGpu = false; }
     }
+    // 계산량이 가장 큰 모델: GPU는 원본, CPU는 8비트(약 40% 빠름). 받아 둔 쪽에 맞춘다.
+    const hasFp32 = await hasCached('onnx/vector_estimator.onnx');
+    const hasInt8 = await hasCached('onnx/vector_estimator_int8.onnx');
+    if (useGpu && !hasFp32) useGpu = false;          // GPU용 원본을 받지 않은 기기 → CPU로
+    const vePath = (!useGpu && hasInt8) ? 'onnx/vector_estimator_int8.onnx' : 'onnx/vector_estimator.onnx';
+    modelName = vePath.includes('int8') ? 'int8' : 'fp32';
     if (!O) {
         // 실행 엔진도 내려받아 둔 사본에서 읽는다 (인터넷 없이도 동작하도록)
         const blobUrl = async (path, type) => URL.createObjectURL(new Blob([await (await readCached(path)).arrayBuffer()], { type }));
@@ -73,7 +94,7 @@ async function init(msg) {
 
     if (useGpu) {
         try {
-            sessions = await createSessions(['webgpu']);
+            sessions = await createSessions(['webgpu'], vePath);
             return 'webgpu';
         } catch (e) {
             const err = new Error('WEBGPU_FAILED: ' + (e && e.message || e));
@@ -81,7 +102,7 @@ async function init(msg) {
             throw err;
         }
     }
-    sessions = await createSessions(['wasm']);
+    sessions = await createSessions(['wasm'], vePath);
     return 'wasm';
 }
 
@@ -134,11 +155,14 @@ async function synth({ text, lang, style, speed, steps }) {
     const textIds = new O.Tensor('int64', ids, [1, L]);
     const textMask = new O.Tensor('float32', new Float32Array(L).fill(1), [1, 1, L]);
 
+    const tm = { start: performance.now() };
     const dpOut = await sessions.dp.run({ text_ids: textIds, style_dp: st.dp, text_mask: textMask });
+    tm.dp = performance.now();
     const duration = dpOut.duration.data[0] / speed;
 
     const teOut = await sessions.te.run({ text_ids: textIds, style_ttl: st.ttl, text_mask: textMask });
     const textEmb = teOut.text_emb;
+    tm.te = performance.now();
 
     const sampleRate = cfgs.ae.sample_rate;
     const chunkSize = cfgs.ae.base_chunk_size * cfgs.ttl.chunk_compress_factor;
@@ -164,11 +188,20 @@ async function synth({ text, lang, style, speed, steps }) {
         xt = new Float32Array(out.denoised_latent.data);
     }
 
+    tm.ve = performance.now();
+    if (role === 'acoustic') {
+        // 소리 만들기(보코더)는 다른 작업자가 맡는다 — 그동안 이 작업자는 다음 문장을 만든다
+        return { latent: xt, latentDim, latentLen, wavLen, sampleRate,
+                 parts: { dp: tm.dp - tm.start, te: tm.te - tm.dp, ve: tm.ve - tm.te } };
+    }
     const vocOut = await sessions.voc.run({ latent: new O.Tensor('float32', xt, [1, latentDim, latentLen]) });
+    tm.voc = performance.now();
     const full = vocOut.wav_tts.data;
     // 예측한 길이 뒤에 붙는 여분(무음)은 잘라 다음 문장과의 간격이 들쭉날쭉하지 않게 한다
     const wav = new Float32Array(full.subarray(0, Math.min(full.length, Math.max(wavLen, 1))));
-    return { wav, sampleRate };
+    // 진단용: 단계별 걸린 시간(ms)
+    const parts = { dp: tm.dp - tm.start, te: tm.te - tm.dp, ve: tm.ve - tm.te, voc: tm.voc - tm.ve };
+    return { wav, sampleRate, parts };
 }
 
 /**
@@ -210,6 +243,15 @@ function timeStretch(x, rate) {
     return out.subarray(0, outLen);
 }
 
+/** 잠재값을 소리로 (보코더 전담 작업자) */
+async function vocode({ latent, latentDim, latentLen, wavLen }) {
+    const t0 = performance.now();
+    const vocOut = await sessions.voc.run({ latent: new O.Tensor('float32', latent, [1, latentDim, latentLen]) });
+    const full = vocOut.wav_tts.data;
+    const wav = new Float32Array(full.subarray(0, Math.min(full.length, Math.max(wavLen, 1))));
+    return { wav, sampleRate: cfgs.ae.sample_rate, vocMs: performance.now() - t0 };
+}
+
 // 한 번에 하나씩 처리 (모델 세션은 동시 실행을 보장하지 않는다)
 let queue = Promise.resolve();
 // 정지·탐색으로 버려진 재생 세대의 요청은 만들지 않고 건너뛴다 (느린 기기에서 헛계산 방지)
@@ -225,12 +267,22 @@ self.onmessage = (e) => {
         try {
             if (msg.type === 'init') {
                 const backend = await init(msg);
-                self.postMessage({ type: 'ready', backend, sampleRate: cfgs.ae.sample_rate });
+                self.postMessage({ type: 'ready', backend, model: modelName, sampleRate: cfgs.ae.sample_rate });
+            } else if (msg.type === 'vocode') {
+                const { wav: raw, sampleRate, vocMs } = await vocode(msg);
+                const wav = (msg.stretch > 1.001) ? new Float32Array(timeStretch(raw, msg.stretch)) : raw;
+                self.postMessage({ type: 'audio', id: msg.id, wav, sampleRate, vocMs }, [wav.buffer]);
+            } else if (msg.type === 'synth' && role === 'acoustic') {
+                const t0 = performance.now();
+                const r = await synth(msg);
+                self.postMessage({ type: 'latent', id: msg.id, latent: r.latent, latentDim: r.latentDim, latentLen: r.latentLen,
+                                   wavLen: r.wavLen, sampleRate: r.sampleRate, ms: performance.now() - t0, steps: msg.steps, parts: r.parts },
+                                 [r.latent.buffer]);
             } else if (msg.type === 'synth') {
                 const t0 = performance.now();
-                const { wav: raw, sampleRate } = await synth(msg);
+                const { wav: raw, sampleRate, parts } = await synth(msg);
                 const wav = (msg.stretch > 1.001) ? new Float32Array(timeStretch(raw, msg.stretch)) : raw;
-                self.postMessage({ type: 'audio', id: msg.id, wav, sampleRate, ms: performance.now() - t0, steps: msg.steps }, [wav.buffer]);
+                self.postMessage({ type: 'audio', id: msg.id, wav, sampleRate, ms: performance.now() - t0, steps: msg.steps, parts }, [wav.buffer]);
             }
         } catch (err) {
             self.postMessage({ type: 'error', id: msg.id, message: String(err && err.message || err), webgpuFailed: !!(err && err.webgpuFailed) });
