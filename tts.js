@@ -8,7 +8,8 @@ import {
     NEURAL_PREFIX, NEURAL_VOICES, NEURAL_MAX_CHUNK, NEURAL_CHARS_PER_SEC,
     isNeuralVoice, isNeuralSupported, isNeuralReady, isNeuralLoaded, downloadNeuralVoice, cancelNeuralDownload,
     deleteNeuralVoice, synthesizeNeural, cancelNeuralBefore, unlockNeuralAudio, playNeuralAudio,
-    stopNeuralAudio, pauseNeuralAudio, resumeNeuralAudio, lowerNeuralQuality, getNeuralInfo
+    stopNeuralAudio, pauseNeuralAudio, resumeNeuralAudio, lowerNeuralQuality, getNeuralInfo,
+    checkNeuralUpdate, addNeuralDiag, getNeuralDiag, getNeuralMinSteps
 } from './neural-tts.js';
 import { state } from './state.js';
 import { jumpToPage } from './editor.js';
@@ -452,23 +453,83 @@ function setNeuralRow(statusText, btnText, progressPct) {
     if (fill && progressPct != null) fill.style.width = progressPct + '%';
 }
 
+let neuralUpdate = null;   // { bytes } — 받아 둔 음성보다 새 버전(더 빠른 엔진 등)이 있을 때
+
 async function refreshNeuralRow() {
     const row = document.getElementById('tts-neural-row');
     if (!row) return;
     if (!isNeuralSupported()) { row.classList.add('hidden'); return; }
     row.classList.remove('hidden');
     if (neuralDownloading) return;
+    const diagBtn = document.getElementById('tts-neural-diag');
     if (await isNeuralReady()) {
+        if (diagBtn) diagBtn.classList.remove('hidden');
         const info = getNeuralInfo();
         const where = info.backend ? `${info.backend === 'webgpu' ? ' · GPU로 계산' : ' · CPU로 계산'} · 품질 ${info.steps}/8` : '';
         setNeuralRow('받아 둠 · 인터넷 없이 사용 가능' + where, '삭제', null);
+        // 더 빠른 엔진 등 새 버전이 있으면 업데이트를 권한다 (확인은 인터넷이 될 때만)
+        neuralUpdate = await checkNeuralUpdate();
+        if (neuralUpdate && !neuralDownloading) {
+            const mb = Math.max(1, Math.round(neuralUpdate.bytes / 1e6));
+            setNeuralRow(`더 빠른 음성 엔진이 있습니다 (약 ${mb}MB)`, '업데이트', null);
+        }
+    } else {
+        if (diagBtn) diagBtn.classList.add('hidden');
+        setNeuralRow('약 250~500MB · 와이파이에서 받기를 권장합니다', '내려받기', null);
     }
-    else setNeuralRow('약 440MB · 와이파이에서 받기를 권장합니다', '내려받기', null);
+}
+
+/** 끊김 원인을 확인하기 위한 진단 정보를 복사한다 (사용자가 개발자에게 붙여 보낼 수 있게) */
+async function copyNeuralDiag() {
+    const d = getNeuralDiag();
+    const speed = document.getElementById('tts-speed-slider')?.value || '1';
+    const synth = d.events.filter(e => e.type === 'synth');
+    const waits = d.events.filter(e => e.type === 'wait');
+    const sumA = synth.reduce((x, e) => x + e.audioSec, 0), sumG = synth.reduce((x, e) => x + e.genSec, 0);
+    const lines = [
+        '[신앙일지 자연음 진단]',
+        `앱 ${document.querySelector('meta[name="app-version"]')?.content || '?'} · ${navigator.userAgent}`,
+        `코어 ${navigator.hardwareConcurrency || '?'} · 메모리 ${navigator.deviceMemory || '?'}GB · 계산 ${d.backend || '아직 안 열림'} · 작업자 ${d.workers} · 모델 ${d.model || '?'} · 품질 ${d.steps}/8 · 속도 ${speed}x`,
+        `최근 문장 ${synth.length}개: 소리 ${sumA.toFixed(1)}초를 ${sumG.toFixed(1)}초에 만듦 (실시간의 ${sumG ? (sumA / sumG).toFixed(2) : '?'}배)`,
+        `재생 대기(끊김) ${waits.length}번, 합계 ${(waits.reduce((x, e) => x + e.ms, 0) / 1000).toFixed(1)}초`,
+        ...synth.slice(-15).map(e => `· ${e.chars}자 소리 ${e.audioSec.toFixed(1)}s / 만듦 ${e.genSec.toFixed(1)}s / 품질 ${e.steps}`
+            + (e.parts ? ` (생성 ${((e.parts.ve || 0) / 1000).toFixed(1)}s, 보코더 ${((e.parts.voc || 0) / 1000).toFixed(1)}s)` : '')
+            + (e.stretch > 1.01 ? ` / 늘임 ${e.stretch.toFixed(2)}` : ''))
+    ];
+    const text = lines.join('\n');
+    try {
+        await navigator.clipboard.writeText(text);
+        showToast('진단 정보를 복사했습니다. 붙여 넣어 보내 주세요.');
+    } catch (e) {
+        window.prompt('아래 내용을 복사해 주세요', text);
+    }
 }
 
 async function onNeuralButton() {
     if (neuralDownloading) {
         cancelNeuralDownload();
+        return;
+    }
+    if (neuralUpdate && await isNeuralReady()) {
+        const mb = Math.max(1, Math.round(neuralUpdate.bytes / 1e6));
+        if (!confirm(`더 빠른 음성 엔진(약 ${mb}MB)을 받습니다.\n받은 부분은 그대로 두고 새로 필요한 파일만 받습니다. 계속할까요?`)) return;
+        if (usingNeural()) stopTTS();
+        neuralDownloading = true;
+        setNeuralRow('받는 중… 0%', '취소', 0);
+        try {
+            await downloadNeuralVoice((got, total) => {
+                const pct = total ? Math.floor(got / total * 100) : 0;
+                setNeuralRow(`받는 중… ${pct}% (${Math.round(got / 1e6)} / ${Math.round(total / 1e6)}MB)`, '취소', pct);
+            });
+            neuralUpdate = null;
+            showToast('음성 엔진을 업데이트했습니다.');
+        } catch (err) {
+            if (err && err.name === 'AbortError') showToast('업데이트를 취소했습니다.');
+            else alert('업데이트를 받지 못했습니다.\n' + (err && err.message || err));
+        } finally {
+            neuralDownloading = false;
+            refreshNeuralRow();
+        }
         return;
     }
     if (await isNeuralReady()) {
@@ -479,7 +540,7 @@ async function onNeuralButton() {
         showToast('자연스러운 음성을 지웠습니다.');
         return;
     }
-    if (!confirm('자연스러운 음성(약 440MB)을 내려받습니다.\n데이터 요금이 들 수 있으니 와이파이에서 받기를 권장합니다.\n\n한 번 받으면 인터넷 없이도 쓸 수 있습니다. 계속할까요?')) return;
+    if (!confirm('자연스러운 음성(약 250~500MB, 기기에 따라 다름)을 내려받습니다.\n데이터 요금이 들 수 있으니 와이파이에서 받기를 권장합니다.\n\n한 번 받으면 인터넷 없이도 쓸 수 있습니다. 계속할까요?')) return;
     neuralDownloading = true;
     setNeuralRow('받는 중… 0%', '취소', 0);
     try {
@@ -504,7 +565,7 @@ export function clearTTSRangeForNewEntry() {
     clearTTSHighlight();
 }
 
-function showToast(msg) {
+function showToast(msg, ms = 1800) {
     let toast = document.getElementById('tts-toast');
     if (!toast) {
         toast = document.createElement('div');
@@ -515,7 +576,7 @@ function showToast(msg) {
     toast.textContent = msg;
     toast.classList.add('show');
     clearTimeout(toast._timer);
-    toast._timer = setTimeout(() => toast.classList.remove('show'), 1800);
+    toast._timer = setTimeout(() => toast.classList.remove('show'), ms);
 }
 
 
@@ -999,10 +1060,25 @@ function advanceAfterChunk(currentChunk, minGapMs) {
 // 문장 하나를 만드는 데 몇 초 걸리므로, 읽는 동안 앞으로 읽을 문장들을 미리 만들어 둔다.
 // 한 문장만 미리 만들면 그다음 문장은 지금 문장이 끝나야 만들기 시작해, 길이가 들쭉날쭉한
 // 글에서 문장 사이가 자주 끊겼다. 작업자가 쉬지 않도록 몇 문장 앞까지 줄 세워 둔다.
-const NEURAL_READ_AHEAD = 3;
+// 미리 만들 분량: 문장 수가 아니라 '앞으로 읽을 시간'으로 정한다.
+// 문장 수(3개)로 정하면 짧은 문장들 뒤에 오는 아주 긴 문장을 너무 늦게 만들기 시작해 그 앞에서 끊겼다.
+const NEURAL_AHEAD_SEC = 40;
+const NEURAL_AHEAD_MAX = 10;
 let neuralCache = null;             // { gen, voice, map: Map<index, Promise> }
 let neuralErrorShown = false;
 let neuralPlayedGen = -1;           // 이 재생(세대)에서 이미 한 문장 이상 읽었는가
+// 가장 낮은 품질로도 따라가지 못해 계속 끊기면, 이유를 알려 주고 할 수 있는 일을 안내한다 (재생마다 한 번)
+let slowWarnedGen = -1;
+let stallsInGen = 0, stallGen = -1;
+function warnIfTooSlow() {
+    if (stallGen !== ttsGen) { stallGen = ttsGen; stallsInGen = 0; }
+    stallsInGen++;
+    if (stallsInGen < 2 || slowWarnedGen === ttsGen) return;
+    if (getNeuralInfo().steps > getNeuralMinSteps()) return;
+    slowWarnedGen = ttsGen;
+    showToast('이 기기에서는 음성을 만드는 속도가 읽는 속도를 못 따라가 끊길 수 있습니다. 읽기 속도를 낮추면 덜 끊깁니다.', 5000);
+}
+
 // 문장 끝의 쉼 — 모델이 문장 끝을 짧게 끊어 쉼 없이 이으면 숨 쉴 틈이 없다 (공식 예제 0.3초)
 const NEURAL_SENTENCE_GAP_MS = 250;
 // 긴 문장을 쉼표 등에서 나눈 자리 — 문장 끝처럼 쉬면 한 문장 안에서 툭툭 끊겨 들린다
@@ -1031,7 +1107,12 @@ function requestNeural(index, gen) {
 function fillNeuralAhead(index, gen) {
     if (!neuralCache || neuralCache.gen !== gen) return;
     for (const k of [...neuralCache.map.keys()]) if (k < index) neuralCache.map.delete(k);
-    for (let k = index + 1; k <= index + NEURAL_READ_AHEAD && k < ttsChunks.length; k++) requestNeural(k, gen);
+    const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
+    let aheadSec = 0;
+    for (let k = index + 1; k < ttsChunks.length && k <= index + NEURAL_AHEAD_MAX && aheadSec < NEURAL_AHEAD_SEC; k++) {
+        requestNeural(k, gen);
+        aheadSec += cleanForSpeech(ttsChunks[k].text).length / NEURAL_CHARS_PER_SEC / speed;
+    }
 }
 
 async function speakNextNeural(currentChunk) {
@@ -1048,9 +1129,16 @@ async function speakNextNeural(currentChunk) {
         pending.then(() => { ready = true; }, () => { ready = true; });
         await Promise.resolve();
         // (재생·탭·탐색 직후의 첫 문장은 기다리는 게 당연하므로 따지지 않는다)
-        if (!ready && neuralPlayedGen === myGen) lowerNeuralQuality();
+        const stalled = !ready && neuralPlayedGen === myGen;
+        if (stalled) lowerNeuralQuality();
         fillNeuralAhead(index, myGen);
+        const waitStart = performance.now();
         audio = await pending;
+        if (stalled) {
+            const ms = Math.round(performance.now() - waitStart);
+            addNeuralDiag({ type: 'wait', ms, index });
+            warnIfTooSlow();
+        }
     } catch (err) {
         if (myGen !== ttsGen) return;
         console.error('자연스러운 음성 생성 실패:', err);
@@ -1232,6 +1320,7 @@ export function initTTS() {
     if (pitch && ps) { ps.value = pitch; updatePitchDisplay(); }
     if (gap && gs) { gs.value = gap; updateGapDisplay(); }
     document.getElementById('tts-neural-btn')?.addEventListener('click', onNeuralButton);
+    document.getElementById('tts-neural-diag')?.addEventListener('click', copyNeuralDiag);
     document.getElementById('editor-body')?.addEventListener('click', onEditorTapForTTS);
     // 사용자가 직접 스크롤하는 동안에는 읽는 문장을 따라가지 않는다
     const markUserScroll = () => { lastUserScrollMs = Date.now(); };

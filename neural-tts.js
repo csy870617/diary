@@ -1,7 +1,7 @@
 /**
  * 자연스러운 음성(Supertonic 3) — 내려받기·생성·재생
  *
- * 음성 모델(약 440MB)은 같은 주소 아래의 별도 저장소(faith-voice)에 두고,
+ * 음성 모델(약 250~500MB)은 같은 주소 아래의 별도 저장소(faith-voice)에 두고,
  * 사용자가 원할 때 한 번만 내려받아 브라우저 저장소(Cache Storage)에 보관한다.
  * 받은 뒤에는 인터넷 없이 기기 안에서 음성을 만든다(서버·이용료 없음).
  *
@@ -30,8 +30,9 @@ const MODEL_MAX_SPEED = 1.2;
 const MAX_STEPS = 8, MIN_STEPS = 4;
 let denoiseSteps = MAX_STEPS;
 let backendName = null;
-// 한국어는 한 번에 120자 안쪽으로 만들 때 가장 안정적이다(공식 예제 기준)
-export const NEURAL_MAX_CHUNK = 120;
+// 한 번에 만드는 최대 글자 수. 한국어는 120자 안쪽이 안정적이지만(공식 예제), 긴 조각은
+// 작업자 하나가 오래 붙잡고 있어 다음 조각이 늦어진다. 90자로 나눠 여러 작업자가 동시에 만들게 한다.
+export const NEURAL_MAX_CHUNK = 90;
 // 자연스러운 음성이 1배속에서 읽는 평균 글자 수/초 (측정값 약 6.5~7)
 export const NEURAL_CHARS_PER_SEC = 7;
 
@@ -57,10 +58,37 @@ export function isNeuralSupported() {
     return hasCacheStorage();
 }
 
-async function fetchManifest() {
-    const res = await fetch(voiceBase() + 'manifest.json', { cache: 'no-cache' });
-    if (!res.ok) throw new Error('음성 목록을 불러오지 못했습니다 (' + res.status + ')');
-    return res.json();
+async function fetchManifest(timeoutMs) {
+    const ctl = new AbortController();
+    const timer = timeoutMs ? setTimeout(() => ctl.abort(), timeoutMs) : null;
+    try {
+        const res = await fetch(voiceBase() + 'manifest.json', { cache: 'no-cache', signal: ctl.signal });
+        if (!res.ok) throw new Error('음성 목록을 불러오지 못했습니다 (' + res.status + ')');
+        return await res.json();
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+}
+
+// 이 기기가 GPU(WebGPU)로 계산할 수 있는가 — 받을 파일을 고를 때 쓴다
+let gpuCheck = null;
+function hasWebGPU() {
+    if (!gpuCheck) {
+        gpuCheck = (async () => {
+            try { return !!(navigator.gpu && await navigator.gpu.requestAdapter()); } catch (e) { return false; }
+        })();
+    }
+    return gpuCheck;
+}
+
+/**
+ * 이 기기에 필요한 파일만 고른다.
+ * 계산량이 가장 큰 모델은 두 가지가 있다: 원본(GPU용, 257MB)과 8비트(CPU용, 67MB).
+ * CPU로 계산하는 기기는 8비트가 약 40% 빠르고 받을 용량도 절반 이하라 원본을 받지 않는다.
+ */
+async function applicableFiles(manifest) {
+    const gpu = await hasWebGPU();
+    return manifest.files.filter(f => !f.only || (f.only === 'webgpu' && gpu));
 }
 
 /**
@@ -96,8 +124,18 @@ let downloadAbort = null;
  */
 export async function downloadNeuralVoice(onProgress) {
     if (!isNeuralSupported()) throw new Error('이 브라우저에서는 자연스러운 음성을 쓸 수 없습니다.');
-    const manifest = await fetchManifest();
-    const total = neuralDownloadSize(manifest);
+    const remote = await fetchManifest();
+    const manifest = { ...remote, files: await applicableFiles(remote) };
+    const base0 = voiceBase();
+    // 이미 받아 둔 파일은 다시 받지 않으므로, 실제로 받을 양만 센다 (업데이트 때 용량 확인용)
+    let total = 0;
+    try {
+        const c0 = await caches.open(CACHE_NAME);
+        for (const f of manifest.files) {
+            const ex = await c0.match(base0 + f.path);
+            if (!(ex && f.size && Number(ex.headers.get('X-Size')) === f.size)) total += f.size || 0;
+        }
+    } catch (e) { total = neuralDownloadSize(manifest); }
     // 저장 공간이 부족할 때 브라우저가 이 파일들을 먼저 지우지 않도록 요청 (거절돼도 계속 진행)
     try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) {}
     try {
@@ -119,10 +157,9 @@ export async function downloadNeuralVoice(onProgress) {
     try {
         for (const f of manifest.files) {
             const url = base + f.path;
-            // 이미 받은 파일은 건너뛴다 (중간에 끊겼다가 다시 받을 때)
+            // 이미 받은 파일은 건너뛴다 (중간에 끊겼다가 다시 받을 때, 업데이트 때)
             const existing = await cache.match(url);
             if (existing && f.size && Number(existing.headers.get('X-Size')) === f.size) {
-                done += f.size; onProgress && onProgress(done, total);
                 continue;
             }
             const parts = f.parts && f.parts.length ? f.parts : [f.path];
@@ -157,11 +194,44 @@ export async function downloadNeuralVoice(onProgress) {
             if (f.size && blob.size !== f.size) throw new Error('받은 파일 크기가 맞지 않습니다: ' + f.path);
             await cache.put(url, new Response(blob, { headers: { 'Content-Type': f.type || 'application/octet-stream', 'X-Size': String(blob.size) } }));
         }
+        // 이 기기에 더는 필요 없는 파일(예: CPU 기기에 남은 원본 모델 257MB)은 지운다
+        try {
+            const keep = new Set(manifest.files.map(f => base + f.path));
+            for (const req of await cache.keys()) if (!keep.has(req.url)) await cache.delete(req);
+        } catch (e) { /* 정리는 실패해도 괜찮다 */ }
         localStorage.setItem(READY_KEY + '_manifest', JSON.stringify(manifest));
         localStorage.setItem(READY_KEY, manifest.version);
+        // 새 엔진을 쓰도록 열려 있던 작업자를 닫는다 (다음 재생 때 다시 연다)
+        shutdownNeural();
         return manifest;
     } finally {
         downloadAbort = null;
+    }
+}
+
+/**
+ * 받아 둔 음성보다 새 버전(예: 더 빠른 엔진)이 있으면 { bytes }를, 없거나 확인할 수 없으면 null.
+ * (인터넷이 없거나 느리면 조용히 넘어간다)
+ */
+export async function checkNeuralUpdate() {
+    if (!navigator.onLine) return null;
+    let stored;
+    try { stored = JSON.parse(localStorage.getItem(READY_KEY + '_manifest') || 'null'); } catch (e) { stored = null; }
+    if (!stored) return null;
+    try {
+        const remote = await fetchManifest(5000);
+        if (!remote || remote.version === stored.version) return null;
+        const files = await applicableFiles(remote);
+        const cache = await caches.open(CACHE_NAME);
+        const base = voiceBase();
+        let bytes = 0;
+        for (const f of files) {
+            const ex = await cache.match(base + f.path);
+            if (!(ex && f.size && Number(ex.headers.get('X-Size')) === f.size)) bytes += f.size || 0;
+        }
+        return { bytes, version: remote.version };
+    } catch (e) {
+        return null;
     }
 }
 
@@ -177,38 +247,121 @@ export async function deleteNeuralVoice() {
 }
 
 // ─── 생성 (작업자) ───────────────────────────────────────────────
+// GPU로 계산하는 기기: 작업자 1개가 전부 처리한다 (GPU가 알아서 병렬로 계산).
+// CPU로 계산하는 기기: 브라우저의 다중 스레드는 GitHub Pages에서 쓸 수 없어(필요한 헤더를 못 줌)
+// 예전에는 코어 하나만 썼다. 대신 작업자를 여러 개 띄워 나눠 맡긴다 —
+//   '음성 생성'(acoustic) 작업자 1~2개가 문장들을 동시에 만들고,
+//   '보코더' 작업자 1개가 그 결과를 소리로 바꾼다.
+// 측정(4코어, 8비트, 품질 4): 작업자 1개 실시간의 1.44배 → 생성2+보코더1 2.74배.
 
-let worker = null;
+let workers = [];           // [{ w, role, n }] — n: 맡긴 일 수
 let workerReady = null;     // Promise<backend>
-let reqSeq = 0;
-const pending = new Map();  // id → { resolve, reject }
+let modelName = null;       // 'int8' | 'fp32'
+let poolMode = false;       // CPU 작업자 여러 개로 나눠 맡기는가
 
-function spawnWorker(forceWasm) {
+// ─── 진단 기록 ───
+// 사용자 기기에서 끊김의 원인을 확인하기 위해 최근 문장들의 만드는 시간·소리 길이·대기 시간을 남긴다.
+const DIAG_MAX = 40;
+const diagLog = [];
+export function addNeuralDiag(ev) {
+    diagLog.push({ t: Date.now(), ...ev });
+    if (diagLog.length > DIAG_MAX) diagLog.shift();
+}
+export function getNeuralDiag() {
+    const acoustic = workers.filter(x => x.role === 'acoustic').length;
+    return { backend: backendName, model: modelName, steps: denoiseSteps, workers: poolMode ? `생성${acoustic}+보코더1` : (workers.length ? '1' : '0'), events: diagLog.slice() };
+}
+let reqSeq = 0;
+const pending = new Map();  // id → { resolve, reject, chars, stretch, acMs, parts }
+
+function workerUrl() {
     // 이 파일과 같은 버전(?v=…)으로 작업자를 불러온다 (캐시에 남은 옛 작업자와 섞이지 않게)
-    const w = new Worker(new URL('./neural-tts-worker.js' + new URL(import.meta.url).search, import.meta.url));
+    return new URL('./neural-tts-worker.js' + new URL(import.meta.url).search, import.meta.url);
+}
+
+function finishAudio(p, d, genSec) {
+    const audioSec = d.wav.length / d.sampleRate;
+    addNeuralDiag({ type: 'synth', chars: p.chars, audioSec, genSec, steps: p.steps, stretch: p.stretch, parts: p.parts || d.parts });
+    adaptSteps(audioSec, genSec, p.steps);
+    p.resolve({ wav: d.wav, sampleRate: d.sampleRate });
+}
+
+function spawnWorker(role, forceWasm) {
+    const entry = { w: new Worker(workerUrl()), role, n: 0 };
+    const w = entry.w;
     w.onmessage = (e) => {
         const d = e.data || {};
         if (d.type === 'ready' || (d.type === 'error' && d.id == null)) return; // init 응답은 아래에서 처리
         const p = pending.get(d.id);
         if (!p) return;
+        entry.n = Math.max(0, entry.n - 1);
+        if (d.type === 'latent') {
+            // 음성 생성 작업자가 끝낸 것 → 보코더 작업자에게 넘긴다 (그동안 이 작업자는 다음 문장을 만든다)
+            p.acMs = d.ms || 0;
+            p.parts = d.parts;
+            const voc = workers.find(x => x.role === 'vocoder');
+            if (!voc) { pending.delete(d.id); p.resolve(null); return; }
+            voc.n++;
+            voc.w.postMessage({ type: 'vocode', id: d.id, latent: d.latent, latentDim: d.latentDim, latentLen: d.latentLen,
+                                wavLen: d.wavLen, stretch: p.stretch }, [d.latent.buffer]);
+            return;
+        }
         pending.delete(d.id);
         if (d.type === 'audio') {
-            adaptSteps(d.wav.length / d.sampleRate, (d.ms || 0) / 1000, d.steps);
-            p.resolve({ wav: d.wav, sampleRate: d.sampleRate });
+            // 나눠 맡길 때 실제 처리 속도는 '가장 느린 단계'가 정한다 (생성은 작업자 수만큼 동시에 돈다)
+            const nAc = Math.max(1, workers.filter(x => x.role === 'acoustic').length);
+            const genSec = role === 'vocoder'
+                ? Math.max((p.acMs || 0) / nAc, d.vocMs || 0) / 1000
+                : (d.ms || 0) / 1000;
+            if (role === 'vocoder' && p.parts) p.parts = { ...p.parts, voc: d.vocMs || 0 };
+            finishAudio(p, d, genSec);
         }
         else if (d.type === 'skipped') p.resolve(null);
         else p.reject(new Error(d.message || '음성을 만들지 못했습니다.'));
     };
-    const ready = new Promise((resolve, reject) => {
+    entry.ready = new Promise((resolve, reject) => {
         const h = (e) => {
             const d = e.data || {};
-            if (d.type === 'ready') { w.removeEventListener('message', h); resolve(d.backend); }
+            if (d.type === 'ready') { w.removeEventListener('message', h); if (d.model) modelName = d.model; resolve(d.backend); }
             else if (d.type === 'error' && d.id == null) { w.removeEventListener('message', h); reject(d); }
         };
         w.addEventListener('message', h);
     });
-    w.postMessage({ type: 'init', base: voiceBase(), cacheName: CACHE_NAME, forceWasm: !!forceWasm });
-    return { w, ready };
+    w.postMessage({ type: 'init', base: voiceBase(), cacheName: CACHE_NAME, forceWasm: !!forceWasm, role });
+    return entry;
+}
+
+/** CPU 기기: 코어 수에 맞춰 음성 생성 작업자 1~2개 + 보코더 1개 */
+async function startPool() {
+    // 측정(파일을 받아 둔 상태): 작업자 1개 약 570MB·실시간 1.5배 / 생성1+보코더1 약 750MB·2.0배 /
+    // 생성2+보코더1 약 1,070MB·2.5배. 기본은 생성1+보코더1, 코어·메모리가 넉넉하다고 확인된 기기만 생성 2개.
+    // (아이폰 등은 메모리 크기를 알려 주지 않으므로 기본값)
+    const cores = navigator.hardwareConcurrency || 2;
+    const mem = navigator.deviceMemory;
+    let nAc = (cores >= 6 && mem >= 6) ? 2 : 1;
+    try { const o = Number(localStorage.getItem('faith_voice_workers')); if (o === 1 || o === 2) nAc = o; } catch (e) {}
+    workers = [];
+    for (let k = 0; k < nAc; k++) workers.push(spawnWorker('acoustic', true));
+    workers.push(spawnWorker('vocoder', true));
+    poolMode = true;
+    try {
+        await Promise.all(workers.map(x => x.ready));
+    } catch (err) {
+        // 메모리가 부족해 여러 개를 못 열면 작업자 1개로 다시 연다
+        workers.forEach(x => x.w.terminate());
+        workers = [spawnWorker('full', true)];
+        poolMode = false;
+        await workers[0].ready;
+    }
+    return 'wasm';
+}
+
+async function gpuWillBeUsed() {
+    if (!(await hasWebGPU())) return false;
+    try {
+        const cache = await caches.open(CACHE_NAME);
+        return !!(await cache.match(voiceBase() + 'onnx/vector_estimator.onnx'));
+    } catch (e) { return false; }
 }
 
 /**
@@ -217,8 +370,9 @@ function spawnWorker(forceWasm) {
  */
 function adaptSteps(audioSec, genSec, stepsUsed) {
     if (!(audioSec > 0.5) || !(genSec > 0) || !stepsUsed) return;   // 아주 짧은 문장은 판단 근거로 쓰지 않는다
-    // 만드는 시간 ≈ 고정 부분(약 17%) + 단계 수 × 단계당 시간 (측정: 단계 8→11.4초, 5→7.6초, 4→6.5초)
-    const fixed = genSec * 0.17;
+    // 만드는 시간 ≈ 고정 부분 + 단계 수 × 단계당 시간
+    // (측정: 원본은 고정 부분이 약 17%, 8비트는 단계 계산이 빨라져 약 30% — 그 사이 값을 쓴다)
+    const fixed = genSec * 0.22;
     const perStep = (genSec - fixed) / stepsUsed;
     // 읽는 시간보다 30% 빨리 만들 수 있는 가장 높은 단계
     const sustainable = Math.floor((audioSec / 1.3 - fixed) / perStep);
@@ -237,24 +391,29 @@ export function getNeuralInfo() {
     return { backend: backendName, steps: denoiseSteps };
 }
 
+export function getNeuralMinSteps() { return MIN_STEPS; }
+
 export function isNeuralLoaded() {
-    return !!backendName && !!worker;
+    return !!backendName && workers.length > 0;
 }
 
-/** 모델을 연다 (처음 한 번은 수 초 걸린다). WebGPU로 열다 실패하면 WASM으로 다시 연다. */
+/** 모델을 연다 (처음 한 번은 수 초 걸린다). WebGPU로 열다 실패하면 CPU 작업자들로 다시 연다. */
 export function ensureNeuralReady() {
     if (workerReady) return workerReady;
     workerReady = (async () => {
-        let { w, ready } = spawnWorker(false);
-        worker = w;
-        try {
-            backendName = await ready;
-        } catch (err) {
-            w.terminate();
-            if (!err.webgpuFailed) throw new Error(err.message || '자연스러운 음성을 열지 못했습니다.');
-            ({ w, ready } = spawnWorker(true));
-            worker = w;
-            backendName = await ready;
+        if (await gpuWillBeUsed()) {
+            const full = spawnWorker('full', false);
+            workers = [full];
+            poolMode = false;
+            try {
+                backendName = await full.ready;
+            } catch (err) {
+                full.w.terminate();
+                if (!err.webgpuFailed) throw new Error(err.message || '자연스러운 음성을 열지 못했습니다.');
+                backendName = await startPool();
+            }
+        } else {
+            backendName = await startPool();
         }
         // GPU 없이 계산하는 기기는 중간 단계에서 시작한다 (빠르면 자동으로 올라간다)
         denoiseSteps = backendName === 'webgpu' ? MAX_STEPS : 5;
@@ -265,10 +424,12 @@ export function ensureNeuralReady() {
 }
 
 export function shutdownNeural() {
-    if (worker) worker.terminate();
-    worker = null;
+    workers.forEach(x => x.w.terminate());
+    workers = [];
+    poolMode = false;
     workerReady = null;
     backendName = null;
+    modelName = null;
     pending.forEach(p => p.resolve(null));
     pending.clear();
     stopNeuralAudio();
@@ -282,15 +443,21 @@ export async function synthesizeNeural(text, voiceValue, appSpeed, gen) {
     const total = Math.max(0.5, Math.min(2.5, MODEL_BASE_SPEED * (appSpeed || 1)));
     const speed = Math.min(total, MODEL_MAX_SPEED);
     const stretch = total / speed;
+    // 빠르게 들을수록 같은 시간에 더 많이 만들어야 한다. CPU 기기에서 1.5배 이상이면 처음부터 가장 빠른 단계로.
+    if (backendName !== 'webgpu' && stretch >= 1.25 && denoiseSteps > MIN_STEPS && !diagLog.some(e => e.type === 'synth')) denoiseSteps = MIN_STEPS;
+    const steps = denoiseSteps;
+    // 맡긴 일이 가장 적은 생성 작업자에게 (GPU 기기는 작업자 1개)
+    const target = workers.filter(x => x.role !== 'vocoder').reduce((a, b) => (a.n <= b.n ? a : b));
     return new Promise((resolve, reject) => {
-        pending.set(id, { resolve, reject });
-        worker.postMessage({ type: 'synth', id, gen, text, lang: 'ko', style, speed, stretch, steps: denoiseSteps });
+        pending.set(id, { resolve, reject, chars: text.length, stretch, steps });
+        target.n++;
+        target.w.postMessage({ type: 'synth', id, gen, text, lang: 'ko', style, speed, stretch, steps });
     });
 }
 
 /** 정지·탐색 시: 이 세대보다 오래된 대기 요청은 만들지 않게 한다 */
 export function cancelNeuralBefore(gen) {
-    if (worker) worker.postMessage({ type: 'cancelBefore', gen });
+    workers.forEach(x => x.w.postMessage({ type: 'cancelBefore', gen }));
 }
 
 // ─── 재생 (Web Audio) ────────────────────────────────────────────
