@@ -125,18 +125,30 @@ export async function downloadNeuralVoice(onProgress) {
             const parts = f.parts && f.parts.length ? f.parts : [f.path];
             const blobs = [];
             for (const part of parts) {
-                const res = await fetch(base + part, { signal: controller.signal, cache: 'no-cache' });
-                if (!res.ok) throw new Error(`음성 파일을 받지 못했습니다 (${res.status}): ${part}`);
-                const reader = res.body.getReader();
-                const chunks = [];
-                for (;;) {
-                    const { done: end, value } = await reader.read();
-                    if (end) break;
-                    chunks.push(value);
-                    done += value.byteLength;
-                    onProgress && onProgress(Math.min(done, total), total);
+                // 휴대폰 네트워크에서는 큰 파일을 받다 끊기는 일이 흔하다. 조각 하나는 몇 번 다시 받아 본다.
+                let partBlob = null;
+                for (let attempt = 1; !partBlob; attempt++) {
+                    const before = done;
+                    try {
+                        const res = await fetch(base + part, { signal: controller.signal, cache: 'no-cache' });
+                        if (!res.ok) throw new Error(`음성 파일을 받지 못했습니다 (${res.status}): ${part}`);
+                        const reader = res.body.getReader();
+                        const chunks = [];
+                        for (;;) {
+                            const { done: end, value } = await reader.read();
+                            if (end) break;
+                            chunks.push(value);
+                            done += value.byteLength;
+                            onProgress && onProgress(Math.min(done, total), total);
+                        }
+                        partBlob = new Blob(chunks);
+                    } catch (err) {
+                        done = before;   // 이 조각은 처음부터 다시 받는다
+                        if (controller.signal.aborted || attempt >= 3) throw err;
+                        await new Promise(r => setTimeout(r, 2000 * attempt));
+                    }
                 }
-                blobs.push(new Blob(chunks));
+                blobs.push(partBlob);
             }
             const blob = new Blob(blobs);
             if (f.size && blob.size !== f.size) throw new Error('받은 파일 크기가 맞지 않습니다: ' + f.path);
