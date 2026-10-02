@@ -171,6 +171,45 @@ async function synth({ text, lang, style, speed, steps }) {
     return { wav, sampleRate };
 }
 
+/**
+ * 음높이를 바꾸지 않고 소리를 빠르게 한다 (WSOLA: 겹쳐 잇기 + 파형이 가장 잘 맞는 자리 찾기).
+ * 모델에 직접 빠르게 말하게 하면 1.3배쯤부터 말을 빼먹어(받아쓰기로 확인: 1.6배에서 원문의 43%만
+ * 읽힘) 모델은 안정적인 속도까지만 쓰고, 나머지 배율은 여기서 맞춘다.
+ */
+function timeStretch(x, rate) {
+    if (!(rate > 1.001) || x.length < 4096) return x;
+    const N = 1536, Hs = N >> 1, tol = 384;          // 44.1kHz에서 약 35ms 창, 절반 겹침, ±9ms 탐색
+    const win = new Float32Array(N);
+    for (let i = 0; i < N; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / N);
+    const outLen = Math.round(x.length / rate);
+    const out = new Float32Array(outLen + N);
+    for (let j = 0; j < N && j < x.length; j++) out[j] += x[j] * win[j];
+    let prev = 0;
+    // 겹치는 앞 절반이 바로 앞 조각의 자연스러운 이어짐과 가장 비슷한 자리를 고른다
+    const score = (pos, nat, step) => {
+        let acc = 0;
+        for (let j = 0; j < Hs; j += step) acc += x[pos + j] * x[nat + j];
+        return acc;
+    };
+    for (let k = 1; ; k++) {
+        const outPos = k * Hs;
+        if (outPos >= outLen) break;
+        const nominal = Math.round(outPos * rate);
+        const natural = prev + Hs;
+        const lo = Math.max(0, nominal - tol), hi = Math.min(x.length - N, nominal + tol);
+        if (hi < lo || natural + Hs > x.length) break;
+        // 거칠게(4칸씩) 찾은 뒤 주변을 촘촘히 다듬는다 — 계산량을 1/8로 줄인다
+        let best = lo, bestScore = -Infinity;
+        for (let p = lo; p <= hi; p += 2) { const sc = score(p, natural, 4); if (sc > bestScore) { bestScore = sc; best = p; } }
+        const a = Math.max(lo, best - 2), b = Math.min(hi, best + 2);
+        bestScore = -Infinity;
+        for (let p = a; p <= b; p++) { const sc = score(p, natural, 1); if (sc > bestScore) { bestScore = sc; best = p; } }
+        for (let j = 0; j < N; j++) out[outPos + j] += x[best + j] * win[j];
+        prev = best;
+    }
+    return out.subarray(0, outLen);
+}
+
 // 한 번에 하나씩 처리 (모델 세션은 동시 실행을 보장하지 않는다)
 let queue = Promise.resolve();
 // 정지·탐색으로 버려진 재생 세대의 요청은 만들지 않고 건너뛴다 (느린 기기에서 헛계산 방지)
@@ -189,7 +228,8 @@ self.onmessage = (e) => {
                 self.postMessage({ type: 'ready', backend, sampleRate: cfgs.ae.sample_rate });
             } else if (msg.type === 'synth') {
                 const t0 = performance.now();
-                const { wav, sampleRate } = await synth(msg);
+                const { wav: raw, sampleRate } = await synth(msg);
+                const wav = (msg.stretch > 1.001) ? new Float32Array(timeStretch(raw, msg.stretch)) : raw;
                 self.postMessage({ type: 'audio', id: msg.id, wav, sampleRate, ms: performance.now() - t0, steps: msg.steps }, [wav.buffer]);
             }
         } catch (err) {

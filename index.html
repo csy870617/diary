@@ -5,7 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <meta name="referrer" content="origin"> 
     <title>신앙일지 | Faith Log</title>
-    <link rel="stylesheet" href="style.css?v=5.5">
+    <!-- 앱 버전: 배포할 때마다 이 값, 아래 import map, version.json을 함께 올린다.
+         (화면을 다시 열 때 version.json과 비교해 새 버전이면 자동으로 새로고침한다) -->
+    <meta name="app-version" content="2026.10.02.2">
+    <link rel="stylesheet" href="style.css?v=2026.10.02.2">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
     <script>
         // 페이지 로드 전 다크모드 적용 (깜빡임 방지)
@@ -443,6 +446,27 @@
         </div>
     </div>
 
-    <script type="module" src="script.js?v=9.3"></script>
+    <!-- 모든 기능 파일을 같은 버전으로 불러온다. 예전에는 script.js만 버전이 붙어 있어,
+         새 화면과 캐시에 남은 옛 기능 파일이 섞여 실행될 수 있었다. -->
+    <script type="importmap">
+    {
+        "imports": {
+            "./state.js": "./state.js?v=2026.10.02.2",
+            "./data.js": "./data.js?v=2026.10.02.2",
+            "./ui.js": "./ui.js?v=2026.10.02.2",
+            "./editor.js": "./editor.js?v=2026.10.02.2",
+            "./auth.js": "./auth.js?v=2026.10.02.2",
+            "./drive.js": "./drive.js?v=2026.10.02.2",
+            "./tts.js": "./tts.js?v=2026.10.02.2",
+            "./neural-tts.js": "./neural-tts.js?v=2026.10.02.2",
+            "./faiths-sso.js": "./faiths-sso.js?v=2026.10.02.2",
+            "./storage.js": "./storage.js?v=2026.10.02.2",
+            "./utils.js": "./utils.js?v=2026.10.02.2",
+            "./formula.js": "./formula.js?v=2026.10.02.2",
+            "./config.js": "./config.js?v=2026.10.02.2"
+        }
+    }
+    </script>
+    <script type="module" src="script.js?v=2026.10.02.2"></script>
 </body>
 </html>
