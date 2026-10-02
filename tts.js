@@ -1,7 +1,15 @@
 /**
  * TTS (Text-to-Speech) 모듈 v2
  * Web Speech API 기반 - 미니 플레이어 UI
+ * + 자연스러운 음성(Supertonic 3, 내려받아 기기에서 생성) — neural-tts.js
  */
+
+import {
+    NEURAL_PREFIX, NEURAL_VOICES, NEURAL_MAX_CHUNK, NEURAL_CHARS_PER_SEC,
+    isNeuralVoice, isNeuralSupported, isNeuralReady, isNeuralLoaded, downloadNeuralVoice, cancelNeuralDownload,
+    deleteNeuralVoice, synthesizeNeural, cancelNeuralBefore, unlockNeuralAudio, playNeuralAudio,
+    stopNeuralAudio, pauseNeuralAudio, resumeNeuralAudio
+} from './neural-tts.js';
 
 let ttsVoices = [];
 let isTTSSpeaking = false;
@@ -24,6 +32,17 @@ let ttsTimerInterval = null;
 
 // 1x 속도에서 TTS가 읽는 평균 문자 수/초 (경험적 추정)
 const CHARS_PER_SEC = 13;
+
+function selectedVoiceValue() {
+    return document.getElementById('tts-voice-select')?.value || '';
+}
+function usingNeural() {
+    return isNeuralVoice(selectedVoiceValue());
+}
+// 자연스러운 음성은 기본 음성보다 천천히 읽는다 (재생 시간 예상·탐색 위치 계산용)
+function charsPerSec() {
+    return usingNeural() ? NEURAL_CHARS_PER_SEC : CHARS_PER_SEC;
+}
 
 // 마침표 1개를 초과하는 각 마침표마다 추가되는 쉼(초). "..." = 기본 간격 + 1.0초
 const DOT_EXTRA_PAUSE_SEC = 0.5;
@@ -161,9 +180,41 @@ function closeTTSSettings() {
 // 자연스러운(Neural/Natural) 음성을 식별하기 위한 키워드
 const NATURAL_VOICE_RE = /natural|neural|online|enhanced|premium|wavenet|studio|neural2/i;
 
+// 내려받아 둔 자연스러운 음성을 목록 맨 위에 넣는다 (받지 않았으면 넣지 않는다)
+async function addNeuralGroup(sel, saved) {
+    const ready = await isNeuralReady();
+    sel.querySelector('optgroup[data-neural]')?.remove();
+    if (ready) {
+        const g = document.createElement('optgroup');
+        g.label = '✨ 자연스러운 음성';
+        g.dataset.neural = '1';
+        NEURAL_VOICES.forEach(v => {
+            const o = document.createElement('option');
+            o.value = NEURAL_PREFIX + v.id;
+            o.textContent = '✨ ' + v.label;
+            g.appendChild(o);
+        });
+        sel.insertBefore(g, sel.firstChild);
+        if (isNeuralVoice(saved)) sel.value = saved;
+    } else if (isNeuralVoice(sel.value)) {
+        // 받아 둔 음성이 지워졌으면 기본 음성 중 첫 번째로
+        const first = sel.querySelector('option:not([value^="' + NEURAL_PREFIX + '"])');
+        if (first) sel.value = first.value;
+    }
+    updatePitchAvailability();
+}
+
 export function loadVoices() {
     const sel = document.getElementById('tts-voice-select');
-    if (!sel || !('speechSynthesis' in window)) return;
+    if (!sel) return;
+    if (!('speechSynthesis' in window)) {
+        // 기본 음성 엔진이 없어도 자연스러운 음성은 쓸 수 있다
+        sel.innerHTML = '';
+        addNeuralGroup(sel, localStorage.getItem('faith_tts_voice'));
+        refreshNeuralRow();
+        return;
+    }
+    refreshNeuralRow();
 
     const populate = () => {
         ttsVoices = speechSynthesis.getVoices();
@@ -219,6 +270,7 @@ export function loadVoices() {
         } else if (enUs.length) {
             sel.value = enUs[0].name;
         }
+        addNeuralGroup(sel, saved);
     };
 
     populate();
@@ -234,6 +286,76 @@ export function loadVoices() {
             }
         };
         speechSynthesis.addEventListener('voiceschanged', ttsVoicesListener);
+    }
+}
+
+// 자연스러운 음성은 음높이를 바꿀 수 없다 → 슬라이더를 잠그고 이유를 알려 준다
+function updatePitchAvailability() {
+    const slider = document.getElementById('tts-pitch-slider');
+    if (!slider) return;
+    const neural = usingNeural();
+    slider.disabled = neural;
+    const row = slider.closest('.tts-row');
+    if (row) {
+        row.classList.toggle('tts-row-disabled', neural);
+        row.title = neural ? '자연스러운 음성은 음높이를 바꿀 수 없습니다' : '';
+    }
+}
+
+// ─── 자연스러운 음성 내려받기 ───
+let neuralDownloading = false;
+
+function setNeuralRow(statusText, btnText, progressPct) {
+    const status = document.getElementById('tts-neural-status');
+    const btn = document.getElementById('tts-neural-btn');
+    const bar = document.getElementById('tts-neural-progress');
+    const fill = document.getElementById('tts-neural-progress-fill');
+    if (status) status.textContent = statusText;
+    if (btn) btn.textContent = btnText;
+    if (bar) bar.classList.toggle('hidden', progressPct == null);
+    if (fill && progressPct != null) fill.style.width = progressPct + '%';
+}
+
+async function refreshNeuralRow() {
+    const row = document.getElementById('tts-neural-row');
+    if (!row) return;
+    if (!isNeuralSupported()) { row.classList.add('hidden'); return; }
+    row.classList.remove('hidden');
+    if (neuralDownloading) return;
+    if (await isNeuralReady()) setNeuralRow('받아 둠 · 인터넷 없이 사용 가능', '삭제', null);
+    else setNeuralRow('약 440MB · 와이파이에서 받기를 권장합니다', '내려받기', null);
+}
+
+async function onNeuralButton() {
+    if (neuralDownloading) {
+        cancelNeuralDownload();
+        return;
+    }
+    if (await isNeuralReady()) {
+        if (!confirm('내려받은 자연스러운 음성을 기기에서 지울까요?\n(필요하면 언제든 다시 받을 수 있습니다)')) return;
+        if (usingNeural()) stopTTS();
+        await deleteNeuralVoice();
+        loadVoices();
+        showToast('자연스러운 음성을 지웠습니다.');
+        return;
+    }
+    if (!confirm('자연스러운 음성(약 440MB)을 내려받습니다.\n데이터 요금이 들 수 있으니 와이파이에서 받기를 권장합니다.\n\n한 번 받으면 인터넷 없이도 쓸 수 있습니다. 계속할까요?')) return;
+    neuralDownloading = true;
+    setNeuralRow('받는 중… 0%', '취소', 0);
+    try {
+        await downloadNeuralVoice((got, total) => {
+            const pct = total ? Math.floor(got / total * 100) : 0;
+            setNeuralRow(`받는 중… ${pct}% (${Math.round(got / 1e6)} / ${Math.round(total / 1e6)}MB)`, '취소', pct);
+        });
+        neuralDownloading = false;
+        localStorage.setItem('faith_tts_voice', NEURAL_PREFIX + 'F1');
+        loadVoices();
+        showToast('자연스러운 음성을 받았습니다. 음성 목록에서 고를 수 있습니다.');
+    } catch (err) {
+        neuralDownloading = false;
+        if (err && err.name === 'AbortError') showToast('내려받기를 취소했습니다.');
+        else alert('자연스러운 음성을 받지 못했습니다.\n' + (err && err.message || err) + '\n\n받은 부분은 남아 있어 다시 누르면 이어서 받습니다.');
+        refreshNeuralRow();
     }
 }
 
@@ -347,7 +469,9 @@ function formatTime(sec) {
 /** Chrome의 ~15초 발화 중단을 피하기 위해 속도에 비례해 청크 최대 길이 산정 */
 function getMaxChunkLen() {
     const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
-    return Math.max(60, Math.min(300, Math.round(180 * speed)));
+    const len = Math.max(60, Math.min(300, Math.round(180 * speed)));
+    // 자연스러운 음성은 한 번에 120자 안쪽으로 만들어야 안정적이다
+    return usingNeural() ? Math.min(len, NEURAL_MAX_CHUNK) : len;
 }
 
 function estimateTotalTime() {
@@ -356,7 +480,7 @@ function estimateTotalTime() {
     const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
     const gap = parseFloat(document.getElementById('tts-gap-slider')?.value || '0') || 0;
     const chunks = splitChunks(text, getMaxChunkLen());
-    const speakTime = text.length / CHARS_PER_SEC / speed;
+    const speakTime = text.length / charsPerSec() / speed;
     const baseGapTime = Math.max(0, chunks.length - 1) * gap;
     const dotGapTime = chunks
         .slice(0, -1)
@@ -385,7 +509,7 @@ function buildChunkTimings(chunks, speed, gapSec) {
     let elapsed = 0;
     for (let i = 0; i < chunks.length; i++) {
         const spokenLen = cleanForSpeech(chunks[i].text).length;
-        const speakSec = spokenLen / CHARS_PER_SEC / speed;
+        const speakSec = spokenLen / charsPerSec() / speed;
         timings.push({ index: i, startSec: elapsed, speakSec });
         elapsed += speakSec;
         if (i < chunks.length - 1) {
@@ -434,7 +558,7 @@ function stopTimeTicker() {
 function startTTSHeartbeat() {
     stopTTSHeartbeat();
     ttsHeartbeatTimer = setInterval(() => {
-        if (isTTSSpeaking && !isTTSPaused) speechSynthesis.resume();
+        if (isTTSSpeaking && !isTTSPaused && 'speechSynthesis' in window && !usingNeural()) speechSynthesis.resume();
     }, 10000);
 }
 
@@ -493,11 +617,22 @@ function getTextToSpeak() {
     return stripParentheses(full.substring(s, e)).trim();
 }
 
+// 기본 음성 엔진의 발화를 멈춘다 (엔진이 없는 브라우저에서도 안전하게)
+function cancelSystemSpeech() {
+    if ('speechSynthesis' in window) {
+        speechSynthesis.cancel();
+        speechSynthesis.resume(); // paused 고착 방지 (발화 없을 땐 무해)
+    }
+}
+
 export function playTTS() {
-    if (!('speechSynthesis' in window)) {
+    const neural = usingNeural();
+    if (!neural && !('speechSynthesis' in window)) {
         alert('이 브라우저는 TTS를 지원하지 않습니다.');
         return;
     }
+    // 아이폰은 재생 버튼을 누른 순간에 소리 장치를 깨워 두어야 이후 생성된 음성이 재생된다
+    if (neural) unlockNeuralAudio();
 
     // 일시정지 → 재개
     if (isTTSPaused) {
@@ -511,8 +646,10 @@ export function playTTS() {
             // 청크 간 쉼 도중 일시정지된 경우 → 살아있는 발화가 없으므로 speakNext로 재진입
             ttsGapInterrupted = false;
             // 엔진이 paused로 남아 있으면 새 발화가 무음 대기하므로 먼저 해제 (발화 없을 땐 무해)
-            speechSynthesis.resume();
+            if (!neural && 'speechSynthesis' in window) speechSynthesis.resume();
             speakNext();
+        } else if (neural) {
+            resumeNeuralAudio();
         } else {
             speechSynthesis.resume();
         }
@@ -529,8 +666,9 @@ export function playTTS() {
 
     ttsGen++; // 이전 발화의 stale 이벤트 무효화
     ttsGapInterrupted = false;
-    speechSynthesis.cancel();
-    speechSynthesis.resume(); // 일시정지 상태에서 새 재생 시 paused 고착으로 무음이 되는 것 방지
+    cancelSystemSpeech(); // 일시정지 상태에서 새 재생 시 paused 고착으로 무음이 되는 것 방지
+    stopNeuralAudio();
+    cancelNeuralBefore(ttsGen);
     clearTimeout(ttsGapTimer);
     ttsGapTimer = null;
 
@@ -570,8 +708,9 @@ export function seekTTSByPercent(percent) {
     clearTimeout(ttsGapTimer);
     ttsGapTimer = null;
     ttsGen++; // 이전 발화의 stale 이벤트 무효화
-    speechSynthesis.cancel();
-    speechSynthesis.resume(); // paused 고착 방지 (발화 없을 땐 무해)
+    cancelSystemSpeech();
+    stopNeuralAudio();
+    cancelNeuralBefore(ttsGen);
 
     if (wasPlaying) {
         ttsGapInterrupted = false;
@@ -665,6 +804,8 @@ function speakNext() {
         return;
     }
 
+    if (usingNeural()) { speakNextNeural(currentChunk); return; }
+
     const utt = new SpeechSynthesisUtterance(spoken);
 
     // 음성: 선택된 음성 하나로 고정 (lang까지 맞춰 다른 음성이 섞이지 않도록)
@@ -693,16 +834,7 @@ function speakNext() {
     };
     utt.onend = () => {
         if (myGen !== ttsGen) return;
-        ttsChunkIndex++;
-        setProgress(Math.round((ttsChunkIndex / ttsChunks.length) * 100));
-        const baseGap = parseFloat(document.getElementById('tts-gap-slider')?.value || '0') * 1000;
-        const dotGap = extraPauseForDots(currentChunk.dots) * 1000;
-        const totalGap = baseGap + dotGap;
-        if (totalGap > 0 && ttsChunkIndex < ttsChunks.length) {
-            ttsGapTimer = setTimeout(() => speakNext(), totalGap);
-        } else {
-            speakNext();
-        }
+        advanceAfterChunk(currentChunk, 0);
     };
     utt.onerror = (e) => {
         if (myGen !== ttsGen) return;
@@ -720,6 +852,84 @@ function speakNext() {
     speechSynthesis.speak(utt);
 }
 
+/** 한 문장을 다 읽은 뒤: 진행률을 올리고, 설정한 쉼만큼 기다렸다가 다음 문장으로 */
+function advanceAfterChunk(currentChunk, minGapMs) {
+    ttsChunkIndex++;
+    setProgress(Math.round((ttsChunkIndex / ttsChunks.length) * 100));
+    const baseGap = parseFloat(document.getElementById('tts-gap-slider')?.value || '0') * 1000;
+    const dotGap = extraPauseForDots(currentChunk.dots) * 1000;
+    const totalGap = Math.max(minGapMs || 0, baseGap + dotGap);
+    if (totalGap > 0 && ttsChunkIndex < ttsChunks.length) {
+        ttsGapTimer = setTimeout(() => { ttsGapTimer = null; speakNext(); }, totalGap);
+    } else {
+        speakNext();
+    }
+}
+
+// ─── 자연스러운 음성 재생 ───
+// 지금 문장을 읽는 동안 다음 문장을 미리 만들어 둔다 (만드는 데 몇 초 걸리므로)
+let neuralPrefetch = null;          // { gen, index, voice, promise }
+let neuralErrorShown = false;
+// 문장 사이의 기본 쉼 — 모델이 문장 끝을 짧게 끊어 쉼 없이 이으면 숨 쉴 틈이 없다 (공식 예제 0.3초)
+const NEURAL_SENTENCE_GAP_MS = 250;
+
+function requestNeural(index, gen) {
+    const voice = selectedVoiceValue();
+    if (neuralPrefetch && neuralPrefetch.gen === gen && neuralPrefetch.index === index && neuralPrefetch.voice === voice) {
+        return neuralPrefetch.promise;
+    }
+    const text = cleanForSpeech(ttsChunks[index]?.text || '');
+    const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
+    const promise = text ? synthesizeNeural(text, voice, speed, gen) : Promise.resolve(null);
+    promise.catch(() => {});   // 미리 만들다 실패해도 그 문장 차례에 다시 처리한다
+    neuralPrefetch = { gen, index, voice, promise };
+    return promise;
+}
+
+async function speakNextNeural(currentChunk) {
+    const myGen = ttsGen;
+    const index = ttsChunkIndex;
+    localStorage.setItem('faith_tts_voice', selectedVoiceValue());
+    setProgress(Math.round((index / ttsChunks.length) * 100));
+    if (!isNeuralLoaded()) showToast('자연스러운 음성을 준비하고 있습니다…');
+    let audio;
+    try {
+        audio = await requestNeural(index, myGen);
+    } catch (err) {
+        if (myGen !== ttsGen) return;
+        console.error('자연스러운 음성 생성 실패:', err);
+        neuralPrefetch = null;
+        isTTSSpeaking = false;
+        isTTSPaused = false;
+        stopTimeTicker();
+        stopTTSHeartbeat();
+        syncUI();
+        if (!neuralErrorShown) {
+            neuralErrorShown = true;
+            setTimeout(() => { neuralErrorShown = false; }, 3000);
+            const missing = /내려받은 음성 파일이 없습니다/.test(err.message || '');
+            alert(missing
+                ? '내려받은 자연스러운 음성이 기기에서 지워졌습니다.\n음성 설정에서 다시 내려받거나 다른 음성을 골라 주세요.'
+                : '자연스러운 음성을 만들지 못했습니다.\n기기 메모리가 부족할 수 있습니다. 다른 앱을 닫거나 기본 음성을 골라 주세요.');
+            if (missing) refreshNeuralRow();
+        }
+        return;
+    }
+    if (myGen !== ttsGen) return;
+    if (!audio) { advanceAfterChunk(currentChunk, 0); return; }
+    // 만드는 동안 일시정지를 눌렀다면, 재개할 때 이 문장부터 읽는다 (만든 결과는 그대로 재사용)
+    if (isTTSPaused) { ttsGapInterrupted = true; return; }
+
+    // 다음 문장을 미리 만들기 시작
+    if (index + 1 < ttsChunks.length) requestNeural(index + 1, myGen);
+
+    isTTSSpeaking = true;
+    syncUI();
+    const finished = await playNeuralAudio(audio.wav, audio.sampleRate);
+    if (myGen !== ttsGen || !finished) return;
+    advanceAfterChunk(currentChunk, NEURAL_SENTENCE_GAP_MS);
+}
+
 export function pauseTTS() {
     if (isTTSSpeaking && !isTTSPaused) {
         // 청크 간 쉼(gap) 도중이면 대기 타이머를 해제하고 재개 시 speakNext로 진입하도록 표시
@@ -729,6 +939,8 @@ export function pauseTTS() {
             ttsGapInterrupted = true;
             // 살아있는 발화가 없는데 pause()를 호출하면 엔진이 paused로 고착되어
             // 다음 발화가 무음 대기하므로, 이 경우에는 pause()를 건너뛴다
+        } else if (usingNeural()) {
+            pauseNeuralAudio();   // 만드는 중이었다면 끝난 뒤 speakNextNeural이 재개를 기다린다
         } else {
             speechSynthesis.pause();
         }
@@ -749,11 +961,11 @@ export function stopTTS() {
     ttsGapInterrupted = false;
     // 음성 읽기를 지원하지 않는 브라우저(일부 앱 내 WebView)에서는 여기서 예외가 나
     // 편집기 닫기·저장까지 멈췄다. 엔진이 있을 때만 호출한다.
-    if ('speechSynthesis' in window) {
-        speechSynthesis.cancel();
-        // 일시정지 중 정지하면 Chrome이 paused 상태를 유지해 다음 재생이 무음이 되므로 해제
-        speechSynthesis.resume();
-    }
+    // 일시정지 중 정지하면 Chrome이 paused 상태를 유지해 다음 재생이 무음이 되므로 해제
+    cancelSystemSpeech();
+    stopNeuralAudio();
+    cancelNeuralBefore(ttsGen);
+    neuralPrefetch = null;
     clearTimeout(ttsGapTimer);
     ttsGapTimer = null;
     isTTSSpeaking = false;
@@ -779,6 +991,7 @@ export function playSelection() {
         return;
     }
     stopTTS();
+    if (usingNeural()) unlockNeuralAudio();
     const selText = stripParentheses(info.text).trim();
     if (!selText) { alert('읽을 내용이 없습니다.'); return; }
     ttsChunks = splitChunks(selText, getMaxChunkLen());
@@ -788,7 +1001,7 @@ export function playSelection() {
     const dotGapTime = ttsChunks
         .slice(0, -1)
         .reduce((sum, c) => sum + extraPauseForDots(c.dots), 0);
-    ttsTotalSec = selText.length / CHARS_PER_SEC / speed
+    ttsTotalSec = selText.length / charsPerSec() / speed
         + Math.max(0, ttsChunks.length - 1) * gap
         + dotGapTime;
     ttsElapsedBeforePause = 0;
@@ -853,6 +1066,14 @@ export function updatePitchDisplay() {
 export function saveTTSVoice() {
     const sel = document.getElementById('tts-voice-select');
     if (sel && sel.value) localStorage.setItem('faith_tts_voice', sel.value);
+    updatePitchAvailability();
+    // 음성마다 문장을 나누는 길이·읽는 속도가 달라 읽는 중이면 지금 위치부터 새 음성으로 다시 읽는다
+    if (isTTSSpeaking && !isTTSPaused) {
+        const slider = document.getElementById('tts-progress-slider');
+        seekTTSByPercent(slider ? slider.value : 0);
+    } else if (!isTTSSpeaking) {
+        refreshTTSTotalTime();
+    }
 }
 
 export function updateGapDisplay() {
@@ -876,6 +1097,7 @@ export function initTTS() {
     if (speed && ss) { ss.value = speed; updateSpeedDisplay(); }
     if (pitch && ps) { ps.value = pitch; updatePitchDisplay(); }
     if (gap && gs) { gs.value = gap; updateGapDisplay(); }
+    document.getElementById('tts-neural-btn')?.addEventListener('click', onNeuralButton);
     updateTimeDisplay();
 }
 
