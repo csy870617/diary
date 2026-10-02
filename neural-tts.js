@@ -22,6 +22,9 @@ export const NEURAL_VOICES = [
 
 // 공식 예제 기본값. 앱의 1.0배속이 모델의 1.05에 해당한다.
 const MODEL_BASE_SPEED = 1.05;
+// 모델에 맡기는 최대 속도. 이보다 빠르게 시키면 말을 빼먹는다(받아쓰기로 확인:
+// 1.37배 91%, 1.68배 43%, 2.1배 30%만 읽힘). 그 이상은 만든 소리를 음높이 그대로 빠르게 한다.
+const MODEL_MAX_SPEED = 1.2;
 // 품질 단계(반복 횟수). 많을수록 곱지만 느리다. 기기 속도에 맞춰 4~8 사이에서 자동 조절한다.
 // (측정: 단계 8은 5보다 약 1.5배 느림. 느린 기기에서 8로 고정하면 문장 사이가 끊긴다)
 const MAX_STEPS = 8, MIN_STEPS = 4;
@@ -181,7 +184,8 @@ let reqSeq = 0;
 const pending = new Map();  // id → { resolve, reject }
 
 function spawnWorker(forceWasm) {
-    const w = new Worker(new URL('./neural-tts-worker.js', import.meta.url));
+    // 이 파일과 같은 버전(?v=…)으로 작업자를 불러온다 (캐시에 남은 옛 작업자와 섞이지 않게)
+    const w = new Worker(new URL('./neural-tts-worker.js' + new URL(import.meta.url).search, import.meta.url));
     w.onmessage = (e) => {
         const d = e.data || {};
         if (d.type === 'ready' || (d.type === 'error' && d.id == null)) return; // init 응답은 아래에서 처리
@@ -275,10 +279,12 @@ export async function synthesizeNeural(text, voiceValue, appSpeed, gen) {
     await ensureNeuralReady();
     const id = ++reqSeq;
     const style = voiceValue.slice(NEURAL_PREFIX.length) || 'F1';
-    const speed = Math.max(0.5, Math.min(2.0, MODEL_BASE_SPEED * (appSpeed || 1)));
+    const total = Math.max(0.5, Math.min(2.5, MODEL_BASE_SPEED * (appSpeed || 1)));
+    const speed = Math.min(total, MODEL_MAX_SPEED);
+    const stretch = total / speed;
     return new Promise((resolve, reject) => {
         pending.set(id, { resolve, reject });
-        worker.postMessage({ type: 'synth', id, gen, text, lang: 'ko', style, speed, steps: denoiseSteps });
+        worker.postMessage({ type: 'synth', id, gen, text, lang: 'ko', style, speed, stretch, steps: denoiseSteps });
     });
 }
 

@@ -93,6 +93,35 @@ function sanitizeSharedHtml(html) {
     return doc.body.innerHTML;
 }
 
+// ─── 새 버전 감지 ───
+// 휴대폰은 앱을 열어 둔 채 다른 앱에 다녀오면 페이지를 새로 받지 않고 예전 화면을 그대로 보여 준다.
+// (GitHub Pages도 파일을 10분 동안 캐시한다) 그래서 배포 뒤에도 예전 화면이 한참 남았다.
+// 화면으로 돌아올 때 version.json을 확인해, 새 버전이면 편집 중이 아닐 때 새로고침한다.
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '';
+
+async function checkForUpdate() {
+    if (!APP_VERSION || !navigator.onLine) return;
+    try {
+        const res = await fetch(`version.json?ts=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const { version } = await res.json();
+        if (!version || version === APP_VERSION) return;
+        // 이 버전으로 이미 한 번 새로고침했는데도 그대로라면(캐시가 아직 안 풀림) 되풀이하지 않는다
+        const key = 'faith_reloaded_for';
+        if (sessionStorage.getItem(key) === version) return;
+        // 글을 쓰거나 다른 창이 열려 있으면 지금은 미룬다 (다음에 화면으로 돌아올 때 다시 확인)
+        const busy = ['write-modal', 'trash-modal', 'move-modal']
+            .some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); });
+        if (busy) return;
+        sessionStorage.setItem(key, version);
+        await flushEntries().catch(() => {});   // 아직 기록되지 않은 로컬 저장분을 마무리
+        // 주소에 버전을 붙여 캐시에 남은 예전 화면 대신 새 화면을 받게 한다
+        const url = new URL(location.href);
+        url.searchParams.set('v', version);
+        location.replace(url.toString());
+    } catch (e) { /* 확인 실패는 조용히 넘긴다 — 다음에 다시 확인 */ }
+}
+
 async function init() {
     if (!history.state) history.replaceState({ modal: 'main' }, null, '');
 
@@ -198,7 +227,7 @@ async function init() {
 
     window.addEventListener('focus', handleResume);
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') handleResume();
+        if (document.visibilityState === 'visible') { handleResume(); checkForUpdate(); }
         // 백그라운드로 전환되기 직전, 대기 중인 클라우드 업로드를 즉시 전송 → 다른 기기에서 최신 상태 확인 가능
         // 탭이 가려지기 직전 — 편집 중이던 내용을 먼저 저장한 뒤 올린다
         else flushPendingEdit().then(() => syncNow());
@@ -246,6 +275,9 @@ async function init() {
     });
 
     setupListeners();
+    // 새 버전 확인: 처음 연 뒤 잠시 후, 그리고 뒤로가기 캐시에서 되살아났을 때
+    setTimeout(checkForUpdate, 5000);
+    window.addEventListener('pageshow', (e) => { if (e.persisted) checkForUpdate(); });
     renderStickers();
 
     // FAITHS SSO 응답(또는 타임아웃)을 먼저 기다려, 응답이 늦게 도착해
