@@ -8,7 +8,7 @@ import {
     NEURAL_PREFIX, NEURAL_VOICES, NEURAL_MAX_CHUNK, NEURAL_CHARS_PER_SEC,
     isNeuralVoice, isNeuralSupported, isNeuralReady, isNeuralLoaded, downloadNeuralVoice, cancelNeuralDownload,
     deleteNeuralVoice, synthesizeNeural, cancelNeuralBefore, unlockNeuralAudio, playNeuralAudio,
-    stopNeuralAudio, pauseNeuralAudio, resumeNeuralAudio
+    stopNeuralAudio, pauseNeuralAudio, resumeNeuralAudio, lowerNeuralQuality, getNeuralInfo
 } from './neural-tts.js';
 import { state } from './state.js';
 import { jumpToPage } from './editor.js';
@@ -18,8 +18,6 @@ let isTTSSpeaking = false;
 let isTTSPaused = false;
 let ttsChunks = [];
 let ttsChunkIndex = 0;
-let ttsStartOffset = null;
-let ttsEndOffset = null;
 let ttsGapTimer = null;
 let ttsGen = 0;                // 재생 세대 카운터 — 이전 발화의 stale onend/onerror 무시용
 let ttsGapInterrupted = false; // 청크 간 쉼 도중 일시정지됨 → 재개 시 speakNext로 진입
@@ -140,20 +138,6 @@ function rangeFromOffsets(index, start, end) {
     } catch (e) { return null; }
 }
 
-function getSelectionInfo() {
-    const editor = document.getElementById('editor-body');
-    const sel = window.getSelection();
-    if (!sel.rangeCount || !editor) return null;
-    const range = sel.getRangeAt(0);
-    if (!editor.contains(range.startContainer) || range.collapsed) return null;
-
-    const index = buildTextIndex(editor);
-    const startOff = offsetAtPosition(index, range.startContainer, range.startOffset);
-    const endOff = offsetAtPosition(index, range.endContainer, range.endOffset);
-    if (startOff == null || endOff == null) return null;
-
-    return { start: startOff, end: endOff, text: sel.toString() };
-}
 
 // ─── 지금 읽는 문장 강조 · 문장을 눌러 거기서부터 읽기 ───
 // 강조는 CSS Highlight API로 그린다. 본문 HTML을 건드리지 않으므로 표시가 글에 저장될 일이 없다.
@@ -244,22 +228,13 @@ function onEditorTapForTTS(e) {
     const index = getTextIndex();
     const pos = offsetAtPosition(index, pt.node, pt.offset);
     if (pos == null) return;
-    playFromOffset(pos, index.text);
+    playFromOffset(pos);
 }
 
-function playFromOffset(pos, full) {
+function playFromOffset(pos) {
     const neural = usingNeural();
     if (!neural && !('speechSynthesis' in window)) return;
     if (neural) unlockNeuralAudio();   // 누른 순간에 소리 장치를 깨워 둔다 (아이폰)
-    // 정해 둔 구간 밖을 눌렀으면 구간을 풀고 그 문장부터 읽는다
-    const s = ttsStartOffset || 0;
-    const e = ttsEndOffset || full.length;
-    if (pos < s || pos >= e) {
-        ttsStartOffset = null;
-        ttsEndOffset = null;
-        refreshRangeDisplay();
-        showToast('구간을 풀고 이 문장부터 읽습니다.');
-    }
     const src = getSpeechSource();
     if (!src.text) return;
     const chunks = splitChunks(src.text, getMaxChunkLen(), src.map);
@@ -315,7 +290,6 @@ export function toggleTTSPanel() {
             }
         }
         loadVoices();
-        refreshRangeDisplay();
         refreshTTSTotalTime();
     } else {
         panel.classList.add('hidden');
@@ -329,7 +303,7 @@ export function toggleTTSSettings() {
     const settings = document.getElementById('tts-settings');
     if (!settings) return;
     settings.classList.toggle('hidden');
-    refreshRangeDisplay();
+    if (!settings.classList.contains('hidden')) refreshNeuralRow();   // 계산 장치·품질 표시를 최신으로
 }
 
 function closeTTSSettings() {
@@ -484,7 +458,11 @@ async function refreshNeuralRow() {
     if (!isNeuralSupported()) { row.classList.add('hidden'); return; }
     row.classList.remove('hidden');
     if (neuralDownloading) return;
-    if (await isNeuralReady()) setNeuralRow('받아 둠 · 인터넷 없이 사용 가능', '삭제', null);
+    if (await isNeuralReady()) {
+        const info = getNeuralInfo();
+        const where = info.backend ? `${info.backend === 'webgpu' ? ' · GPU로 계산' : ' · CPU로 계산'} · 품질 ${info.steps}/8` : '';
+        setNeuralRow('받아 둠 · 인터넷 없이 사용 가능' + where, '삭제', null);
+    }
     else setNeuralRow('약 440MB · 와이파이에서 받기를 권장합니다', '내려받기', null);
 }
 
@@ -521,48 +499,9 @@ async function onNeuralButton() {
     }
 }
 
-// ─── 구간 선택 ───
-
-export function setTTSStart() {
-    const info = getSelectionInfo();
-    if (info) {
-        ttsStartOffset = info.start;
-        if (ttsEndOffset !== null && ttsEndOffset <= ttsStartOffset) ttsEndOffset = null;
-        showToast('시작 지점이 설정되었습니다.');
-    } else {
-        ttsStartOffset = null;
-        showToast('시작 지점이 초기화되었습니다 (처음부터).');
-    }
-    refreshRangeDisplay();
-}
-
-export function setTTSEnd() {
-    const info = getSelectionInfo();
-    if (info) {
-        ttsEndOffset = info.end;
-        if (ttsStartOffset !== null && ttsStartOffset >= ttsEndOffset) ttsStartOffset = null;
-        showToast('끝 지점이 설정되었습니다.');
-    } else {
-        ttsEndOffset = null;
-        showToast('끝 지점이 초기화되었습니다 (끝까지).');
-    }
-    refreshRangeDisplay();
-}
-
-// 다른 글을 열 때 호출. 이전 글에서 잡아둔 구간이 남아 있으면
-// 새 글을 엉뚱한 위치부터 읽으므로 조용히(안내 없이) 초기화한다.
+// 다른 글을 열 때 호출 — 이전 글의 강조 표시를 지운다
 export function clearTTSRangeForNewEntry() {
-    ttsStartOffset = null;
-    ttsEndOffset = null;
     clearTTSHighlight();
-    try { refreshRangeDisplay(); } catch (e) { /* 패널이 아직 없으면 무시 */ }
-}
-
-export function resetTTSRange() {
-    ttsStartOffset = null;
-    ttsEndOffset = null;
-    refreshRangeDisplay();
-    showToast('구간이 초기화되었습니다.');
 }
 
 function showToast(msg) {
@@ -579,45 +518,6 @@ function showToast(msg) {
     toast._timer = setTimeout(() => toast.classList.remove('show'), 1800);
 }
 
-function refreshRangeDisplay() {
-    const full = getFullText();
-    const startInfo = document.getElementById('tts-start-info');
-    const endInfo = document.getElementById('tts-end-info');
-    const barLabel = document.getElementById('tts-bar-range-label');
-
-    // 본문이 일시적으로 짧아진 상태(재렌더링 중 등)에서 사용자가 지정한 구간을
-    // 지워버리지 않도록, 범위를 벗어난 경우에도 상태는 유지하고 표시만 기본값으로 한다.
-    // (본문이 비어 있지 않고 실제로 범위를 벗어났을 때만 초기화)
-    if (ttsStartOffset !== null && ttsStartOffset < full.length) {
-        const t = full.substring(ttsStartOffset, ttsStartOffset + 20).replace(/\n/g, ' ').trim();
-        if (startInfo) { startInfo.textContent = `"${t}…"`; startInfo.classList.add('set'); }
-    } else {
-        if (ttsStartOffset !== null && full.length > 0) ttsStartOffset = null;
-        if (startInfo) { startInfo.textContent = '처음부터'; startInfo.classList.remove('set'); }
-    }
-
-    if (ttsEndOffset !== null && ttsEndOffset <= full.length) {
-        const s = Math.max(0, ttsEndOffset - 20);
-        const t = full.substring(s, ttsEndOffset).replace(/\n/g, ' ').trim();
-        if (endInfo) { endInfo.textContent = `"…${t}"`; endInfo.classList.add('set'); }
-    } else {
-        if (ttsEndOffset !== null && full.length > 0) ttsEndOffset = null;
-        if (endInfo) { endInfo.textContent = '끝까지'; endInfo.classList.remove('set'); }
-    }
-
-    // 바 라벨
-    if (barLabel) {
-        if (ttsStartOffset !== null || ttsEndOffset !== null) {
-            barLabel.textContent = '구간';
-            barLabel.classList.add('active');
-        } else {
-            barLabel.textContent = '전체';
-            barLabel.classList.remove('active');
-        }
-    }
-
-    if (!isTTSSpeaking) refreshTTSTotalTime();
-}
 
 // ─── 재생 시간 계산/표시 ───
 
@@ -808,12 +708,10 @@ function buildSpeechText(full, s, e) {
     return { text: chars.slice(a, b).join(''), map: map.slice(a, b) };
 }
 
-/** 지금 구간(시작~끝)에서 읽을 글과 위치표 */
+/** 본문 전체에서 읽을 글과 위치표 */
 function getSpeechSource() {
     const full = getFullText();
-    const s = ttsStartOffset || 0;
-    const e = ttsEndOffset || full.length;
-    return buildSpeechText(full, s, e);
+    return buildSpeechText(full, 0, full.length);
 }
 
 function getTextToSpeak() {
@@ -1098,23 +996,42 @@ function advanceAfterChunk(currentChunk, minGapMs) {
 }
 
 // ─── 자연스러운 음성 재생 ───
-// 지금 문장을 읽는 동안 다음 문장을 미리 만들어 둔다 (만드는 데 몇 초 걸리므로)
-let neuralPrefetch = null;          // { gen, index, voice, promise }
+// 문장 하나를 만드는 데 몇 초 걸리므로, 읽는 동안 앞으로 읽을 문장들을 미리 만들어 둔다.
+// 한 문장만 미리 만들면 그다음 문장은 지금 문장이 끝나야 만들기 시작해, 길이가 들쭉날쭉한
+// 글에서 문장 사이가 자주 끊겼다. 작업자가 쉬지 않도록 몇 문장 앞까지 줄 세워 둔다.
+const NEURAL_READ_AHEAD = 3;
+let neuralCache = null;             // { gen, voice, map: Map<index, Promise> }
 let neuralErrorShown = false;
-// 문장 사이의 기본 쉼 — 모델이 문장 끝을 짧게 끊어 쉼 없이 이으면 숨 쉴 틈이 없다 (공식 예제 0.3초)
+let neuralPlayedGen = -1;           // 이 재생(세대)에서 이미 한 문장 이상 읽었는가
+// 문장 끝의 쉼 — 모델이 문장 끝을 짧게 끊어 쉼 없이 이으면 숨 쉴 틈이 없다 (공식 예제 0.3초)
 const NEURAL_SENTENCE_GAP_MS = 250;
+// 긴 문장을 쉼표 등에서 나눈 자리 — 문장 끝처럼 쉬면 한 문장 안에서 툭툭 끊겨 들린다
+const NEURAL_CLAUSE_GAP_MS = 60;
+
+function neuralGapAfter(chunk) {
+    return /[.!?。…"'」』)\]]\s*$/.test(chunk.text || '') ? NEURAL_SENTENCE_GAP_MS : NEURAL_CLAUSE_GAP_MS;
+}
 
 function requestNeural(index, gen) {
     const voice = selectedVoiceValue();
-    if (neuralPrefetch && neuralPrefetch.gen === gen && neuralPrefetch.index === index && neuralPrefetch.voice === voice) {
-        return neuralPrefetch.promise;
+    if (!neuralCache || neuralCache.gen !== gen || neuralCache.voice !== voice) {
+        neuralCache = { gen, voice, map: new Map() };
     }
+    const map = neuralCache.map;
+    if (map.has(index)) return map.get(index);
     const text = cleanForSpeech(ttsChunks[index]?.text || '');
     const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
     const promise = text ? synthesizeNeural(text, voice, speed, gen) : Promise.resolve(null);
     promise.catch(() => {});   // 미리 만들다 실패해도 그 문장 차례에 다시 처리한다
-    neuralPrefetch = { gen, index, voice, promise };
+    map.set(index, promise);
     return promise;
+}
+
+/** 지금 문장 뒤로 몇 문장을 미리 만들어 두고, 지나간 문장은 버린다 */
+function fillNeuralAhead(index, gen) {
+    if (!neuralCache || neuralCache.gen !== gen) return;
+    for (const k of [...neuralCache.map.keys()]) if (k < index) neuralCache.map.delete(k);
+    for (let k = index + 1; k <= index + NEURAL_READ_AHEAD && k < ttsChunks.length; k++) requestNeural(k, gen);
 }
 
 async function speakNextNeural(currentChunk) {
@@ -1125,11 +1042,19 @@ async function speakNextNeural(currentChunk) {
     if (!isNeuralLoaded()) showToast('자연스러운 음성을 준비하고 있습니다…');
     let audio;
     try {
-        audio = await requestNeural(index, myGen);
+        const pending = requestNeural(index, myGen);
+        // 첫 문장이 아닌데 아직 덜 만들어졌다 = 재생이 기다리게 됐다(끊김) → 품질을 한 단계 낮춘다
+        let ready = false;
+        pending.then(() => { ready = true; }, () => { ready = true; });
+        await Promise.resolve();
+        // (재생·탭·탐색 직후의 첫 문장은 기다리는 게 당연하므로 따지지 않는다)
+        if (!ready && neuralPlayedGen === myGen) lowerNeuralQuality();
+        fillNeuralAhead(index, myGen);
+        audio = await pending;
     } catch (err) {
         if (myGen !== ttsGen) return;
         console.error('자연스러운 음성 생성 실패:', err);
-        neuralPrefetch = null;
+        neuralCache = null;
         isTTSSpeaking = false;
         isTTSPaused = false;
         stopTimeTicker();
@@ -1148,18 +1073,25 @@ async function speakNextNeural(currentChunk) {
     }
     if (myGen !== ttsGen) return;
     if (!audio) { advanceAfterChunk(currentChunk, 0); return; }
+    // 재생을 막 시작했는데 첫 문장이 아주 짧으면(예: "감사합니다."), 그걸 읽는 동안 다음 문장을
+    // 다 못 만들어 바로 끊긴다. 이때만 다음 문장까지 준비한 뒤 시작한다.
+    if (neuralPlayedGen !== myGen && audio.wav.length / audio.sampleRate < 3 && index + 1 < ttsChunks.length) {
+        try { await requestNeural(index + 1, myGen); } catch (e) { /* 다음 문장 실패는 그 차례에 처리 */ }
+        if (myGen !== ttsGen) return;
+    }
     // 만드는 동안 일시정지를 눌렀다면, 재개할 때 이 문장부터 읽는다 (만든 결과는 그대로 재사용)
     if (isTTSPaused) { ttsGapInterrupted = true; return; }
 
-    // 다음 문장을 미리 만들기 시작
-    if (index + 1 < ttsChunks.length) requestNeural(index + 1, myGen);
+    // 앞으로 읽을 문장들을 미리 만들어 둔다
+    fillNeuralAhead(index, myGen);
 
     isTTSSpeaking = true;
     syncUI();
     highlightChunk(currentChunk);
+    neuralPlayedGen = myGen;
     const finished = await playNeuralAudio(audio.wav, audio.sampleRate);
     if (myGen !== ttsGen || !finished) return;
-    advanceAfterChunk(currentChunk, NEURAL_SENTENCE_GAP_MS);
+    advanceAfterChunk(currentChunk, neuralGapAfter(currentChunk));
 }
 
 export function pauseTTS() {
@@ -1197,7 +1129,7 @@ export function stopTTS() {
     cancelSystemSpeech();
     stopNeuralAudio();
     cancelNeuralBefore(ttsGen);
-    neuralPrefetch = null;
+    neuralCache = null;
     clearTTSHighlight();
     clearTimeout(ttsGapTimer);
     ttsGapTimer = null;
@@ -1213,39 +1145,6 @@ export function stopTTS() {
     ttsTotalSec = estimateTotalTime();
     updateTimeDisplay();
     syncUI();
-}
-
-// ─── 선택 텍스트만 바로 듣기 ───
-
-export function playSelection() {
-    const info = getSelectionInfo();
-    if (!info || !info.text.trim()) {
-        alert('먼저 본문에서 텍스트를 선택해주세요.');
-        return;
-    }
-    stopTTS();
-    if (usingNeural()) unlockNeuralAudio();
-    // 고른 곳의 위치를 알고 있으면 읽는 문장을 강조할 수 있다
-    const src = buildSpeechText(getFullText(), info.start, info.end);
-    if (!src.text) { alert('읽을 내용이 없습니다.'); return; }
-    ttsChunks = splitChunks(src.text, getMaxChunkLen(), src.map);
-    ttsChunkIndex = 0;
-    const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
-    const gap = parseFloat(document.getElementById('tts-gap-slider')?.value || '0') || 0;
-    const dotGapTime = ttsChunks
-        .slice(0, -1)
-        .reduce((sum, c) => sum + extraPauseForDots(c.dots), 0);
-    ttsTotalSec = src.text.length / charsPerSec() / speed
-        + Math.max(0, ttsChunks.length - 1) * gap
-        + dotGapTime;
-    ttsElapsedBeforePause = 0;
-    ttsPlayStartMs = Date.now();
-    isTTSSpeaking = true;
-    updateTimeDisplay();
-    startTimeTicker();
-    startTTSHeartbeat();
-    // stopTTS()의 cancel() 직후 같은 틱에 speak()하면 Chrome에서 새 발화가 무시될 수 있어 한 틱 지연
-    setTimeout(speakNext, 0);
 }
 
 // ─── UI 동기화 ───
@@ -1340,4 +1239,3 @@ export function initTTS() {
     updateTimeDisplay();
 }
 
-export { refreshRangeDisplay as updateTTSRange };

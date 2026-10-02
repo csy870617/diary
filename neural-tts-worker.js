@@ -190,7 +190,7 @@ self.onmessage = (e) => {
             } else if (msg.type === 'synth') {
                 const t0 = performance.now();
                 const { wav, sampleRate } = await synth(msg);
-                self.postMessage({ type: 'audio', id: msg.id, wav, sampleRate, ms: performance.now() - t0 }, [wav.buffer]);
+                self.postMessage({ type: 'audio', id: msg.id, wav, sampleRate, ms: performance.now() - t0, steps: msg.steps }, [wav.buffer]);
             }
         } catch (err) {
             self.postMessage({ type: 'error', id: msg.id, message: String(err && err.message || err), webgpuFailed: !!(err && err.webgpuFailed) });
