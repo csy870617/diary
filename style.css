@@ -710,6 +710,9 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
 .tts-neural-progress { height: 4px; background: var(--gray-200); border-radius: 2px; overflow: hidden; }
 .tts-neural-progress-fill { height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
 .tts-row-disabled { opacity: 0.45; }
+/* 음성 읽기: 지금 읽는 문장 (CSS Highlight API — 본문 HTML은 바뀌지 않는다) */
+::highlight(tts-current) { background-color: rgba(20, 184, 166, 0.22); }
+[data-theme="dark"] ::highlight(tts-current) { background-color: rgba(45, 212, 191, 0.28); }
 .tts-hint {
     font-size: 11px;
     color: var(--gray-400);

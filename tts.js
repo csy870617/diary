@@ -10,6 +10,8 @@ import {
     deleteNeuralVoice, synthesizeNeural, cancelNeuralBefore, unlockNeuralAudio, playNeuralAudio,
     stopNeuralAudio, pauseNeuralAudio, resumeNeuralAudio
 } from './neural-tts.js';
+import { state } from './state.js';
+import { jumpToPage } from './editor.js';
 
 let ttsVoices = [];
 let isTTSSpeaking = false;
@@ -49,38 +51,93 @@ const DOT_EXTRA_PAUSE_SEC = 0.5;
 
 // ─── 텍스트 추출 (Range 기반으로 일관성 유지) ───
 
-function getFullText() {
-    const editor = document.getElementById('editor-body');
-    if (!editor) return '';
-    return extractTextWithBreaks(editor);
-}
+const TEXT_BLOCKS = new Set([
+    'DIV','P','BR','LI','TR','H1','H2','H3','H4','H5','H6',
+    'BLOCKQUOTE','PRE','HR','UL','OL','TABLE','SECTION','ARTICLE'
+]);
 
-/** DOM을 순회하며 블록 요소·<br> 경계에 \n을 삽입해 텍스트 추출 */
-function extractTextWithBreaks(root) {
-    const blocks = new Set([
-        'DIV','P','BR','LI','TR','H1','H2','H3','H4','H5','H6',
-        'BLOCKQUOTE','PRE','HR','UL','OL','TABLE','SECTION','ARTICLE'
-    ]);
-    let text = '';
-    for (const node of root.childNodes) {
-        if (node.nodeType === Node.TEXT_NODE) {
-            text += node.textContent;
-        } else if (node.nodeType === Node.ELEMENT_NODE) {
-            const tag = node.tagName;
-            if (tag === 'BR') {
-                text += '\n';
-            } else if (blocks.has(tag)) {
-                const inner = extractTextWithBreaks(node);
-                if (inner) {
-                    if (text && !text.endsWith('\n')) text += '\n';
-                    text += inner;
+/**
+ * 본문을 읽을 글자로 펼치면서, 각 글자 마디(text node)가 어디서 시작하는지도 기록한다.
+ * 블록 요소·<br> 경계에는 \n을 넣는다.
+ * 기록한 위치로 '지금 읽는 문장'을 화면에서 찾아 강조하고, 탭한 곳이 몇 번째 글자인지 계산한다.
+ * → { text, segs: [{ node, start }] }
+ */
+function buildTextIndex(root) {
+    function walk(parent) {
+        let text = '';
+        const segs = [];
+        for (const node of parent.childNodes) {
+            if (node.nodeType === Node.TEXT_NODE) {
+                segs.push({ node, start: text.length });
+                text += node.textContent;
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+                const tag = node.tagName;
+                if (tag === 'BR') {
+                    text += '\n';
+                } else {
+                    const inner = walk(node);
+                    if (TEXT_BLOCKS.has(tag)) {
+                        if (!inner.text) continue;
+                        if (text && !text.endsWith('\n')) text += '\n';
+                    }
+                    const base = text.length;
+                    inner.segs.forEach(sg => segs.push({ node: sg.node, start: base + sg.start }));
+                    text += inner.text;
                 }
-            } else {
-                text += extractTextWithBreaks(node);
             }
         }
+        return { text, segs };
     }
-    return text;
+    return root ? walk(root) : { text: '', segs: [] };
+}
+
+function getTextIndex() {
+    return buildTextIndex(document.getElementById('editor-body'));
+}
+
+function getFullText() {
+    return getTextIndex().text;
+}
+
+/** 화면의 한 위치(마디, 그 안의 위치)가 펼친 글자에서 몇 번째인지 */
+function offsetAtPosition(index, container, offset) {
+    if (!container) return null;
+    if (container.nodeType === Node.TEXT_NODE) {
+        const seg = index.segs.find(sg => sg.node === container);
+        if (seg) return seg.start + Math.min(offset, container.textContent.length);
+    }
+    // 요소 사이의 위치이거나 기록에 없는 마디 → 그 뒤에 처음 나오는 글자 마디의 시작
+    try {
+        const r = document.createRange();
+        r.setStart(container, container.nodeType === Node.TEXT_NODE ? Math.min(offset, container.textContent.length) : offset);
+        r.collapse(true);
+        for (const seg of index.segs) {
+            if (r.comparePoint(seg.node, 0) >= 0) return seg.start;
+        }
+    } catch (e) { return null; }
+    return index.text.length;
+}
+
+/** 펼친 글자의 [start, end) 구간을 화면의 Range로 */
+function rangeFromOffsets(index, start, end) {
+    const segs = index.segs;
+    let startPt = null, endPt = null;
+    for (const seg of segs) {
+        const len = seg.node.textContent.length;
+        if (!len) continue;
+        if (!startPt && start < seg.start + len) {
+            startPt = { node: seg.node, offset: Math.max(0, start - seg.start) };
+        }
+        if (seg.start < end) endPt = { node: seg.node, offset: Math.min(len, end - seg.start) };
+        else break;
+    }
+    if (!startPt || !endPt) return null;
+    try {
+        const r = document.createRange();
+        r.setStart(startPt.node, startPt.offset);
+        r.setEnd(endPt.node, endPt.offset);
+        return r.collapsed ? null : r;
+    } catch (e) { return null; }
 }
 
 function getSelectionInfo() {
@@ -90,57 +147,154 @@ function getSelectionInfo() {
     const range = sel.getRangeAt(0);
     if (!editor.contains(range.startContainer) || range.collapsed) return null;
 
-    const startOff = getExtractedOffsetAt(editor, range.startContainer, range.startOffset);
-    const endOff = getExtractedOffsetAt(editor, range.endContainer, range.endOffset);
+    const index = buildTextIndex(editor);
+    const startOff = offsetAtPosition(index, range.startContainer, range.startOffset);
+    const endOff = offsetAtPosition(index, range.endContainer, range.endOffset);
+    if (startOff == null || endOff == null) return null;
 
     return { start: startOff, end: endOff, text: sel.toString() };
 }
 
-/** extractTextWithBreaks 기준으로 특정 DOM 위치까지의 문자 오프셋 계산 */
-function getExtractedOffsetAt(root, targetNode, targetOffset) {
-    const blocks = new Set([
-        'DIV','P','BR','LI','TR','H1','H2','H3','H4','H5','H6',
-        'BLOCKQUOTE','PRE','HR','UL','OL','TABLE','SECTION','ARTICLE'
-    ]);
-    let text = '';
-    let found = false;
+// ─── 지금 읽는 문장 강조 · 문장을 눌러 거기서부터 읽기 ───
+// 강조는 CSS Highlight API로 그린다. 본문 HTML을 건드리지 않으므로 표시가 글에 저장될 일이 없다.
+// (지원하지 않는 브라우저에서는 강조만 생략되고 나머지는 그대로 동작)
+const HIGHLIGHT_NAME = 'tts-current';
+const canHighlight = typeof CSS !== 'undefined' && CSS.highlights && typeof Highlight !== 'undefined';
+let lastUserScrollMs = 0;
 
-    function processChildren(parent) {
-        if (found) return;
-        for (let i = 0; i < parent.childNodes.length; i++) {
-            if (found) return;
-            if (parent === targetNode && i === targetOffset) { found = true; return; }
-            processNode(parent.childNodes[i]);
-        }
-        if (!found && parent === targetNode && targetOffset === parent.childNodes.length) {
-            found = true;
-        }
+function clearTTSHighlight() {
+    if (canHighlight) CSS.highlights.delete(HIGHLIGHT_NAME);
+}
+
+function isBookMode() {
+    return state.currentViewMode === 'book' || state.currentViewMode === 'book-edit';
+}
+
+function highlightChunk(chunk) {
+    if (!canHighlight || !chunk || chunk.fullStart == null) { clearTTSHighlight(); return; }
+    const range = rangeFromOffsets(getTextIndex(), chunk.fullStart, chunk.fullEnd);
+    if (!range) { clearTTSHighlight(); return; }
+    CSS.highlights.set(HIGHLIGHT_NAME, new Highlight(range));
+    followRange(range);
+}
+
+/** 읽는 문장이 화면 밖이면 따라간다. 사용자가 방금 직접 스크롤했다면 방해하지 않는다. */
+function followRange(range) {
+    if (Date.now() - lastUserScrollMs < 4000) return;
+    const rect = range.getClientRects()[0] || range.getBoundingClientRect();
+    if (!rect || (!rect.width && !rect.height)) return;
+    const container = document.getElementById('editor-container');
+    if (!container) return;
+    if (isBookMode()) {
+        // 책 보기: 그 문장이 있는 쪽으로 넘긴다
+        const stride = Math.floor(container.clientWidth);
+        if (stride <= 0) return;
+        const cRect = container.getBoundingClientRect();
+        const page = Math.floor((rect.left - cRect.left + container.scrollLeft + 1) / stride);
+        if (page !== Math.round(container.scrollLeft / stride)) jumpToPage(page);
+        return;
     }
+    // 화면 아래쪽은 음성 바가 가리므로 그만큼 빼고 본다
+    const panel = document.getElementById('tts-panel');
+    const panelTop = panel && !panel.classList.contains('hidden') ? panel.getBoundingClientRect().top : window.innerHeight;
+    const visTop = Math.max(0, container.getBoundingClientRect().top);
+    const visBottom = Math.min(window.innerHeight, panelTop);
+    if (rect.top >= visTop + 8 && rect.bottom <= visBottom - 8) return;
+    const scroller = findScrollParent(range.startContainer.parentElement) || container;
+    const delta = rect.top - (visTop + (visBottom - visTop) * 0.3);
+    scroller.scrollBy({ top: delta, behavior: 'smooth' });
+}
 
-    function processNode(node) {
-        if (found) return;
-        if (node.nodeType === Node.TEXT_NODE) {
-            if (node === targetNode) {
-                text += node.textContent.substring(0, targetOffset);
-                found = true;
-                return;
-            }
-            text += node.textContent;
-        } else if (node.nodeType === Node.ELEMENT_NODE) {
-            const tag = node.tagName;
-            if (tag === 'BR') {
-                text += '\n';
-            } else if (blocks.has(tag)) {
-                if (text && !text.endsWith('\n')) text += '\n';
-                processChildren(node);
-            } else {
-                processChildren(node);
-            }
-        }
+function findScrollParent(el) {
+    for (let n = el; n && n !== document.body; n = n.parentElement) {
+        const oy = getComputedStyle(n).overflowY;
+        if ((oy === 'auto' || oy === 'scroll') && n.scrollHeight > n.clientHeight + 1) return n;
     }
+    return null;
+}
 
-    processChildren(root);
-    return text.length;
+function caretFromPoint(x, y) {
+    if (document.caretPositionFromPoint) {
+        const p = document.caretPositionFromPoint(x, y);
+        if (p) return { node: p.offsetNode, offset: p.offset };
+    }
+    if (document.caretRangeFromPoint) {
+        const r = document.caretRangeFromPoint(x, y);
+        if (r) return { node: r.startContainer, offset: r.startOffset };
+    }
+    return null;
+}
+
+function ttsPanelOpen() {
+    const panel = document.getElementById('tts-panel');
+    return !!panel && !panel.classList.contains('hidden');
+}
+
+/** 음성 바가 열린 읽기·책 보기에서 문장을 누르면 그 문장부터 읽는다 */
+function onEditorTapForTTS(e) {
+    if (!ttsPanelOpen()) return;
+    // 편집 중에는 누르는 것이 커서를 놓는 동작이라 가로채지 않는다
+    if (state.currentViewMode !== 'readOnly' && state.currentViewMode !== 'book') return;
+    if (e.button !== 0 || e.detail > 1) return;                 // 두 번 눌러 단어 고르기는 그대로
+    if (e.target.closest('a, img, button, input, select, textarea, .tts-panel')) return;
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.toString().trim()) return;  // 끌어서 고른 경우는 그대로
+    const pt = caretFromPoint(e.clientX, e.clientY);
+    if (!pt) return;
+    const index = getTextIndex();
+    const pos = offsetAtPosition(index, pt.node, pt.offset);
+    if (pos == null) return;
+    playFromOffset(pos, index.text);
+}
+
+function playFromOffset(pos, full) {
+    const neural = usingNeural();
+    if (!neural && !('speechSynthesis' in window)) return;
+    if (neural) unlockNeuralAudio();   // 누른 순간에 소리 장치를 깨워 둔다 (아이폰)
+    // 정해 둔 구간 밖을 눌렀으면 구간을 풀고 그 문장부터 읽는다
+    const s = ttsStartOffset || 0;
+    const e = ttsEndOffset || full.length;
+    if (pos < s || pos >= e) {
+        ttsStartOffset = null;
+        ttsEndOffset = null;
+        refreshRangeDisplay();
+        showToast('구간을 풀고 이 문장부터 읽습니다.');
+    }
+    const src = getSpeechSource();
+    if (!src.text) return;
+    const chunks = splitChunks(src.text, getMaxChunkLen(), src.map);
+    let idx = chunks.findIndex(c => c.fullEnd != null && c.fullEnd > pos);
+    if (idx < 0) idx = chunks.length - 1;
+    startPlaybackAt(chunks, idx);
+}
+
+/** chunks[index]부터 읽기 시작 (경과 시간·진행률도 그 위치로 맞춘다) */
+function startPlaybackAt(chunks, index) {
+    ttsGen++; // 이전 발화의 stale 이벤트 무효화
+    ttsGapInterrupted = false;
+    cancelSystemSpeech();
+    stopNeuralAudio();
+    cancelNeuralBefore(ttsGen);
+    clearTimeout(ttsGapTimer);
+    ttsGapTimer = null;
+
+    const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
+    const gap = parseFloat(document.getElementById('tts-gap-slider')?.value || '0') || 0;
+    const timings = buildChunkTimings(chunks, speed, gap);
+    ttsChunks = chunks;
+    ttsChunkIndex = index;
+    ttsTotalSec = estimateTotalTime();
+    const startSec = timings[index] ? timings[index].startSec : 0;
+    ttsElapsedBeforePause = Math.round(startSec * 1000);
+    setProgress(ttsTotalSec > 0 ? Math.min(100, Math.round(startSec / ttsTotalSec * 100)) : 0);
+    isTTSSpeaking = true;
+    isTTSPaused = false;
+    ttsPlayStartMs = Date.now();
+    updateTimeDisplay();
+    startTimeTicker();
+    startTTSHeartbeat();
+    syncUI();
+    setTimeout(speakNext, 0);
 }
 
 // ─── 패널 토글 ───
@@ -152,6 +306,14 @@ export function toggleTTSPanel() {
     if (isHidden) {
         panel.classList.remove('hidden');
         document.getElementById('write-modal')?.classList.add('tts-open');
+        // 새 기능 안내: 처음 몇 번만 알려 준다
+        if (state.currentViewMode === 'readOnly' || state.currentViewMode === 'book') {
+            const seen = Number(localStorage.getItem('faith_tts_tap_hint') || '0');
+            if (seen < 3) {
+                localStorage.setItem('faith_tts_tap_hint', String(seen + 1));
+                setTimeout(() => showToast('문장을 누르면 그 문장부터 읽습니다.'), 300);
+            }
+        }
         loadVoices();
         refreshRangeDisplay();
         refreshTTSTotalTime();
@@ -392,6 +554,7 @@ export function setTTSEnd() {
 export function clearTTSRangeForNewEntry() {
     ttsStartOffset = null;
     ttsEndOffset = null;
+    clearTTSHighlight();
     try { refreshRangeDisplay(); } catch (e) { /* 패널이 아직 없으면 무시 */ }
 }
 
@@ -519,9 +682,9 @@ function buildChunkTimings(chunks, speed, gapSec) {
     return timings;
 }
 
-function getSeekState(text, percent) {
+function getSeekState(src, percent) {
     const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
-    const chunks = splitChunks(text, getMaxChunkLen());
+    const chunks = splitChunks(src.text, getMaxChunkLen(), src.map);
     if (!chunks.length) {
         return { percent: clamped, chunks: [], chunkIndex: 0, targetMs: 0 };
     }
@@ -610,11 +773,51 @@ function cleanForSpeech(text) {
     return out.replace(/[ \t]+/g, ' ').trim();
 }
 
-function getTextToSpeak() {
+/**
+ * full[s, e)에서 괄호 안 내용을 빼고 앞뒤 공백을 걷어낸 '읽을 글'을 만들되,
+ * 남은 각 글자가 full의 몇 번째 글자였는지(map)도 함께 돌려준다.
+ * 결과 글은 stripParentheses(full.substring(s, e)).trim()과 같다.
+ */
+function buildSpeechText(full, s, e) {
+    if (e < s) [s, e] = [e, s];
+    s = Math.max(0, s); e = Math.min(full.length, e);
+    let chars = full.substring(s, e).split('');
+    let map = chars.map((_, i) => s + i);
+    // 예전 stripParentheses와 똑같이: 안쪽 괄호 쌍을 정규식으로 한 번에 지우고(ASCII → 전각),
+    // 변화가 없을 때까지 반복한다. 지운 글자는 위치표에서도 함께 뺀다.
+    const removeMatches = (re) => {
+        const str = chars.join('');
+        const drop = new Uint8Array(chars.length);
+        let hit = false;
+        for (const m of str.matchAll(re)) {
+            hit = true;
+            for (let k = m.index; k < m.index + m[0].length; k++) drop[k] = 1;
+        }
+        if (!hit) return;
+        chars = chars.filter((_, k) => !drop[k]);
+        map = map.filter((_, k) => !drop[k]);
+    };
+    for (let prev = -1; prev !== chars.length;) {
+        prev = chars.length;
+        removeMatches(/\([^()]*\)/g);
+        removeMatches(/（[^（）]*）/g);
+    }
+    let a = 0, b = chars.length;
+    while (a < b && /\s/.test(chars[a])) a++;
+    while (b > a && /\s/.test(chars[b - 1])) b--;
+    return { text: chars.slice(a, b).join(''), map: map.slice(a, b) };
+}
+
+/** 지금 구간(시작~끝)에서 읽을 글과 위치표 */
+function getSpeechSource() {
     const full = getFullText();
     const s = ttsStartOffset || 0;
     const e = ttsEndOffset || full.length;
-    return stripParentheses(full.substring(s, e)).trim();
+    return buildSpeechText(full, s, e);
+}
+
+function getTextToSpeak() {
+    return getSpeechSource().text;
 }
 
 // 기본 음성 엔진의 발화를 멈춘다 (엔진이 없는 브라우저에서도 안전하게)
@@ -656,13 +859,13 @@ export function playTTS() {
         return;
     }
 
-    const text = getTextToSpeak();
-    if (!text) { alert('읽을 내용이 없습니다.'); return; }
+    const src = getSpeechSource();
+    if (!src.text) { alert('읽을 내용이 없습니다.'); return; }
 
     // 새 재생 시: 사용자가 옮긴 진행바 위치(정지 상태에서도)를 시작점으로 반영
     const sliderPercent = Number(document.getElementById('tts-progress-slider')?.value || '0');
     const seekPercent = (sliderPercent > 0 && sliderPercent < 100) ? sliderPercent : 0;
-    const seekState = getSeekState(text, seekPercent);
+    const seekState = getSeekState(src, seekPercent);
 
     ttsGen++; // 이전 발화의 stale 이벤트 무효화
     ttsGapInterrupted = false;
@@ -688,8 +891,9 @@ export function playTTS() {
 
 export function seekTTSByPercent(percent) {
     const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
-    const text = getTextToSpeak();
-    const seekState = getSeekState(text, clamped);
+    const src = getSpeechSource();
+    const text = src.text;
+    const seekState = getSeekState(src, clamped);
 
     setProgress(clamped);
     ttsElapsedBeforePause = seekState.targetMs;
@@ -731,46 +935,71 @@ export function seekTTSByPercent(percent) {
     }
 }
 
-function splitChunks(text, max) {
+/**
+ * 읽을 글을 문장 단위 조각으로 나눈다. map(위치표)을 주면 각 조각에 본문에서의
+ * 위치(fullStart, fullEnd)를 붙인다 — 지금 읽는 문장 강조·탭한 문장부터 읽기에 쓴다.
+ */
+function splitChunks(text, max, map) {
     const chunks = [];
+    const isWs = (ch) => /\s/.test(ch);
+    // [a, b) 구간을 앞뒤 공백을 걷어 한 조각으로
+    const add = (a, b, dots) => {
+        while (a < b && isWs(text[a])) a++;
+        while (b > a && isWs(text[b - 1])) b--;
+        if (a >= b) return;
+        const c = { text: text.slice(a, b), dots };
+        if (map) { c.fullStart = map[a]; c.fullEnd = map[b - 1] + 1; }
+        chunks.push(c);
+    };
     // 구두점으로도 나눌 수 없는 긴 조각은 max 길이로 강제 분할해 Chrome ~15초 컷오프 방지
-    const pushHardSliced = (txt, dots) => {
-        let t = (txt || '').trim();
-        if (!t) return;
-        while (t.length > max) {
-            chunks.push({ text: t.slice(0, max), dots: 0 });
-            t = t.slice(max).trim();
+    const pushHardSliced = (a, b, dots) => {
+        while (a < b && isWs(text[a])) a++;
+        while (b > a && isWs(text[b - 1])) b--;
+        while (b - a > max) {
+            add(a, a + max, 0);
+            a += max;
+            while (a < b && isWs(text[a])) a++;
         }
-        if (t) chunks.push({ text: t, dots });
+        add(a, b, dots);
     };
     // 문장 단위로 분리: "내용 + 종결부호(.!?。 연속 허용) 또는 줄바꿈"
     // 연속 마침표(예: "...")는 하나의 청크 끝에 그대로 유지되어 쉼 길이 계산에 사용된다.
-    const sentences = text.match(/[^.!?。\n]*(?:[.!?。]+|\n+|$)/g) || [];
-    for (const s of sentences) {
-        const trimmed = s.trim();
-        if (!trimmed) continue;
+    for (const m of text.matchAll(/[^.!?。\n]*(?:[.!?。]+|\n+|$)/g)) {
+        let a = m.index, b = m.index + m[0].length;
+        while (a < b && isWs(text[a])) a++;
+        while (b > a && isWs(text[b - 1])) b--;
+        if (a >= b) continue;
         // 말미 마침표 개수 추출 (쉼 길이 계산용)
-        const dotMatch = trimmed.match(/\.+$/);
+        const dotMatch = text.slice(a, b).match(/\.+$/);
         const dots = dotMatch ? dotMatch[0].length : 0;
 
-        // 문장이 max를 넘으면 쉼표/중간 구두점에서 한번 더 나눔
-        if (trimmed.length > max) {
-            const sub = trimmed.split(/(?<=[,;:·])\s*/);
-            let cur = '';
-            for (const part of sub) {
-                if ((cur + ' ' + part).length > max && cur) {
-                    pushHardSliced(cur, 0);
-                    cur = part;
+        if (b - a > max) {
+            // 문장이 max를 넘으면 쉼표/중간 구두점에서 한번 더 나눔
+            const parts = [];
+            let ps = a;
+            for (let k = a; k < b; k++) {
+                if (',;:·'.includes(text[k])) { parts.push([ps, k + 1]); ps = k + 1; }
+            }
+            if (ps < b) parts.push([ps, b]);
+            let cs = -1, ce = -1;
+            for (const [pa, pb] of parts) {
+                if (cs >= 0 && pb - cs > max) {
+                    pushHardSliced(cs, ce, 0);
+                    cs = pa; ce = pb;
                 } else {
-                    cur += (cur ? ' ' : '') + part;
+                    if (cs < 0) cs = pa;
+                    ce = pb;
                 }
             }
-            if (cur.trim()) pushHardSliced(cur, dots);
+            if (cs >= 0) pushHardSliced(cs, ce, dots);
         } else {
-            chunks.push({ text: trimmed, dots });
+            add(a, b, dots);
         }
     }
-    return chunks.length ? chunks : [{ text, dots: 0 }];
+    if (chunks.length) return chunks;
+    const only = { text, dots: 0 };
+    if (map && text) { only.fullStart = map[0]; only.fullEnd = map[text.length - 1] + 1; }
+    return [only];
 }
 
 /** 청크의 마침표 개수에 따른 추가 쉼(초) — 1개는 일반 문장 종결이므로 추가 없음 */
@@ -790,6 +1019,7 @@ function speakNext() {
         ttsPlayStartMs = 0;
         updateTimeDisplay();
         syncUI();
+        clearTTSHighlight();
         return;
     }
 
@@ -831,6 +1061,7 @@ function speakNext() {
     utt.onstart = () => {
         if (myGen !== ttsGen) return;
         isTTSSpeaking = true; isTTSPaused = false; syncUI();
+        highlightChunk(currentChunk);
     };
     utt.onend = () => {
         if (myGen !== ttsGen) return;
@@ -925,6 +1156,7 @@ async function speakNextNeural(currentChunk) {
 
     isTTSSpeaking = true;
     syncUI();
+    highlightChunk(currentChunk);
     const finished = await playNeuralAudio(audio.wav, audio.sampleRate);
     if (myGen !== ttsGen || !finished) return;
     advanceAfterChunk(currentChunk, NEURAL_SENTENCE_GAP_MS);
@@ -966,6 +1198,7 @@ export function stopTTS() {
     stopNeuralAudio();
     cancelNeuralBefore(ttsGen);
     neuralPrefetch = null;
+    clearTTSHighlight();
     clearTimeout(ttsGapTimer);
     ttsGapTimer = null;
     isTTSSpeaking = false;
@@ -992,20 +1225,22 @@ export function playSelection() {
     }
     stopTTS();
     if (usingNeural()) unlockNeuralAudio();
-    const selText = stripParentheses(info.text).trim();
-    if (!selText) { alert('읽을 내용이 없습니다.'); return; }
-    ttsChunks = splitChunks(selText, getMaxChunkLen());
+    // 고른 곳의 위치를 알고 있으면 읽는 문장을 강조할 수 있다
+    const src = buildSpeechText(getFullText(), info.start, info.end);
+    if (!src.text) { alert('읽을 내용이 없습니다.'); return; }
+    ttsChunks = splitChunks(src.text, getMaxChunkLen(), src.map);
     ttsChunkIndex = 0;
     const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
     const gap = parseFloat(document.getElementById('tts-gap-slider')?.value || '0') || 0;
     const dotGapTime = ttsChunks
         .slice(0, -1)
         .reduce((sum, c) => sum + extraPauseForDots(c.dots), 0);
-    ttsTotalSec = selText.length / charsPerSec() / speed
+    ttsTotalSec = src.text.length / charsPerSec() / speed
         + Math.max(0, ttsChunks.length - 1) * gap
         + dotGapTime;
     ttsElapsedBeforePause = 0;
     ttsPlayStartMs = Date.now();
+    isTTSSpeaking = true;
     updateTimeDisplay();
     startTimeTicker();
     startTTSHeartbeat();
@@ -1098,6 +1333,10 @@ export function initTTS() {
     if (pitch && ps) { ps.value = pitch; updatePitchDisplay(); }
     if (gap && gs) { gs.value = gap; updateGapDisplay(); }
     document.getElementById('tts-neural-btn')?.addEventListener('click', onNeuralButton);
+    document.getElementById('editor-body')?.addEventListener('click', onEditorTapForTTS);
+    // 사용자가 직접 스크롤하는 동안에는 읽는 문장을 따라가지 않는다
+    const markUserScroll = () => { lastUserScrollMs = Date.now(); };
+    ['wheel', 'touchmove'].forEach(evt => document.addEventListener(evt, markUserScroll, { passive: true }));
     updateTimeDisplay();
 }
 
