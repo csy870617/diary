@@ -32,6 +32,7 @@ export const state = {
     contextCatId: null,
     contextFolderId: null,
     longPressTimer: null,
+    ignoreClickUntil: 0,   // 길게 누른 뒤 따라오는 탭 하나를 '바깥 클릭'으로 보지 않을 때까지의 시각
     lastFocusedEdit: null,
     touchStartX: 0,
     touchEndX: 0,

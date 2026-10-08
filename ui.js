@@ -271,7 +271,12 @@ function attachLongPress(element, onLongPress) {
         cancelTimer();
         // 길게 누르기가 발동했다면 뒤따르는 합성 click만 무시하고, click이 안 와도 곧 플래그 해제
         // (해제하지 않으면 이후 정상 탭이 한 번 먹힐 수 있음)
-        if (longPressFired) setTimeout(() => { longPressFired = false; }, 400);
+        if (longPressFired) {
+            // 화면 전체의 '바깥을 누르면 메뉴 닫기'(script.js, 캡처 단계라 이 요소보다 먼저 받는다)에도
+            // 이 탭은 무시하라고 알린다. 안 그러면 방금 띄운 메뉴가 손을 떼자마자 닫혔다.
+            state.ignoreClickUntil = Date.now() + 400;
+            setTimeout(() => { longPressFired = false; }, 400);
+        }
     };
     element.addEventListener('click', (e) => {
         if (longPressFired) {
