@@ -110,8 +110,10 @@ async function checkForUpdate() {
         const key = 'faith_reloaded_for';
         if (sessionStorage.getItem(key) === version) return;
         // 글을 쓰거나 다른 창이 열려 있으면 지금은 미룬다 (다음에 화면으로 돌아올 때 다시 확인)
-        const busy = ['write-modal', 'trash-modal', 'move-modal']
-            .some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); });
+        // PDF를 만드는 중이거나 여러 글을 골라 둔 상태에서 새로고침하면 그 작업이 통째로 사라진다.
+        const busy = ['write-modal', 'trash-modal', 'move-modal', 'pdf-progress', 'crop-modal', 'login-modal']
+            .some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); })
+            || state.isSelectMode;
         if (busy) return;
         sessionStorage.setItem(key, version);
         await flushEntries().catch(() => {});   // 아직 기록되지 않은 로컬 저장분을 마무리
@@ -364,6 +366,9 @@ function setupListeners() {
     }
 
     window.addEventListener('click', (e) => {
+        // 길게 눌러 메뉴를 띄운 뒤 손을 떼면 브라우저가 탭(click)을 하나 붙여 보낸다.
+        // 이건 '메뉴 바깥을 누른 것'이 아니므로 닫지 않는다 (폰에서 메뉴가 뜨자마자 사라지던 문제)
+        if (Date.now() < (state.ignoreClickUntil || 0)) { state.ignoreClickUntil = 0; return; }
         const link = e.target.closest('#editor-body a');
         if (link && link.href && document.getElementById('editor-body')?.getAttribute('contenteditable') === "false") {
             e.preventDefault(); e.stopPropagation(); window.open(link.href, '_blank')?.focus(); return;
