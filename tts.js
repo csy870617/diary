@@ -276,11 +276,26 @@ function startPlaybackAt(chunks, index) {
 
 // ─── 패널 토글 ───
 
+// 설정 창이 펼쳐져 있는지를 글쓰기 창에 표시한다(tts-settings-open) — 좁은 화면에서 '맨 위로' 버튼이
+// 설정 창을 가리지 않게 하는 데 쓴다(style.css). 설정 창은 설정 버튼뿐 아니라 바깥 누르기·화면 전환 등
+// 여러 곳에서 닫히므로, 닫는 곳마다 고치는 대신 class 변화를 직접 지켜본다.
+let settingsWatcher = null;
+function watchSettingsDrawer() {
+    const settings = document.getElementById('tts-settings');
+    const modal = document.getElementById('write-modal');
+    if (settingsWatcher || !settings || !modal || typeof MutationObserver === 'undefined') return;
+    const sync = () => modal.classList.toggle('tts-settings-open', !settings.classList.contains('hidden'));
+    settingsWatcher = new MutationObserver(sync);
+    settingsWatcher.observe(settings, { attributes: true, attributeFilter: ['class'] });
+    sync();
+}
+
 export function toggleTTSPanel() {
     const panel = document.getElementById('tts-panel');
     if (!panel) return;
     const isHidden = panel.classList.contains('hidden');
     if (isHidden) {
+        watchSettingsDrawer();
         panel.classList.remove('hidden');
         document.getElementById('write-modal')?.classList.add('tts-open');
         // 새 기능 안내: 처음 몇 번만 알려 준다

@@ -321,7 +321,13 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .book-slider-container.hidden { display: none !important; }
 #book-page-slider { width: 100%; height: 6px; -webkit-appearance: none; appearance: none; background: var(--gray-200); border-radius: 3px; outline: none; cursor: pointer; }
 #book-page-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; background: var(--gray-900); border-radius: 50%; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-.btn-scroll-top { position: fixed; bottom: 30px; right: 30px; width: 44px; height: 44px; border-radius: 50%; background: var(--surface-color); color: var(--gray-900); border: 1px solid var(--gray-200); box-shadow: 0 4px 12px var(--shadow-light); cursor: pointer; display: flex; justify-content: center; align-items: center; font-size: 18px; z-index: 2060; transition: opacity 0.3s, transform 0.2s; }
+.btn-scroll-top { position: fixed; bottom: 30px; right: 30px; width: 44px; height: 44px; border-radius: 50%; background: var(--surface-color); color: var(--gray-900); border: 1px solid var(--gray-200); box-shadow: 0 4px 12px var(--shadow-light); cursor: pointer; display: flex; justify-content: center; align-items: center; font-size: 18px; z-index: 2060; transition: opacity 0.3s, transform 0.2s, bottom 0.2s ease; }
+/* TTS 바가 열려 있으면 '맨 위로' 버튼을 바 위로 올린다 (폰에서는 바의 설정·닫기 버튼을 덮었다) */
+#write-modal.tts-open .btn-scroll-top { bottom: calc(64px + var(--safe-bottom)); }
+/* 좁은 화면에서 TTS 설정 창을 펼친 동안에는 설정 창을 가리지 않게 잠시 숨긴다 (tts.js가 tts-settings-open을 붙인다) */
+@media (max-width: 680px) {
+    #write-modal.tts-open.tts-settings-open .btn-scroll-top { opacity: 0; visibility: hidden; pointer-events: none; }
+}
 
 /* 나머지 디자인 유지 */
 .trash-container { padding: 20px; }
@@ -740,7 +746,8 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
     opacity: 0;
     pointer-events: none;
     transition: all 0.25s ease;
-    z-index: 1300;
+    /* 책 모드 글쓰기 창(2000)·'맨 위로' 버튼(2060)보다 위 — 예전(1300)에는 책 모드에서 안내가 창 뒤에 가려졌다 */
+    z-index: 2070;
     white-space: nowrap;
 }
 .tts-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
