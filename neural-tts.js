@@ -13,11 +13,29 @@ const CACHE_NAME = 'faith-voice-v1';
 const READY_KEY = 'faith_voice_ready';      // 받은 버전 (다 받았을 때만 기록)
 export const NEURAL_PREFIX = 'st:';          // 음성 목록에서 자연스러운 음성을 구분하는 접두어
 
+// 목소리 이름은 소리에서 잰 값으로 붙였다 (문장 4개 × 2번, 품질 8단계, 같은 성별끼리 견줌):
+//          높이(Hz) 억양 폭(반음) 빠르기(음절/초) 밝기(고음 대 저음, dB) 크기 변화(dB)
+//   F1      196      8.3        4.71          -12.1             8.6   — 모든 값이 가운데, 숨소리가 가장 적어 맑다
+//   F2      236      9.5        5.02           -7.9            10.9   — 가장 높고 밝고 억양·크기 변화가 크다
+//   F3      182     10.1        4.57          -16.6            10.5   — 억양 폭이 가장 넓고 가장 느리다
+//   F4      198      5.7        5.49           -8.8             9.1   — 억양이 가장 평평하고 가장 빠르다
+//   F5      166      7.8        4.86          -20.5             7.7   — 가장 낮고 어둡고(따뜻) 고르다
+//   M1      153      9.1        4.71           -8.0             8.1   — 남성 중 가장 높고 밝으며 숨결이 많다
+//   M2       94      7.7        4.81           -9.9             9.8   — 낮지만 밝은 편이고 숨결이 섞였다
+//   M3      104      7.8        5.71          -12.4             5.7   — 가장 빠르고 크기 변화가 가장 적다
+//   M4      123      9.2        5.03          -16.0             8.3   — 가운데 높이, 어두운(따뜻한) 음색, 억양 폭이 넓다
+//   M5       91      8.3        4.72          -18.5             6.4   — 가장 낮고 가장 어둡고 고르다
 export const NEURAL_VOICES = [
-    { id: 'F1', label: '여성 1' }, { id: 'F2', label: '여성 2' }, { id: 'F3', label: '여성 3' },
-    { id: 'F4', label: '여성 4' }, { id: 'F5', label: '여성 5' },
-    { id: 'M1', label: '남성 1' }, { id: 'M2', label: '남성 2' }, { id: 'M3', label: '남성 3' },
-    { id: 'M4', label: '남성 4' }, { id: 'M5', label: '남성 5' }
+    { id: 'F1', label: '여성 · 맑고 단정한 기본 목소리' },
+    { id: 'F2', label: '여성 · 높고 밝은, 생기 있는 목소리' },
+    { id: 'F3', label: '여성 · 부드럽고 느긋한, 억양이 풍부한 목소리' },
+    { id: 'F4', label: '여성 · 또렷하고 담담한, 조금 빠른 목소리' },
+    { id: 'F5', label: '여성 · 낮고 차분한, 따뜻한 목소리' },
+    { id: 'M1', label: '남성 · 밝고 부드러운, 젊은 목소리' },
+    { id: 'M2', label: '남성 · 낮고 부드러운 목소리' },
+    { id: 'M3', label: '남성 · 담담하고 고른, 조금 빠른 목소리' },
+    { id: 'M4', label: '남성 · 따뜻한 중저음, 억양이 풍부한 목소리' },
+    { id: 'M5', label: '남성 · 가장 낮고 묵직한, 차분한 목소리' }
 ];
 
 // 공식 예제 기본값. 앱의 1.0배속이 모델의 1.05에 해당한다.
@@ -83,8 +101,9 @@ function hasWebGPU() {
 
 /**
  * 이 기기에 필요한 파일만 고른다.
- * 계산량이 가장 큰 모델은 두 가지가 있다: 원본(GPU용, 257MB)과 8비트(CPU용, 67MB).
- * CPU로 계산하는 기기는 8비트가 약 40% 빠르고 받을 용량도 절반 이하라 원본을 받지 않는다.
+ * 계산량이 가장 큰 모델은 두 가지가 있다: 원본(GPU용, 257MB)과 8비트(CPU용, 66MB).
+ * CPU로 계산하는 기기는 8비트가 두 배 넘게 빠르고 받을 용량도 4분의 1이라 원본을 받지 않는다.
+ * (8비트는 계산할 때마다 값의 범위를 새로 재는 '동적 양자화'판 — 소리는 원본에 가깝다. faith-voice/README.md)
  */
 async function applicableFiles(manifest) {
     const gpu = await hasWebGPU();
@@ -229,7 +248,8 @@ export async function checkNeuralUpdate() {
             const ex = await cache.match(base + f.path);
             if (!(ex && f.size && Number(ex.headers.get('X-Size')) === f.size)) bytes += f.size || 0;
         }
-        return { bytes, version: remote.version };
+        // note: 무엇이 좋아졌는지 한 줄 (예: '더 자연스러운 음성') — 목록(manifest.json)의 updateNote
+        return { bytes, version: remote.version, note: typeof remote.updateNote === 'string' ? remote.updateNote : '' };
     } catch (e) {
         return null;
     }
@@ -415,8 +435,10 @@ export function ensureNeuralReady() {
         } else {
             backendName = await startPool();
         }
-        // GPU 없이 계산하는 기기는 중간 단계에서 시작한다 (빠르면 자동으로 올라간다)
-        denoiseSteps = backendName === 'webgpu' ? MAX_STEPS : 5;
+        // GPU 없이 계산하는 기기는 중간 단계에서 시작한다 (빠르면 자동으로 올라가고, 못 따라가면 내려간다)
+        // 측정(자연스러움 점수, 원본 8단계 3.92): CPU용 모델 4단계 3.11 · 5단계 3.42 · 6단계 3.73 · 8단계 3.86.
+        // 5→6단계의 차이가 가장 크고, 지금 CPU용 모델은 단계당 계산이 예전보다 약 15% 빨라 6단계도 예전 5단계만큼 걸린다.
+        denoiseSteps = backendName === 'webgpu' ? MAX_STEPS : 6;
         return backendName;
     })();
     workerReady.catch(() => { shutdownNeural(); });
