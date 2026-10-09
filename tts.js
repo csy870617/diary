@@ -13,6 +13,7 @@ import {
 } from './neural-tts.js';
 import { state } from './state.js';
 import { jumpToPage } from './editor.js';
+import { normalizeForSpeech, noBreakMask } from './speech-text.js';
 
 let ttsVoices = [];
 let isTTSSpeaking = false;
@@ -453,7 +454,13 @@ function setNeuralRow(statusText, btnText, progressPct) {
     if (fill && progressPct != null) fill.style.width = progressPct + '%';
 }
 
-let neuralUpdate = null;   // { bytes } — 받아 둔 음성보다 새 버전(더 빠른 엔진 등)이 있을 때
+let neuralUpdate = null;   // { bytes, note } — 받아 둔 음성보다 새 버전(더 빠른 엔진 등)이 있을 때
+
+// 새 버전 안내 이름: 음성 목록이 알려 주는 한 줄(예: '더 자연스러운 음성')을 쓰고, 없으면 일반 이름
+function neuralUpdateName() {
+    const note = (neuralUpdate && neuralUpdate.note || '').trim();
+    return note ? `${note} 엔진` : '새 음성 엔진';
+}
 
 async function refreshNeuralRow() {
     const row = document.getElementById('tts-neural-row');
@@ -467,11 +474,11 @@ async function refreshNeuralRow() {
         const info = getNeuralInfo();
         const where = info.backend ? `${info.backend === 'webgpu' ? ' · GPU로 계산' : ' · CPU로 계산'} · 품질 ${info.steps}/8` : '';
         setNeuralRow('받아 둠 · 인터넷 없이 사용 가능' + where, '삭제', null);
-        // 더 빠른 엔진 등 새 버전이 있으면 업데이트를 권한다 (확인은 인터넷이 될 때만)
+        // 더 자연스럽거나 빠른 엔진 등 새 버전이 있으면 업데이트를 권한다 (확인은 인터넷이 될 때만)
         neuralUpdate = await checkNeuralUpdate();
         if (neuralUpdate && !neuralDownloading) {
             const mb = Math.max(1, Math.round(neuralUpdate.bytes / 1e6));
-            setNeuralRow(`더 빠른 음성 엔진이 있습니다 (약 ${mb}MB)`, '업데이트', null);
+            setNeuralRow(`${neuralUpdateName()}이 있습니다 (약 ${mb}MB)`, '업데이트', null);
         }
     } else {
         if (diagBtn) diagBtn.classList.add('hidden');
@@ -512,7 +519,7 @@ async function onNeuralButton() {
     }
     if (neuralUpdate && await isNeuralReady()) {
         const mb = Math.max(1, Math.round(neuralUpdate.bytes / 1e6));
-        if (!confirm(`더 빠른 음성 엔진(약 ${mb}MB)을 받습니다.\n받은 부분은 그대로 두고 새로 필요한 파일만 받습니다. 계속할까요?`)) return;
+        if (!confirm(`${neuralUpdateName()}(약 ${mb}MB)을 받습니다.\n받은 부분은 그대로 두고 새로 필요한 파일만 받습니다. 계속할까요?`)) return;
         if (usingNeural()) stopTTS();
         neuralDownloading = true;
         setNeuralRow('받는 중… 0%', '취소', 0);
@@ -720,9 +727,11 @@ function stripParentheses(text) {
  */
 function cleanForSpeech(text) {
     if (!text) return '';
+    // 성경 구절(3:16)·날짜(2026.10.9)·큰 수·%처럼 기호가 섞인 표기를 먼저 읽는 말로 풀어 쓴다
+    // (기호를 지우고 나면 뜻을 잃는다 — speech-text.js)
     // 일부 엔진이 아포스트로피/대시를 기호명으로 읽는 문제를 피하기 위해 사전 제거
     // 예) ' -> "아포스트로피", - -> "대시/다시"
-    const normalized = text.replace(/['’`´\-‐‑‒–—―]+/g, ' ');
+    const normalized = normalizeForSpeech(text).replace(/['’`´\-‐‑‒–—―]+/g, ' ');
     // 허용: 글자(\p{L}), 숫자(\p{N}), 공백, 운율용 기본 문장부호
     //  . , ! ? : ; … · ~ 및 한중일 대응 부호(。、，．！？：；‥)
     //  큰따옴표·작은따옴표·한국식 인용부호(「」『』)
@@ -910,21 +919,42 @@ function splitChunks(text, max, map) {
         if (map) { c.fullStart = map[a]; c.fullEnd = map[b - 1] + 1; }
         chunks.push(c);
     };
-    // 구두점으로도 나눌 수 없는 긴 조각은 max 길이로 강제 분할해 Chrome ~15초 컷오프 방지
+    // 구두점으로도 나눌 수 없는 긴 조각은 max 길이로 강제 분할해 Chrome ~15초 컷오프 방지.
+    // 낱말 한가운데서 자르면 그 낱말이 두 번에 나뉘어 어색하게 읽히므로 띄어쓰기에서 자르고,
+    // 끝에 두어 글자만 따로 남지 않도록 조각 길이를 고르게 나눈다.
     const pushHardSliced = (a, b, dots) => {
         while (a < b && isWs(text[a])) a++;
         while (b > a && isWs(text[b - 1])) b--;
         while (b - a > max) {
-            add(a, a + max, 0);
-            a += max;
+            const target = a + Math.ceil((b - a) / Math.ceil((b - a) / max));
+            let cut = a + max;
+            for (let d = 0; d <= max / 2; d++) {
+                if (target - d > a && isWs(text[target - d])) { cut = target - d; break; }
+                if (target + d < a + max && isWs(text[target + d])) { cut = target + d; break; }
+            }
+            add(a, cut, 0);
+            a = cut;
             while (a < b && isWs(text[a])) a++;
         }
         add(a, b, dots);
     };
+    // 숫자 사이의 부호(1.5 · 1,200 · 3:16)와 날짜 안의 점에서는 끊지 않는다
+    const keep = noBreakMask(text);
+    const isEnd = (k) => '.!?。'.includes(text[k]) && !keep[k];
     // 문장 단위로 분리: "내용 + 종결부호(.!?。 연속 허용) 또는 줄바꿈"
     // 연속 마침표(예: "...")는 하나의 청크 끝에 그대로 유지되어 쉼 길이 계산에 사용된다.
-    for (const m of text.matchAll(/[^.!?。\n]*(?:[.!?。]+|\n+|$)/g)) {
-        let a = m.index, b = m.index + m[0].length;
+    const sentences = [];
+    for (let s = 0, k = 0; k <= text.length; k++) {
+        if (k === text.length) { if (s < k) sentences.push([s, k]); break; }
+        if (isEnd(k)) {
+            while (k + 1 < text.length && isEnd(k + 1)) k++;
+            sentences.push([s, k + 1]); s = k + 1;
+        } else if (text[k] === '\n') {
+            while (k + 1 < text.length && text[k + 1] === '\n') k++;
+            sentences.push([s, k + 1]); s = k + 1;
+        }
+    }
+    for (let [a, b] of sentences) {
         while (a < b && isWs(text[a])) a++;
         while (b > a && isWs(text[b - 1])) b--;
         if (a >= b) continue;
@@ -937,7 +967,7 @@ function splitChunks(text, max, map) {
             const parts = [];
             let ps = a;
             for (let k = a; k < b; k++) {
-                if (',;:·'.includes(text[k])) { parts.push([ps, k + 1]); ps = k + 1; }
+                if (',;:·'.includes(text[k]) && !keep[k]) { parts.push([ps, k + 1]); ps = k + 1; }
             }
             if (ps < b) parts.push([ps, b]);
             let cs = -1, ce = -1;
