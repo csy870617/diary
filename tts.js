@@ -9,7 +9,7 @@ import {
     isNeuralVoice, isNeuralSupported, isNeuralReady, isNeuralLoaded, downloadNeuralVoice, cancelNeuralDownload,
     deleteNeuralVoice, synthesizeNeural, cancelNeuralBefore, unlockNeuralAudio, playNeuralAudio,
     stopNeuralAudio, pauseNeuralAudio, resumeNeuralAudio, lowerNeuralQuality, getNeuralInfo,
-    checkNeuralUpdate, addNeuralDiag, getNeuralDiag, getNeuralMinSteps
+    checkNeuralUpdate, addNeuralDiag, getNeuralMinSteps
 } from './neural-tts.js';
 import { state } from './state.js';
 import { jumpToPage } from './editor.js';
@@ -216,12 +216,11 @@ function ttsPanelOpen() {
     return !!panel && !panel.classList.contains('hidden');
 }
 
-/** 음성 바가 열린 읽기·책 보기에서 문장을 누르면 그 문장부터 읽는다 */
+/** 음성 바가 열려 있으면 문장을 누른 곳부터 읽는다 (보기·편집 모두 — 편집 중에는 커서도 그대로 놓인다) */
 function onEditorTapForTTS(e) {
     if (!ttsPanelOpen()) return;
-    // 편집 중에는 누르는 것이 커서를 놓는 동작이라 가로채지 않는다
-    if (state.currentViewMode !== 'readOnly' && state.currentViewMode !== 'book') return;
     if (e.button !== 0 || e.detail > 1) return;                 // 두 번 눌러 단어 고르기는 그대로
+    if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return; // 늘려 고르기 등 키를 함께 누른 경우는 그대로
     if (e.target.closest('a, img, button, input, select, textarea, .tts-panel')) return;
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed && sel.toString().trim()) return;  // 끌어서 고른 경우는 그대로
@@ -299,13 +298,13 @@ export function toggleTTSPanel() {
         panel.classList.remove('hidden');
         document.getElementById('write-modal')?.classList.add('tts-open');
         // 새 기능 안내: 처음 몇 번만 알려 준다
-        if (state.currentViewMode === 'readOnly' || state.currentViewMode === 'book') {
+        try {
             const seen = Number(localStorage.getItem('faith_tts_tap_hint') || '0');
             if (seen < 3) {
                 localStorage.setItem('faith_tts_tap_hint', String(seen + 1));
                 setTimeout(() => showToast('문장을 누르면 그 문장부터 읽습니다.'), 300);
             }
-        }
+        } catch (_) {}
         loadVoices();
         refreshTTSTotalTime();
     } else {
@@ -483,9 +482,7 @@ async function refreshNeuralRow() {
     if (!isNeuralSupported()) { row.classList.add('hidden'); return; }
     row.classList.remove('hidden');
     if (neuralDownloading) return;
-    const diagBtn = document.getElementById('tts-neural-diag');
     if (await isNeuralReady()) {
-        if (diagBtn) diagBtn.classList.remove('hidden');
         const info = getNeuralInfo();
         const where = info.backend ? `${info.backend === 'webgpu' ? ' · GPU로 계산' : ' · CPU로 계산'} · 품질 ${info.steps}/8` : '';
         setNeuralRow('받아 둠 · 인터넷 없이 사용 가능' + where, '삭제', null);
@@ -496,34 +493,7 @@ async function refreshNeuralRow() {
             setNeuralRow(`${neuralUpdateName()}이 있습니다 (약 ${mb}MB)`, '업데이트', null);
         }
     } else {
-        if (diagBtn) diagBtn.classList.add('hidden');
         setNeuralRow('약 250~500MB · 와이파이에서 받기를 권장합니다', '내려받기', null);
-    }
-}
-
-/** 끊김 원인을 확인하기 위한 진단 정보를 복사한다 (사용자가 개발자에게 붙여 보낼 수 있게) */
-async function copyNeuralDiag() {
-    const d = getNeuralDiag();
-    const speed = document.getElementById('tts-speed-slider')?.value || '1';
-    const synth = d.events.filter(e => e.type === 'synth');
-    const waits = d.events.filter(e => e.type === 'wait');
-    const sumA = synth.reduce((x, e) => x + e.audioSec, 0), sumG = synth.reduce((x, e) => x + e.genSec, 0);
-    const lines = [
-        '[신앙일지 자연음 진단]',
-        `앱 ${document.querySelector('meta[name="app-version"]')?.content || '?'} · ${navigator.userAgent}`,
-        `코어 ${navigator.hardwareConcurrency || '?'} · 메모리 ${navigator.deviceMemory || '?'}GB · 계산 ${d.backend || '아직 안 열림'} · 작업자 ${d.workers} · 모델 ${d.model || '?'} · 품질 ${d.steps}/8 · 속도 ${speed}x`,
-        `최근 문장 ${synth.length}개: 소리 ${sumA.toFixed(1)}초를 ${sumG.toFixed(1)}초에 만듦 (실시간의 ${sumG ? (sumA / sumG).toFixed(2) : '?'}배)`,
-        `재생 대기(끊김) ${waits.length}번, 합계 ${(waits.reduce((x, e) => x + e.ms, 0) / 1000).toFixed(1)}초`,
-        ...synth.slice(-15).map(e => `· ${e.chars}자 소리 ${e.audioSec.toFixed(1)}s / 만듦 ${e.genSec.toFixed(1)}s / 품질 ${e.steps}`
-            + (e.parts ? ` (생성 ${((e.parts.ve || 0) / 1000).toFixed(1)}s, 보코더 ${((e.parts.voc || 0) / 1000).toFixed(1)}s)` : '')
-            + (e.stretch > 1.01 ? ` / 늘임 ${e.stretch.toFixed(2)}` : ''))
-    ];
-    const text = lines.join('\n');
-    try {
-        await navigator.clipboard.writeText(text);
-        showToast('진단 정보를 복사했습니다. 붙여 넣어 보내 주세요.');
-    } catch (e) {
-        window.prompt('아래 내용을 복사해 주세요', text);
     }
 }
 
@@ -1365,7 +1335,6 @@ export function initTTS() {
     if (pitch && ps) { ps.value = pitch; updatePitchDisplay(); }
     if (gap && gs) { gs.value = gap; updateGapDisplay(); }
     document.getElementById('tts-neural-btn')?.addEventListener('click', onNeuralButton);
-    document.getElementById('tts-neural-diag')?.addEventListener('click', copyNeuralDiag);
     document.getElementById('editor-body')?.addEventListener('click', onEditorTapForTTS);
     // 사용자가 직접 스크롤하는 동안에는 읽는 문장을 따라가지 않는다
     const markUserScroll = () => { lastUserScrollMs = Date.now(); };
