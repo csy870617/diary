@@ -280,16 +280,12 @@ let modelName = null;       // 'int8' | 'fp32'
 let poolMode = false;       // CPU 작업자 여러 개로 나눠 맡기는가
 
 // ─── 진단 기록 ───
-// 사용자 기기에서 끊김의 원인을 확인하기 위해 최근 문장들의 만드는 시간·소리 길이·대기 시간을 남긴다.
+// 최근 문장들의 만드는 시간·소리 길이·대기 시간을 남긴다 (빠른 속도 시작 단계 판단 등에 쓴다).
 const DIAG_MAX = 40;
 const diagLog = [];
 export function addNeuralDiag(ev) {
     diagLog.push({ t: Date.now(), ...ev });
     if (diagLog.length > DIAG_MAX) diagLog.shift();
-}
-export function getNeuralDiag() {
-    const acoustic = workers.filter(x => x.role === 'acoustic').length;
-    return { backend: backendName, model: modelName, steps: denoiseSteps, workers: poolMode ? `생성${acoustic}+보코더1` : (workers.length ? '1' : '0'), events: diagLog.slice() };
 }
 let reqSeq = 0;
 const pending = new Map();  // id → { resolve, reject, chars, stretch, acMs, parts }
