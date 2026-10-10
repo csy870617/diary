@@ -31,6 +31,7 @@ let ttsTotalSec = 0;           // 예상 총 재생 시간
 let ttsPlayStartMs = 0;        // 현재 재생 세션 시작 시각
 let ttsElapsedBeforePause = 0; // 일시정지 전까지 누적된 경과(ms)
 let ttsTimerInterval = null;
+let ttsTimingParams = null;     // 지금 시간 계산에 쓴 속도·쉼 — 읽는 중에 바꾸면 이 값과 비교해 다시 계산
 
 // 1x 속도에서 TTS가 읽는 평균 문자 수/초 (경험적 추정)
 const CHARS_PER_SEC = 13;
@@ -259,6 +260,7 @@ function startPlaybackAt(chunks, index) {
     const timings = buildChunkTimings(chunks, speed, gap);
     ttsChunks = chunks;
     ttsChunkIndex = index;
+    ttsTimingParams = { speed, gap };
     ttsTotalSec = estimateTotalTime();
     const startSec = timings[index] ? timings[index].startSec : 0;
     ttsElapsedBeforePause = Math.round(startSec * 1000);
@@ -830,6 +832,7 @@ export function playTTS() {
 
     ttsChunks = seekState.chunks;
     ttsChunkIndex = seekState.chunkIndex;
+    ttsTimingParams = currentTimingParams();
     ttsTotalSec = estimateTotalTime();
     ttsElapsedBeforePause = seekState.targetMs;
     ttsPlayStartMs = Date.now();
@@ -861,6 +864,7 @@ export function seekTTSByPercent(percent) {
 
     ttsChunks = seekState.chunks;
     ttsChunkIndex = seekState.chunkIndex;
+    ttsTimingParams = currentTimingParams();
 
     clearTimeout(ttsGapTimer);
     ttsGapTimer = null;
@@ -1103,16 +1107,25 @@ function neuralGapAfter(chunk) {
     return /[.!?。…"'」』)\]]\s*$/.test(chunk.text || '') ? NEURAL_SENTENCE_GAP_MS : NEURAL_CLAUSE_GAP_MS;
 }
 
+// 읽는 중에 속도를 바꾸면, 옛 속도로 미리 만들려고 줄 세워 둔 문장들만 버린다 (지금 읽는 문장은 그대로).
+// 작업자는 '이 번호보다 작은 요청'을 건너뛰므로 같은 재생 안에서 번호를 조금씩 올려 구분한다.
+let neuralSpeedRev = 0, neuralSpeedRevGen = -1;
+function neuralSynthGen(gen) {
+    if (neuralSpeedRevGen !== gen) { neuralSpeedRevGen = gen; neuralSpeedRev = 0; }
+    return gen + Math.min(neuralSpeedRev, 999) / 1000;
+}
+let neuralNowPlaying = null;        // { gen, index } — 지금 소리가 나고 있는 문장
+
 function requestNeural(index, gen) {
     const voice = selectedVoiceValue();
-    if (!neuralCache || neuralCache.gen !== gen || neuralCache.voice !== voice) {
-        neuralCache = { gen, voice, map: new Map() };
+    const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
+    if (!neuralCache || neuralCache.gen !== gen || neuralCache.voice !== voice || neuralCache.speed !== speed) {
+        neuralCache = { gen, voice, speed, map: new Map() };
     }
     const map = neuralCache.map;
     if (map.has(index)) return map.get(index);
     const text = cleanForSpeech(ttsChunks[index]?.text || '');
-    const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
-    const promise = text ? synthesizeNeural(text, voice, speed, gen) : Promise.resolve(null);
+    const promise = text ? synthesizeNeural(text, voice, speed, neuralSynthGen(gen)) : Promise.resolve(null);
     promise.catch(() => {});   // 미리 만들다 실패해도 그 문장 차례에 다시 처리한다
     map.set(index, promise);
     return promise;
@@ -1192,7 +1205,9 @@ async function speakNextNeural(currentChunk) {
     syncUI();
     highlightChunk(currentChunk);
     neuralPlayedGen = myGen;
+    neuralNowPlaying = { gen: myGen, index };
     const finished = await playNeuralAudio(audio.wav, audio.sampleRate);
+    if (neuralNowPlaying && neuralNowPlaying.gen === myGen && neuralNowPlaying.index === index) neuralNowPlaying = null;
     if (myGen !== ttsGen || !finished) return;
     advanceAfterChunk(currentChunk, neuralGapAfter(currentChunk));
 }
@@ -1285,6 +1300,7 @@ export function updateSpeedDisplay() {
         localStorage.setItem('faith_tts_speed', String(v));
     }
     if (!isTTSSpeaking) refreshTTSTotalTime();
+    else { retimeFromCurrent(); scheduleLiveApply(usingNeural() ? 'neural-speed' : 'restart'); }
 }
 
 export function updatePitchDisplay() {
@@ -1298,19 +1314,17 @@ export function updatePitchDisplay() {
         }
         localStorage.setItem('faith_tts_pitch', String(v));
     }
+    // 높낮이는 기본 음성만 쓴다 — 읽는 중이면 지금 문장부터 새 높낮이로 다시 읽는다
+    if (isTTSSpeaking && !usingNeural()) scheduleLiveApply('restart');
 }
 
 export function saveTTSVoice() {
     const sel = document.getElementById('tts-voice-select');
     if (sel && sel.value) localStorage.setItem('faith_tts_voice', sel.value);
     updatePitchAvailability();
-    // 음성마다 문장을 나누는 길이·읽는 속도가 달라 읽는 중이면 지금 위치부터 새 음성으로 다시 읽는다
-    if (isTTSSpeaking && !isTTSPaused) {
-        const slider = document.getElementById('tts-progress-slider');
-        seekTTSByPercent(slider ? slider.value : 0);
-    } else if (!isTTSSpeaking) {
-        refreshTTSTotalTime();
-    }
+    // 음성마다 문장을 나누는 길이·읽는 속도가 달라 읽는 중이면 지금 문장부터 새 음성으로 다시 읽는다
+    if (isTTSSpeaking) { clearTimeout(liveApplyTimer); liveApplyTimer = null; restartFromCurrentChunk(); }
+    else refreshTTSTotalTime();
 }
 
 export function updateGapDisplay() {
@@ -1321,7 +1335,91 @@ export function updateGapDisplay() {
         d.textContent = v === 0 ? '없음' : v.toFixed(1) + '초';
         localStorage.setItem('faith_tts_gap', String(v));
     }
+    // 문장 사이 쉼은 다음 쉼부터 저절로 반영되므로 남은 시간만 다시 계산한다
     if (!isTTSSpeaking) refreshTTSTotalTime();
+    else retimeFromCurrent();
+}
+
+// ─── 읽는 중에 설정 바꾸기 ───
+
+function currentTimingParams() {
+    return {
+        speed: parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1,
+        gap: parseFloat(document.getElementById('tts-gap-slider')?.value || '0') || 0,
+    };
+}
+
+/** 바뀐 속도·쉼으로 전체 시간과 지금까지 읽은 시간을 다시 계산한다 (지금 문장 안에서 읽은 비율은 그대로) */
+function retimeFromCurrent() {
+    const next = currentTimingParams();
+    const prev = ttsTimingParams || next;
+    ttsTimingParams = next;
+    if (!ttsChunks.length) { refreshTTSTotalTime(); return; }
+    const idx = Math.max(0, Math.min(ttsChunks.length - 1, ttsChunkIndex));
+    const o = buildChunkTimings(ttsChunks, prev.speed, prev.gap)[idx];
+    const n = buildChunkTimings(ttsChunks, next.speed, next.gap)[idx];
+    const into = Math.max(0, Math.min(o.speakSec, getElapsedSec() - o.startSec));
+    const frac = o.speakSec > 0 ? into / o.speakSec : 0;
+    ttsElapsedBeforePause = Math.round((n.startSec + frac * n.speakSec) * 1000);
+    ttsPlayStartMs = isTTSSpeaking && !isTTSPaused ? Date.now() : 0;
+    ttsTotalSec = estimateTotalTime();
+    updateTimeDisplay();
+}
+
+// 막대를 끄는 동안 매번 다시 읽지 않도록, 손을 멈춘 뒤 한 번만 적용한다
+let liveApplyTimer = null;
+function scheduleLiveApply(kind) {
+    clearTimeout(liveApplyTimer);
+    liveApplyTimer = setTimeout(() => {
+        liveApplyTimer = null;
+        if (!isTTSSpeaking && !isTTSPaused) return;
+        if (kind === 'neural-speed' && usingNeural()) refreshNeuralAhead();
+        else restartFromCurrentChunk();
+    }, 400);
+}
+
+/** 자연스러운 음성: 지금 문장은 끝까지 읽고, 뒤 문장들은 새 속도로 다시 만든다 */
+function refreshNeuralAhead() {
+    const gen = ttsGen;
+    const playingNow = neuralNowPlaying && neuralNowPlaying.gen === gen && neuralNowPlaying.index === ttsChunkIndex && !ttsGapTimer;
+    // 아직 소리가 나기 전(만드는 중·문장 사이 쉼)이면 지금 문장부터 새 속도로 다시 시작한다
+    if (!playingNow) { restartFromCurrentChunk(); return; }
+    const cur = neuralCache && neuralCache.gen === gen ? neuralCache.map.get(ttsChunkIndex) : null;
+    neuralSynthGen(gen);
+    neuralSpeedRev++;
+    const { speed } = currentTimingParams();
+    neuralCache = { gen, voice: selectedVoiceValue(), speed, map: new Map(cur ? [[ttsChunkIndex, cur]] : []) };
+    cancelNeuralBefore(neuralSynthGen(gen));   // 옛 속도로 줄 서 있던 문장은 만들지 않는다
+    fillNeuralAhead(ttsChunkIndex, gen);
+}
+
+/** 지금 읽는 문장의 처음부터 바뀐 설정으로 다시 읽는다 (일시정지 중이면 재개할 때 적용) */
+function restartFromCurrentChunk() {
+    const cur = ttsChunks[Math.min(ttsChunkIndex, ttsChunks.length - 1)];
+    const pos = cur && cur.fullStart != null ? cur.fullStart : 0;
+    const src = getSpeechSource();
+    if (!src.text) return;
+    const chunks = splitChunks(src.text, getMaxChunkLen(), src.map);
+    let idx = chunks.findIndex(c => c.fullEnd != null && c.fullEnd > pos);
+    if (idx < 0) idx = chunks.length - 1;
+    if (!isTTSPaused) { startPlaybackAt(chunks, idx); return; }
+    ttsGen++;
+    cancelSystemSpeech();
+    stopNeuralAudio();
+    cancelNeuralBefore(ttsGen);
+    clearTimeout(ttsGapTimer);
+    ttsGapTimer = null;
+    const { speed, gap } = currentTimingParams();
+    const timings = buildChunkTimings(chunks, speed, gap);
+    ttsChunks = chunks;
+    ttsChunkIndex = idx;
+    ttsTimingParams = { speed, gap };
+    ttsTotalSec = estimateTotalTime();
+    ttsElapsedBeforePause = Math.round((timings[idx] ? timings[idx].startSec : 0) * 1000);
+    ttsPlayStartMs = 0;
+    ttsGapInterrupted = true;   // 살아 있는 발화가 없으므로 재개하면 이 문장부터 새로 읽는다
+    updateTimeDisplay();
+    syncUI();
 }
 
 export function initTTS() {
