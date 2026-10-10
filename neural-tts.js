@@ -110,25 +110,73 @@ async function applicableFiles(manifest) {
     return manifest.files.filter(f => !f.only || (f.only === 'webgpu' && gpu));
 }
 
+// 다 받았다는 표시를 파일들과 같은 저장소(Cache Storage)에도 둔다. 브라우저에 따라 localStorage만
+// 비워지는 경우가 있는데, 그때도 파일이 남아 있으면 다시 받지 않게 한다.
+function readyMarkerUrl() { return voiceBase() + '__faith_ready__.json'; }
+
+let evictedNotice = false;   // 받아 둔 기록은 있는데 파일이 사라졌다 (브라우저가 저장 공간을 비움)
+
+/** 받아 둔 목록(manifest)을 읽는다 — localStorage에 없으면 저장소의 표시에서 되살린다 */
+async function storedManifest() {
+    let manifest = null;
+    try { manifest = JSON.parse(localStorage.getItem(READY_KEY + '_manifest') || 'null'); } catch (e) { manifest = null; }
+    if (manifest && localStorage.getItem(READY_KEY) === manifest.version) return manifest;
+    try {
+        const res = await (await caches.open(CACHE_NAME)).match(readyMarkerUrl());
+        const m = res ? await res.json() : null;
+        if (m && m.version && Array.isArray(m.files)) {
+            try {
+                localStorage.setItem(READY_KEY + '_manifest', JSON.stringify(m));
+                localStorage.setItem(READY_KEY, m.version);
+            } catch (e) { /* 저장 못 해도 다음에 다시 저장소에서 읽는다 */ }
+            return m;
+        }
+    } catch (e) { /* 저장소를 못 열면 받지 않은 것으로 본다 */ }
+    return null;
+}
+
 /**
  * 받아 둔 음성이 온전히 남아 있는가.
  * (아이폰 Safari는 오래 쓰지 않은 사이트의 저장 공간을 비울 수 있어 실제 파일까지 확인한다)
  */
 export async function isNeuralReady() {
     if (!isNeuralSupported()) return false;
-    let manifest;
-    try { manifest = JSON.parse(localStorage.getItem(READY_KEY + '_manifest') || 'null'); } catch (e) { manifest = null; }
-    if (!manifest || localStorage.getItem(READY_KEY) !== manifest.version) return false;
+    const manifest = await storedManifest();
+    if (!manifest) return false;
     try {
         const cache = await caches.open(CACHE_NAME);
         const base = voiceBase();
         for (const f of manifest.files) {
-            if (!(await cache.match(base + f.path))) return false;
+            if (!(await cache.match(base + f.path))) { evictedNotice = true; return false; }
+        }
+        evictedNotice = false;
+        // 이 표시가 생기기 전에 받은 기기도 표시를 남겨 둔다
+        if (!(await cache.match(readyMarkerUrl()))) {
+            await cache.put(readyMarkerUrl(), new Response(JSON.stringify(manifest), { headers: { 'Content-Type': 'application/json' } }));
         }
         return true;
     } catch (e) {
         return false;
     }
+}
+
+/** 받아 둔 기록은 있는데 파일이 사라졌는가 (화면에 이유를 알려 주는 데 쓴다) */
+export function neuralWasEvicted() { return evictedNotice; }
+
+/**
+ * 받은 파일을 브라우저가 지우기 쉬운 환경인가.
+ * 카카오톡·네이버 등 앱 안 브라우저는 앱을 다시 열 때마다 저장 공간을 비우는 경우가 많다.
+ */
+export function inAppBrowserName() {
+    const ua = navigator.userAgent || '';
+    if (/KAKAOTALK/i.test(ua)) return '카카오톡';
+    if (/NAVER\(inapp|NAVER\//i.test(ua)) return '네이버 앱';
+    if (/DaumApps/i.test(ua)) return '다음 앱';
+    if (/Instagram/i.test(ua)) return '인스타그램';
+    if (/FBAN|FBAV/i.test(ua)) return '페이스북';
+    if (/\bLine\//i.test(ua)) return '라인';
+    if (/everytimeApp|BAND\//i.test(ua)) return '앱';
+    return '';
 }
 
 export function neuralDownloadSize(manifest) {
@@ -218,8 +266,12 @@ export async function downloadNeuralVoice(onProgress) {
             const keep = new Set(manifest.files.map(f => base + f.path));
             for (const req of await cache.keys()) if (!keep.has(req.url)) await cache.delete(req);
         } catch (e) { /* 정리는 실패해도 괜찮다 */ }
-        localStorage.setItem(READY_KEY + '_manifest', JSON.stringify(manifest));
-        localStorage.setItem(READY_KEY, manifest.version);
+        await cache.put(readyMarkerUrl(), new Response(JSON.stringify(manifest), { headers: { 'Content-Type': 'application/json' } }));
+        try {
+            localStorage.setItem(READY_KEY + '_manifest', JSON.stringify(manifest));
+            localStorage.setItem(READY_KEY, manifest.version);
+        } catch (e) { /* 저장소의 표시로도 알아본다 */ }
+        evictedNotice = false;
         // 새 엔진을 쓰도록 열려 있던 작업자를 닫는다 (다음 재생 때 다시 연다)
         shutdownNeural();
         return manifest;
@@ -234,8 +286,7 @@ export async function downloadNeuralVoice(onProgress) {
  */
 export async function checkNeuralUpdate() {
     if (!navigator.onLine) return null;
-    let stored;
-    try { stored = JSON.parse(localStorage.getItem(READY_KEY + '_manifest') || 'null'); } catch (e) { stored = null; }
+    const stored = await storedManifest();
     if (!stored) return null;
     try {
         const remote = await fetchManifest(5000);
@@ -264,6 +315,7 @@ export async function deleteNeuralVoice() {
     try { await caches.delete(CACHE_NAME); } catch (e) {}
     localStorage.removeItem(READY_KEY);
     localStorage.removeItem(READY_KEY + '_manifest');
+    evictedNotice = false;
 }
 
 // ─── 생성 (작업자) ───────────────────────────────────────────────
