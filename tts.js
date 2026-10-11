@@ -9,7 +9,7 @@ import {
     isNeuralVoice, isNeuralSupported, isNeuralReady, isNeuralLoaded, downloadNeuralVoice, cancelNeuralDownload,
     deleteNeuralVoice, synthesizeNeural, cancelNeuralBefore, unlockNeuralAudio, playNeuralAudio,
     stopNeuralAudio, pauseNeuralAudio, resumeNeuralAudio, lowerNeuralQuality, getNeuralInfo,
-    checkNeuralUpdate, addNeuralDiag, getNeuralMinSteps
+    checkNeuralUpdate, addNeuralDiag, getNeuralMinSteps, neuralWasEvicted, inAppBrowserName
 } from './neural-tts.js';
 import { state } from './state.js';
 import { jumpToPage } from './editor.js';
@@ -495,7 +495,13 @@ async function refreshNeuralRow() {
             setNeuralRow(`${neuralUpdateName()}이 있습니다 (약 ${mb}MB)`, '업데이트', null);
         }
     } else {
-        setNeuralRow('약 250~500MB · 와이파이에서 받기를 권장합니다', '내려받기', null);
+        // 받아 둔 파일을 브라우저가 지웠다면 이유를 알려 준다 (앱 안 브라우저·사생활 보호 모드·종료 시 데이터 삭제 설정 등)
+        const app = inAppBrowserName();
+        let msg = neuralWasEvicted()
+            ? '브라우저가 받아 둔 음성을 지웠습니다 · 다시 받아 주세요'
+            : '약 250~500MB · 와이파이에서 받기를 권장합니다';
+        if (app) msg += ` · ${app} 안에서는 받은 음성이 지워질 수 있어 Chrome·Safari로 여는 것을 권장합니다`;
+        setNeuralRow(msg, '내려받기', null);
     }
 }
 
@@ -534,7 +540,9 @@ async function onNeuralButton() {
         showToast('자연스러운 음성을 지웠습니다.');
         return;
     }
-    if (!confirm('자연스러운 음성(약 250~500MB, 기기에 따라 다름)을 내려받습니다.\n데이터 요금이 들 수 있으니 와이파이에서 받기를 권장합니다.\n\n한 번 받으면 인터넷 없이도 쓸 수 있습니다. 계속할까요?')) return;
+    const inApp = inAppBrowserName();
+    const appWarn = inApp ? `\n\n지금은 ${inApp} 안의 브라우저입니다. 여기서 받으면 앱을 다시 열 때 지워질 수 있으니, Chrome이나 Safari에서 열어 받는 것을 권장합니다.` : '';
+    if (!confirm('자연스러운 음성(약 250~500MB, 기기에 따라 다름)을 내려받습니다.\n데이터 요금이 들 수 있으니 와이파이에서 받기를 권장합니다.\n\n한 번 받으면 인터넷 없이도 쓸 수 있습니다. 계속할까요?' + appWarn)) return;
     neuralDownloading = true;
     setNeuralRow('받는 중… 0%', '취소', 0);
     try {
