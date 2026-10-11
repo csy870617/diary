@@ -44,7 +44,15 @@ function usingNeural() {
 }
 // 자연스러운 음성은 기본 음성보다 천천히 읽는다 (재생 시간 예상·탐색 위치 계산용)
 function charsPerSec() {
-    return usingNeural() ? NEURAL_CHARS_PER_SEC : CHARS_PER_SEC;
+    return timingNeural() ? NEURAL_CHARS_PER_SEC : CHARS_PER_SEC;
+}
+// 음성 바를 연 직후에는 받아 둔 음성 확인이 끝나기 전이라 목록에 아직 기본 음성이 골라져 있다.
+// 그사이 시간을 기본 음성 빠르기로 잠깐 잘못 보여 주지 않도록, 저장해 둔 음성이 자연스러운 음성이면 그것으로 계산한다.
+let neuralGroupPending = false;
+function timingNeural() {
+    if (usingNeural()) return true;
+    if (!neuralGroupPending) return false;
+    try { return isNeuralVoice(localStorage.getItem('faith_tts_voice')); } catch (e) { return false; }
 }
 
 // 마침표 1개를 초과하는 각 마침표마다 추가되는 쉼(초). "..." = 기본 간격 + 1.0초
@@ -336,7 +344,9 @@ const NATURAL_VOICE_RE = /natural|neural|online|enhanced|premium|wavenet|studio|
 
 // 내려받아 둔 자연스러운 음성을 목록 맨 위에 넣는다 (받지 않았으면 넣지 않는다)
 async function addNeuralGroup(sel, saved) {
-    const ready = await isNeuralReady();
+    neuralGroupPending = true;
+    let ready = false;
+    try { ready = await isNeuralReady(); } finally { neuralGroupPending = false; }
     sel.querySelector('optgroup[data-neural]')?.remove();
     if (ready) {
         const g = document.createElement('optgroup');
@@ -356,6 +366,8 @@ async function addNeuralGroup(sel, saved) {
         if (first) sel.value = first.value;
     }
     updatePitchAvailability();
+    // 받아 둔 음성 확인은 조금 늦게 끝난다 — 음성이 정해진 뒤 그 음성의 빠르기로 시간을 다시 계산한다
+    if (!isTTSSpeaking) refreshTTSTotalTime();
 }
 
 export function loadVoices() {
@@ -597,21 +609,18 @@ function getMaxChunkLen() {
     const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
     const len = Math.max(60, Math.min(300, Math.round(180 * speed)));
     // 자연스러운 음성은 한 번에 120자 안쪽으로 만들어야 안정적이다
-    return usingNeural() ? Math.min(len, NEURAL_MAX_CHUNK) : len;
+    return timingNeural() ? Math.min(len, NEURAL_MAX_CHUNK) : len;
 }
 
+// 재생 전·재생 중·탐색이 모두 같은 계산(buildChunkTimings)을 써야 시간이 서로 맞는다
 function estimateTotalTime() {
     const text = getTextToSpeak();
     if (!text) return 0;
     const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
     const gap = parseFloat(document.getElementById('tts-gap-slider')?.value || '0') || 0;
-    const chunks = splitChunks(text, getMaxChunkLen());
-    const speakTime = text.length / charsPerSec() / speed;
-    const baseGapTime = Math.max(0, chunks.length - 1) * gap;
-    const dotGapTime = chunks
-        .slice(0, -1)
-        .reduce((sum, c) => sum + extraPauseForDots(c.dots), 0);
-    return speakTime + baseGapTime + dotGapTime;
+    const timings = buildChunkTimings(splitChunks(text, getMaxChunkLen()), speed, gap);
+    const last = timings[timings.length - 1];
+    return last ? last.startSec + last.speakSec : 0;
 }
 
 function getElapsedSec() {
@@ -632,14 +641,18 @@ function updateTimeDisplay() {
 
 function buildChunkTimings(chunks, speed, gapSec) {
     const timings = [];
+    const neural = timingNeural();
+    const cps = charsPerSec();
     let elapsed = 0;
     for (let i = 0; i < chunks.length; i++) {
         const spokenLen = cleanForSpeech(chunks[i].text).length;
-        const speakSec = spokenLen / charsPerSec() / speed;
+        const speakSec = spokenLen / cps / speed;
         timings.push({ index: i, startSec: elapsed, speakSec });
         elapsed += speakSec;
         if (i < chunks.length - 1) {
-            elapsed += gapSec + extraPauseForDots(chunks[i].dots);
+            // 실제 재생(advanceAfterChunk)과 같은 쉼: 설정한 쉼과 자연스러운 음성의 문장 끝 쉼 중 긴 쪽
+            const set = gapSec + extraPauseForDots(chunks[i].dots);
+            elapsed += neural ? Math.max(neuralGapAfter(chunks[i]) / 1000, set) : set;
         }
     }
     return timings;

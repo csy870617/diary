@@ -51,8 +51,8 @@ let backendName = null;
 // 한 번에 만드는 최대 글자 수. 한국어는 120자 안쪽이 안정적이지만(공식 예제), 긴 조각은
 // 작업자 하나가 오래 붙잡고 있어 다음 조각이 늦어진다. 90자로 나눠 여러 작업자가 동시에 만들게 한다.
 export const NEURAL_MAX_CHUNK = 90;
-// 자연스러운 음성이 1배속에서 읽는 평균 글자 수/초 (측정값 약 6.5~7)
-export const NEURAL_CHARS_PER_SEC = 7;
+// 자연스러운 음성이 1배속에서 읽는 평균 글자 수/초 (측정값 약 6.5~7 — 재생 전 시간이 실제와 맞도록 6.6)
+export const NEURAL_CHARS_PER_SEC = 6.6;
 
 /** 음성 저장소 주소: 앱이 /diary/ 에 있으면 /faith-voice/ (같은 주소라 별도 허용 설정이 필요 없다) */
 export function voiceBase() {
