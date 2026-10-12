@@ -1,14 +1,14 @@
 /**
  * 자연스러운 음성(Supertonic 3) 생성 작업자 — 화면이 멈추지 않도록 계산은 여기서 한다.
  *
- * 모델 파일은 앱(neural-tts.js)이 내려받아 Cache Storage에 넣어 둔 것을 그대로 읽는다.
- * (메인 스레드에서 수백 MB를 넘겨받지 않기 위해 작업자가 캐시에서 직접 연다)
+ * 모델 파일은 앱(neural-tts.js)이 내려받아 IndexedDB(diary-voice)에 넣어 둔 것을 그대로 읽는다.
+ * (메인 스레드에서 수백 MB를 넘겨받지 않기 위해 작업자가 저장소에서 직접 연다)
  *
  * 추론 순서는 공식 웹 예제(supertone-inc/supertonic web/helper.js)를 따르되,
  * 중첩 배열 대신 Float32Array를 써서 메모리와 시간을 줄였다.
  *
  * 메시지:
- *   → { type:'init', base, cacheName }            ← { type:'ready', backend } | { type:'error' }
+ *   → { type:'init', dbName, dbStore }             ← { type:'ready', backend } | { type:'error' }
  *   → { type:'synth', id, gen, text, lang, style, speed, steps }
  *                                                  ← { type:'audio', id, wav, sampleRate } | { type:'error', id } | { type:'skipped', id }
  *   → { type:'cancelBefore', gen }                 (이 세대보다 오래된 대기 요청은 건너뜀)
@@ -19,8 +19,6 @@ let cfgs = null;
 let indexer = null;
 let sessions = null;          // { dp, te, ve, voc }
 const styles = new Map();     // 'F1' → { ttl, dp }
-let base = '';
-let cacheName = '';
 let modelName = '';
 // 역할: 'full'(전부) | 'acoustic'(길이예측·글자처리·음성생성까지, 결과는 잠재값) | 'vocoder'(잠재값 → 소리)
 // CPU로 계산할 때는 작업자 여러 개가 나눠 맡아 휴대폰의 여러 코어를 함께 쓴다.
@@ -28,18 +26,38 @@ let role = 'full';
 
 const AVAILABLE_LANGS = ['en', 'ko', 'ja', 'ar', 'bg', 'cs', 'da', 'de', 'el', 'es', 'et', 'fi', 'fr', 'hi', 'hr', 'hu', 'id', 'it', 'lt', 'lv', 'nl', 'pl', 'pt', 'ro', 'ru', 'sk', 'sl', 'sv', 'tr', 'uk', 'vi', 'na'];
 
+// 앱(neural-tts.js)이 IndexedDB에 넣어 둔 파일을 읽는다 — 파일 하나 = { blob, size, type }, 열쇠는 경로
+let dbName = '', dbStore = '';
+let dbPromise = null;
+function openDb() {
+    if (!dbPromise) {
+        dbPromise = new Promise((resolve, reject) => {
+            // 저장소는 앱이 먼저 만들어 둔다 (판 번호를 정하지 않고 지금 판으로 연다)
+            const req = indexedDB.open(dbName);
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => { dbPromise = null; reject(req.error); };
+        });
+    }
+    return dbPromise;
+}
+async function dbGet(key) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+        const req = db.transaction(dbStore, 'readonly').objectStore(dbStore).get(key);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
 async function readCached(path) {
-    const url = base + path;
-    const cache = await caches.open(cacheName);
-    const res = await cache.match(url);
-    if (!res) throw new Error('내려받은 음성 파일이 없습니다: ' + path);
-    return res;
+    const rec = await dbGet(path);
+    if (!rec || !rec.blob) throw new Error('내려받은 음성 파일이 없습니다: ' + path);
+    return new Response(rec.blob);
 }
 
 async function readJson(path) { return (await readCached(path)).json(); }
 async function hasCached(path) {
-    const cache = await caches.open(cacheName);
-    return !!(await cache.match(base + path));
+    const rec = await dbGet(path);
+    return !!(rec && rec.blob);
 }
 async function readBytes(path) { return new Uint8Array(await (await readCached(path)).arrayBuffer()); }
 
@@ -60,8 +78,8 @@ async function createSessions(providers, vePath) {
 }
 
 async function init(msg) {
-    base = msg.base;
-    cacheName = msg.cacheName;
+    dbName = msg.dbName;
+    dbStore = msg.dbStore;
     role = msg.role || 'full';
     // WebGPU 빌드와 WASM 빌드는 서로 다른 엔진 파일을 쓰고, 한 번 초기화에 실패하면
     // 같은 작업자에서는 다른 쪽으로 다시 열 수 없다. 그래서 먼저 GPU를 확인하고 하나만 불러온다.
