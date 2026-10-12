@@ -9,8 +9,16 @@
  * manifest.json에 조각 목록이 있고, 받을 때 다시 하나로 합쳐 저장한다.
  */
 
-const CACHE_NAME = 'faith-voice-v1';
-const READY_KEY = 'faith_voice_ready';      // 받은 버전 (다 받았을 때만 기록)
+// 받은 음성은 이 앱만 쓰는 IndexedDB(diary-voice)에 둔다.
+// 같은 주소(csy870617.github.io)의 다른 앱들과 브라우저 저장소를 함께 쓰는데, 그 앱들이
+// 업데이트할 때 '자기 것이 아닌 Cache Storage'를 모두 지우거나(FAITHS·stock),
+// 예전 이름(faith-voice-v1·faith_voice_ready)을 자기 옛 음성으로 알고 지워서(engo)
+// 받아 둔 음성이 자꾸 사라졌다. IndexedDB의 이 이름은 다른 앱이 건드리지 않는다.
+const DB_NAME = 'diary-voice';
+const DB_STORE = 'files';
+const READY_REC = '__ready__';                // 다 받았을 때만 남기는 목록(manifest)
+const OLD_CACHE_NAME = 'faith-voice-v1';      // 예전 저장 위치 (남아 있으면 옮겨 온다)
+const OLD_READY_KEY = 'faith_voice_ready';
 export const NEURAL_PREFIX = 'st:';          // 음성 목록에서 자연스러운 음성을 구분하는 접두어
 
 // 목소리 이름은 소리에서 잰 값으로 붙였다 (문장 4개 × 2번, 품질 8단계, 같은 성별끼리 견줌):
@@ -67,13 +75,9 @@ export function isNeuralVoice(value) {
     return typeof value === 'string' && value.startsWith(NEURAL_PREFIX);
 }
 
-function hasCacheStorage() {
-    return typeof caches !== 'undefined' && typeof Worker !== 'undefined' && typeof AudioContext !== 'undefined'
-        || (typeof caches !== 'undefined' && typeof Worker !== 'undefined' && typeof webkitAudioContext !== 'undefined');
-}
-
 export function isNeuralSupported() {
-    return hasCacheStorage();
+    return typeof indexedDB !== 'undefined' && typeof Worker !== 'undefined'
+        && (typeof AudioContext !== 'undefined' || typeof webkitAudioContext !== 'undefined');
 }
 
 async function fetchManifest(timeoutMs) {
@@ -110,29 +114,101 @@ async function applicableFiles(manifest) {
     return manifest.files.filter(f => !f.only || (f.only === 'webgpu' && gpu));
 }
 
-// 다 받았다는 표시를 파일들과 같은 저장소(Cache Storage)에도 둔다. 브라우저에 따라 localStorage만
-// 비워지는 경우가 있는데, 그때도 파일이 남아 있으면 다시 받지 않게 한다.
-function readyMarkerUrl() { return voiceBase() + '__faith_ready__.json'; }
+// ─── 저장소 (IndexedDB) ───
+// 파일 하나 = { blob, size, type }, 열쇠는 음성 저장소 안의 경로(예: 'onnx/vocoder.onnx')
+let dbPromise = null;
+function openDb() {
+    if (!dbPromise) {
+        const open = (version) => new Promise((resolve, reject) => {
+            const req = version ? indexedDB.open(DB_NAME, version) : indexedDB.open(DB_NAME);
+            req.onupgradeneeded = () => {
+                if (!req.result.objectStoreNames.contains(DB_STORE)) req.result.createObjectStore(DB_STORE);
+            };
+            req.onsuccess = () => {
+                const db = req.result;
+                db.onversionchange = () => { db.close(); dbPromise = null; };
+                resolve(db);
+            };
+            req.onerror = () => reject(req.error);
+            req.onblocked = () => reject(new Error('저장소를 열 수 없습니다'));
+        });
+        dbPromise = (async () => {
+            let db = await open();
+            // 파일 칸이 없는 채로 만들어진 저장소면 판을 올려 칸을 만든다
+            if (!db.objectStoreNames.contains(DB_STORE)) {
+                const v = db.version + 1;
+                db.close();
+                db = await open(v);
+            }
+            return db;
+        })();
+        dbPromise.catch(() => { dbPromise = null; });
+    }
+    return dbPromise;
+}
+async function dbDo(mode, fn) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_STORE, mode);
+        const req = fn(tx.objectStore(DB_STORE));
+        tx.oncomplete = () => resolve(req ? req.result : undefined);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('저장하지 못했습니다'));
+    });
+}
+const dbGet = (key) => dbDo('readonly', st => st.get(key));
+const dbPut = (key, val) => dbDo('readwrite', st => st.put(val, key));
+const dbDel = (key) => dbDo('readwrite', st => st.delete(key));
+const dbKeys = () => dbDo('readonly', st => st.getAllKeys());
+const dbClear = () => dbDo('readwrite', st => st.clear());
+
+/** 이 파일을 온전히 받아 두었는가 (크기까지 맞아야 한다) */
+async function hasFile(f) {
+    const rec = await dbGet(f.path);
+    return !!(rec && rec.blob && (!f.size || rec.size === f.size));
+}
 
 let evictedNotice = false;   // 받아 둔 기록은 있는데 파일이 사라졌다 (브라우저가 저장 공간을 비움)
 
-/** 받아 둔 목록(manifest)을 읽는다 — localStorage에 없으면 저장소의 표시에서 되살린다 */
+/** 받아 둔 목록(manifest) — 다 받았을 때만 남는다 */
 async function storedManifest() {
-    let manifest = null;
-    try { manifest = JSON.parse(localStorage.getItem(READY_KEY + '_manifest') || 'null'); } catch (e) { manifest = null; }
-    if (manifest && localStorage.getItem(READY_KEY) === manifest.version) return manifest;
     try {
-        const res = await (await caches.open(CACHE_NAME)).match(readyMarkerUrl());
-        const m = res ? await res.json() : null;
-        if (m && m.version && Array.isArray(m.files)) {
-            try {
-                localStorage.setItem(READY_KEY + '_manifest', JSON.stringify(m));
-                localStorage.setItem(READY_KEY, m.version);
-            } catch (e) { /* 저장 못 해도 다음에 다시 저장소에서 읽는다 */ }
-            return m;
+        const m = await dbGet(READY_REC);
+        return m && m.version && Array.isArray(m.files) ? m : null;
+    } catch (e) { return null; }
+}
+
+/**
+ * 예전 저장 위치(Cache Storage)에 받아 둔 음성이 남아 있으면 새 저장소로 옮긴다 (다시 받지 않도록).
+ * 옮긴 뒤 예전 사본은 지워 저장 공간을 돌려준다.
+ */
+let migrating = null;
+function migrateFromOldCache() {
+    if (!migrating) migrating = (async () => {
+        if (typeof caches === 'undefined') return false;
+        let manifest = null;
+        try { manifest = JSON.parse(localStorage.getItem(OLD_READY_KEY + '_manifest') || 'null'); } catch (e) { manifest = null; }
+        const base = voiceBase();
+        if (!(await caches.has(OLD_CACHE_NAME))) return false;
+        const cache = await caches.open(OLD_CACHE_NAME);
+        if (!manifest) {
+            const res = await cache.match(base + '__faith_ready__.json');
+            manifest = res ? await res.json().catch(() => null) : null;
         }
-    } catch (e) { /* 저장소를 못 열면 받지 않은 것으로 본다 */ }
-    return null;
+        if (!manifest || !Array.isArray(manifest.files)) return false;
+        for (const f of manifest.files) {
+            const res = await cache.match(base + f.path);
+            if (!res) return false;
+            const blob = await res.blob();
+            if (f.size && blob.size !== f.size) return false;
+            await dbPut(f.path, { blob, size: blob.size, type: f.type || 'application/octet-stream' });
+        }
+        await dbPut(READY_REC, manifest);
+        try { await caches.delete(OLD_CACHE_NAME); } catch (e) {}
+        try { localStorage.removeItem(OLD_READY_KEY); localStorage.removeItem(OLD_READY_KEY + '_manifest'); } catch (e) {}
+        return true;
+    })().catch((e) => { console.warn('예전 음성 옮기기 실패:', e); return false; }).finally(() => { migrating = null; });
+    return migrating;
 }
 
 /**
@@ -141,19 +217,14 @@ async function storedManifest() {
  */
 export async function isNeuralReady() {
     if (!isNeuralSupported()) return false;
-    const manifest = await storedManifest();
+    let manifest = await storedManifest();
+    if (!manifest && await migrateFromOldCache()) manifest = await storedManifest();
     if (!manifest) return false;
     try {
-        const cache = await caches.open(CACHE_NAME);
-        const base = voiceBase();
         for (const f of manifest.files) {
-            if (!(await cache.match(base + f.path))) { evictedNotice = true; return false; }
+            if (!(await hasFile(f))) { evictedNotice = true; return false; }
         }
         evictedNotice = false;
-        // 이 표시가 생기기 전에 받은 기기도 표시를 남겨 둔다
-        if (!(await cache.match(readyMarkerUrl()))) {
-            await cache.put(readyMarkerUrl(), new Response(JSON.stringify(manifest), { headers: { 'Content-Type': 'application/json' } }));
-        }
         return true;
     } catch (e) {
         return false;
@@ -193,15 +264,10 @@ export async function downloadNeuralVoice(onProgress) {
     if (!isNeuralSupported()) throw new Error('이 브라우저에서는 자연스러운 음성을 쓸 수 없습니다.');
     const remote = await fetchManifest();
     const manifest = { ...remote, files: await applicableFiles(remote) };
-    const base0 = voiceBase();
     // 이미 받아 둔 파일은 다시 받지 않으므로, 실제로 받을 양만 센다 (업데이트 때 용량 확인용)
     let total = 0;
     try {
-        const c0 = await caches.open(CACHE_NAME);
-        for (const f of manifest.files) {
-            const ex = await c0.match(base0 + f.path);
-            if (!(ex && f.size && Number(ex.headers.get('X-Size')) === f.size)) total += f.size || 0;
-        }
+        for (const f of manifest.files) if (!(await hasFile(f))) total += f.size || 0;
     } catch (e) { total = neuralDownloadSize(manifest); }
     // 저장 공간이 부족할 때 브라우저가 이 파일들을 먼저 지우지 않도록 요청 (거절돼도 계속 진행)
     try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) {}
@@ -219,16 +285,12 @@ export async function downloadNeuralVoice(onProgress) {
     const controller = new AbortController();
     downloadAbort = controller;
     const base = voiceBase();
-    const cache = await caches.open(CACHE_NAME);
+    await openDb();   // 저장소를 열 수 없으면 받기 전에 알린다
     let done = 0;
     try {
         for (const f of manifest.files) {
-            const url = base + f.path;
             // 이미 받은 파일은 건너뛴다 (중간에 끊겼다가 다시 받을 때, 업데이트 때)
-            const existing = await cache.match(url);
-            if (existing && f.size && Number(existing.headers.get('X-Size')) === f.size) {
-                continue;
-            }
+            if (await hasFile(f)) continue;
             const parts = f.parts && f.parts.length ? f.parts : [f.path];
             const blobs = [];
             for (const part of parts) {
@@ -259,18 +321,16 @@ export async function downloadNeuralVoice(onProgress) {
             }
             const blob = new Blob(blobs);
             if (f.size && blob.size !== f.size) throw new Error('받은 파일 크기가 맞지 않습니다: ' + f.path);
-            await cache.put(url, new Response(blob, { headers: { 'Content-Type': f.type || 'application/octet-stream', 'X-Size': String(blob.size) } }));
+            await dbPut(f.path, { blob, size: blob.size, type: f.type || 'application/octet-stream' });
         }
         // 이 기기에 더는 필요 없는 파일(예: CPU 기기에 남은 원본 모델 257MB)은 지운다
         try {
-            const keep = new Set(manifest.files.map(f => base + f.path));
-            for (const req of await cache.keys()) if (!keep.has(req.url)) await cache.delete(req);
+            const keep = new Set(manifest.files.map(f => f.path));
+            for (const k of await dbKeys()) if (k !== READY_REC && !keep.has(k)) await dbDel(k);
         } catch (e) { /* 정리는 실패해도 괜찮다 */ }
-        await cache.put(readyMarkerUrl(), new Response(JSON.stringify(manifest), { headers: { 'Content-Type': 'application/json' } }));
-        try {
-            localStorage.setItem(READY_KEY + '_manifest', JSON.stringify(manifest));
-            localStorage.setItem(READY_KEY, manifest.version);
-        } catch (e) { /* 저장소의 표시로도 알아본다 */ }
+        await dbPut(READY_REC, manifest);
+        // 예전 저장 위치에 남은 사본은 지운다
+        try { if (typeof caches !== 'undefined') await caches.delete(OLD_CACHE_NAME); } catch (e) {}
         evictedNotice = false;
         // 새 엔진을 쓰도록 열려 있던 작업자를 닫는다 (다음 재생 때 다시 연다)
         shutdownNeural();
@@ -292,13 +352,8 @@ export async function checkNeuralUpdate() {
         const remote = await fetchManifest(5000);
         if (!remote || remote.version === stored.version) return null;
         const files = await applicableFiles(remote);
-        const cache = await caches.open(CACHE_NAME);
-        const base = voiceBase();
         let bytes = 0;
-        for (const f of files) {
-            const ex = await cache.match(base + f.path);
-            if (!(ex && f.size && Number(ex.headers.get('X-Size')) === f.size)) bytes += f.size || 0;
-        }
+        for (const f of files) if (!(await hasFile(f))) bytes += f.size || 0;
         // note: 무엇이 좋아졌는지 한 줄 (예: '더 자연스러운 음성') — 목록(manifest.json)의 updateNote
         return { bytes, version: remote.version, note: typeof remote.updateNote === 'string' ? remote.updateNote : '' };
     } catch (e) {
@@ -312,9 +367,8 @@ export function cancelNeuralDownload() {
 
 export async function deleteNeuralVoice() {
     shutdownNeural();
-    try { await caches.delete(CACHE_NAME); } catch (e) {}
-    localStorage.removeItem(READY_KEY);
-    localStorage.removeItem(READY_KEY + '_manifest');
+    try { await dbClear(); } catch (e) {}
+    try { if (typeof caches !== 'undefined') await caches.delete(OLD_CACHE_NAME); } catch (e) {}
     evictedNotice = false;
 }
 
@@ -395,7 +449,7 @@ function spawnWorker(role, forceWasm) {
         };
         w.addEventListener('message', h);
     });
-    w.postMessage({ type: 'init', base: voiceBase(), cacheName: CACHE_NAME, forceWasm: !!forceWasm, role });
+    w.postMessage({ type: 'init', dbName: DB_NAME, dbStore: DB_STORE, forceWasm: !!forceWasm, role });
     return entry;
 }
 
@@ -427,8 +481,7 @@ async function startPool() {
 async function gpuWillBeUsed() {
     if (!(await hasWebGPU())) return false;
     try {
-        const cache = await caches.open(CACHE_NAME);
-        return !!(await cache.match(voiceBase() + 'onnx/vector_estimator.onnx'));
+        return !!(await dbGet('onnx/vector_estimator.onnx'));
     } catch (e) { return false; }
 }
 

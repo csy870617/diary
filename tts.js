@@ -496,7 +496,12 @@ async function refreshNeuralRow() {
     if (!isNeuralSupported()) { row.classList.add('hidden'); return; }
     row.classList.remove('hidden');
     if (neuralDownloading) return;
-    if (await isNeuralReady()) {
+    // 확인이 오래 걸리면(예전 저장 위치에서 옮겨 오는 중) 그동안 내려받기 버튼 대신 안내를 보여 준다
+    const slow = setTimeout(() => setNeuralRow('받아 둔 음성을 확인하는 중…', '…', null), 400);
+    let ready = false;
+    try { ready = await isNeuralReady(); } finally { clearTimeout(slow); }
+    if (neuralDownloading) return;
+    if (ready) {
         const info = getNeuralInfo();
         const where = info.backend ? `${info.backend === 'webgpu' ? ' · GPU로 계산' : ' · CPU로 계산'} · 품질 ${info.steps}/8` : '';
         setNeuralRow('받아 둠 · 인터넷 없이 사용 가능' + where, '삭제', null);
@@ -518,6 +523,7 @@ async function refreshNeuralRow() {
 }
 
 async function onNeuralButton() {
+    if (document.getElementById('tts-neural-btn')?.textContent === '…') return;   // 확인 중
     if (neuralDownloading) {
         cancelNeuralDownload();
         return;
