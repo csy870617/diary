@@ -71,11 +71,16 @@ async function onConnect() {
     setBusy(true);
     setStatus('키와 요금 등급을 확인하는 중…');
     try {
-        await connectGemini(key);
+        const res = await connectGemini(key);
         const input = $('gemini-key-input');
         if (input) input.value = '';
         render();
-        setStatus('연결했습니다. 글쓰기 도구 막대의 맞춤법 버튼으로 검사할 수 있습니다.', 'ok');
+        if (res.limited) {
+            const wait = res.limited.kind === 'quota' ? '오늘 사용량을 다 써서 내일' : '지금은 1분 사용량 한도에 걸려 있어 1분쯤 뒤에';
+            setStatus(`연결했습니다. 다만 ${wait} 맞춤법을 검사할 수 있습니다.`, 'ok');
+        } else {
+            setStatus('연결했습니다. 글쓰기 도구 막대의 맞춤법 버튼으로 검사할 수 있습니다.', 'ok');
+        }
     } catch (err) {
         setStatus((err && err.message) || String(err), 'err');
     } finally {
