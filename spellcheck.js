@@ -1,16 +1,16 @@
 /**
- * 맞춤법 검사 (Gemini) — 글쓰기 도구 막대의 버튼으로 시작한다.
+ * 맞춤법 검사 (한국어·영어, 기기 안에서) — 글쓰기 도구 막대의 버튼으로 시작한다.
  *
- * 제목·소제목·본문을 줄 단위로 보내고(spell-text.js), 고칠 곳을 본문에 물결 밑줄로 보여 준다.
+ * 제목·소제목·본문을 줄 단위로 검사하고(spell-engine.js), 고칠 곳을 본문에 물결 밑줄로 보여 준다.
+ * 글은 어디로도 보내지 않는다. 사전은 처음 한 번 받아 기기에 저장한다.
  * 밑줄은 CSS Highlight API로 그린다 — 본문 HTML을 건드리지 않으므로 표시가 글에 저장될 일이 없다.
  * 아래 창의 목록에서 하나씩 고치거나 무시하고, '모두 고치기'로 한 번에 고친다.
  * 고칠 때마다 되돌릴 자리를 남겨 되돌리기(Ctrl+Z) 한 번으로 돌아갈 수 있다.
  * 밑줄은 글과 함께 움직이는 Range로 잡고, 고치기 직전에 그 자리의 글자가 그대로인지 확인한다
  * (검사하는 동안이나 결과를 보는 동안 글을 고쳐도 엉뚱한 곳을 고치지 않도록).
  */
-import { checkSpelling, diffSpans } from './spell-text.js';
-import { isGeminiConnected, getGeminiInfo, textUsageWon, formatWon, removeOldVoiceData } from './gemini.js';
-import { openGeminiModal } from './gemini-connect.js';
+import { diffSpans } from './spell-text.js';
+import { checkDocument, addPersonalWord } from './spell-engine.js';
 import { markEditPoint, afterProgrammaticEdit } from './editor.js';
 import { showToast } from './tts.js';
 import { state, isReadOnlyView } from './state.js';
@@ -20,10 +20,9 @@ const canHighlight = typeof CSS !== 'undefined' && CSS.highlights && typeof High
 const ERR = 'spell-error', FOCUS = 'spell-focus';
 const HAS_LETTER = /\p{L}/u;
 
-let items = [];      // { id, where: 'body'|'title'|'subtitle', range | (el, a), from, to, type, why, row }
+let items = [];      // { id, where: 'body'|'title'|'subtitle', range | (el, a), from, to, type, why, word, src, row }
 let running = false;
 let runSeq = 0;      // 검사 중에 창을 닫거나 다른 글을 열면 늦게 온 결과를 버린다
-let costText = '';
 
 // ─── 본문 글자 펼치기 ───
 // 음성 읽기(tts.js)와 같은 방식이지만 표의 칸(TD·TH)도 줄로 나눈다 — 칸끼리 붙어 '띄어쓰기 틀림'으로 보이지 않게.
@@ -102,10 +101,6 @@ function relocate(text, line) {
 async function startSpellcheck() {
     if (running) return;
     if (isReadOnlyView()) { showToast('편집 화면에서 쓸 수 있습니다.'); return; }
-    if (!isGeminiConnected()) {
-        openGeminiModal({ hint: '맞춤법 검사는 Gemini로 합니다. 먼저 Gemini 키를 연결해 주세요.' });
-        return;
-    }
     const body = $('editor-body');
     const lines = [], plan = [];
     for (const [el, where] of [[$('edit-title'), 'title'], [$('edit-subtitle'), 'subtitle']]) {
@@ -125,14 +120,20 @@ async function startSpellcheck() {
     setBusy(true);
     setSummary('검사하는 중…');
     try {
-        const res = await checkSpelling(lines, {
-            onProgress: (done, total) => { if (seq === runSeq && total > 1) setSummary(`검사하는 중… (${done}/${total})`); }
+        const fixes = await checkDocument(lines, {
+            onProgress: (p) => {
+                if (seq !== runSeq) return;
+                const name = p.lang === 'en' ? '영어' : '한국어';
+                if (p.stage === 'download') setSummary(`${name} 사전을 받는 중… ${p.total ? Math.min(100, Math.round(p.got / p.total * 100)) : 0}% (처음 한 번)`);
+                else if (p.stage === 'open') setSummary(`${name} 사전을 여는 중…`);
+                else if (p.stage === 'check' && p.total > 8) setSummary(`검사하는 중… (${p.got}/${p.total})`);
+            }
         });
         if (seq !== runSeq) return;
         // 검사하는 동안 글을 고쳤을 수 있다 — 지금 글에서 자리를 다시 잡는다
         const index = indexText(body);
         const starts = new Map();
-        for (const f of res.fixes) {
+        for (const f of fixes) {
             const p = plan[f.id];
             if (p.where !== 'body') { items.push({ ...f, where: p.where, el: p.el }); continue; }
             if (!starts.has(f.id)) starts.set(f.id, relocate(index.text, p));
@@ -141,14 +142,11 @@ async function startSpellcheck() {
             const range = rangeAt(index, base + f.a, base + f.b);
             if (range && range.toString() === f.from) items.push({ ...f, where: 'body', range });
         }
-        // 무료 등급은 요금이 없다
-        const won = textUsageWon(res.usage);
-        costText = getGeminiInfo().tier === 'free' ? '무료 등급' : won >= 1 ? `검사 비용 ${formatWon(won)}` : '';
         render();
     } catch (err) {
         if (seq !== runSeq) return;
         setSummary('');
-        showMessage(err && err.kind ? err.message : '맞춤법을 검사하지 못했습니다.\n' + ((err && err.message) || err));
+        showMessage('맞춤법을 검사하지 못했습니다.\n' + ((err && err.message) || err));
     } finally {
         if (seq === runSeq) { running = false; setBusy(false); }
     }
@@ -162,7 +160,7 @@ function render() {
     list.innerHTML = '';
     if (!items.length) {
         showMessage('고칠 곳을 찾지 못했습니다 ✓');
-        setSummary(costText);
+        setSummary('');
     } else {
         items.forEach(it => list.appendChild(itemRow(it)));
         updateSummary();
@@ -172,7 +170,7 @@ function render() {
 
 function updateSummary() {
     $('spell-fix-all')?.classList.toggle('hidden', items.length < 2);
-    setSummary([items.length ? `${items.length}곳` : '', costText].filter(Boolean).join(' · '));
+    setSummary(items.length ? `${items.length}곳` : '');
 }
 
 function showMessage(text) {
@@ -217,6 +215,8 @@ function itemRow(it) {
     const actions = document.createElement('div');
     actions.className = 'spell-actions';
     actions.append(button('고치기', 'spell-btn', () => fixOne(it)), button('무시', 'spell-btn ghost', () => removeItem(it)));
+    // 사전에 없어서 잡힌 말(사람 이름 등)은 사전에 넣어 다음부터 잡지 않게 할 수 있다
+    if (it.src === 'dict' && it.word && it.type === '맞춤법') actions.append(button('사전에 추가', 'spell-btn ghost', () => addToDictionary(it)));
     row.append(change, why, actions);
     it.row = row;
     return row;
@@ -234,6 +234,16 @@ function removeItem(it) {
     items = items.filter(o => o !== it);
     it.row?.remove();
     paint();
+    if (items.length) updateSummary();
+    else { showMessage('모두 살펴봤습니다 ✓'); updateSummary(); }
+}
+
+function addToDictionary(it) {
+    addPersonalWord(it.word);
+    const same = items.filter(o => o.src === 'dict' && o.word === it.word);
+    same.forEach(o => { items = items.filter(x => x !== o); o.row?.remove(); });
+    paint();
+    showToast(`'${it.word}'을(를) 사전에 넣었습니다.`);
     if (items.length) updateSummary();
     else { showMessage('모두 살펴봤습니다 ✓'); updateSummary(); }
 }
@@ -411,7 +421,6 @@ function openPanel() {
 
 function clearResults() {
     items = [];
-    costText = '';
     const list = $('spell-list');
     if (list) list.innerHTML = '';
     $('spell-fix-all')?.classList.add('hidden');
@@ -463,17 +472,22 @@ export function initSpellcheck() {
     $('toolbar-spell-btn')?.addEventListener('click', startSpellcheck);
     $('spell-close')?.addEventListener('click', closePanel);
     $('spell-fix-all')?.addEventListener('click', fixAll);
-    $('spell-gemini')?.addEventListener('click', () => openGeminiModal());
     $('editor-body')?.addEventListener('click', onBodyClick);
     window.addEventListener('bottom-panel-open', (e) => {
         if (e.detail !== 'spell' && !$('spell-panel')?.classList.contains('hidden')) closePanel();
     });
-    // 사용량 한도로 기다리는 동안 (무료 등급은 1분 한도가 작다)
-    window.addEventListener('gemini-wait', (e) => {
-        if (!running) return;
-        const sec = Math.ceil(((e.detail && e.detail.ms) || 0) / 1000);
-        setSummary(`${e.detail && e.detail.free ? '무료 등급 사용량 한도로' : '요청이 몰려'} ${sec}초 기다리는 중…`);
-    });
-    // 예전 Gemini 음성 기능이 이 기기에 남긴 음성·설정을 지운다 (음성 기능은 뺐다)
-    setTimeout(() => { removeOldVoiceData(); }, 3000);
+    setTimeout(removeOldGeminiData, 3000);
+}
+
+/**
+ * 예전 Gemini 연결(맞춤법 검사·음성)이 이 기기에 남긴 것을 지운다 — Gemini 연결은 뺐다.
+ * 특히 키는 요금이 청구될 수 있는 열쇠라 남겨 두지 않는다. (없으면 아무 일도 하지 않는다)
+ */
+function removeOldGeminiData() {
+    try {
+        ['faith_gemini_key', 'faith_gemini_meta', 'faith_gemini_style', 'faith_gemini_cps'].forEach(k => localStorage.removeItem(k));
+        const v = localStorage.getItem('faith_tts_voice');
+        if (v && v.startsWith('gm:')) localStorage.removeItem('faith_tts_voice');
+    } catch (e) { /* 저장소 접근 불가 */ }
+    try { if (typeof indexedDB !== 'undefined') indexedDB.deleteDatabase('diary-gemini-voice'); } catch (e) { /* 지우지 못해도 쓰지 않는다 */ }
 }
