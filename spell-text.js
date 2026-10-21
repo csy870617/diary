@@ -506,6 +506,7 @@ function depNounSpacing(core, next) {
         } else if (/^줄(알|몰)/.test(rest)) to = head + ' 줄 ' + rest.slice(1);
         else if (/^줄(은|을|도|이야)/.test(rest) || (rest === '줄' && /^(알|몰)/.test(next || ''))) to = head + ' ' + rest;
         else if (/^(텐데|테니|테야|테지)/.test(rest) || (k === 1 && /^(뿐|만큼)/.test(rest))) to = head + ' ' + rest;
+        else if (/^건(데|가|지|요|$)/.test(rest)) to = head + ' ' + rest;   // 할건 → 할 건 ('것은'이 줄어든 말)
         else if (/^리(없|만무)/.test(rest)) to = head + ' 리 ' + rest.slice(1);
         else if (/^리가/.test(rest)) to = head + ' ' + rest;
         else if (/^듯(이|한|하|싶|말|도|$)/.test(rest)) to = head + ' ' + rest;
@@ -514,6 +515,7 @@ function depNounSpacing(core, next) {
         if (to) {
             const sp = rest[0] === '꺼'
                 ? "'것'을 뜻하는 '거'는 예사소리로 적고 앞말과 띄어 씁니다"
+                : rest[0] === '건' ? "'건'은 '것은'이 줄어든 말이라 앞말과 띄어 씁니다"
                 : `${topic(rest.replace(/^(수|것|거|줄|뿐|만큼|텐데|테니|테야|테지|리|듯|때|뻔).*/, '$1'))} 의존 명사라 앞말과 띄어 씁니다`;
             return { to, why: sp };
         }
@@ -865,6 +867,42 @@ export function pairRules(words) {
     return out;
 }
 
+// 한 낱말을 잘못 띄어 쓴 것 (먹 었다 → 먹었다, 공부 했다 → 공부했다)
+// 어미·조사로 시작해 홀로는 사전에 없는 조각이거나, '-하다·-되다·-시키다'가 붙는 명사 뒤를 띄운 것
+const DO_VERB = /^(하|해|했|합|한|할|함|되|돼|됐|된|될|됩|됨|시키|시켜|시켰|시킨|시킬|시킵)/;
+
+/**
+ * 붙여 써야 할 두 낱말 후보 — [{ i, j, to, why, valid, invalid }]
+ * 사전에서 valid는 모두 있고 invalid는 모두 없을 때만 고친다 (checkLines가 확인한다).
+ */
+export function joinCandidates(words) {
+    const out = [];
+    for (let j = 1; j < words.length; j++) {
+        const p = words[j - 1], w = words[j];
+        if (p.lang !== 'ko' || w.lang !== 'ko' || p.b !== p.cb || w.a !== w.ca) continue;
+        const a = p.core, b = w.core, ab = a + b;
+        if (ARCHAIC.test(b)) continue;
+        const next = words[j + 1] && words[j + 1].a >= w.b ? words[j + 1].core : '';
+        // '-하다·-되다·-시키다'가 붙는 명사 + 그 꼴 (기도 했다 → 기도했다). 부사·때·수를 나타내는 말은 빼고 두 글자 이상 명사만
+        const verb = DO_VERB.exec(b);
+        // '한'은 수를 나타내는 말일 수 있어(말씀 한 구절·공부 한 시간) 뒤에 '것·후·적' 같은 말이 올 때만 본다
+        if (verb && a.length >= 2 && !ADVERBS.has(a) && !TIME_DET.has(a) && !NUM_DET.has(a) && (b !== '한' || ADN_DEP.test(next) || next === '지')) {
+            const lemma = a + (/^(되|돼|됐|된|될|됩|됨)/.test(b) ? '되다' : /^시/.test(b) ? '시키다' : '하다');
+            // '두 배가 된다'·'부자가 된다'의 '-가·-이'는 조사다 — 앞이 명사이면 붙이지 않는다
+            const head = a.slice(0, -1);
+            const invalid = /[가이]$/.test(a) ? [head + (hasJong(head[head.length - 1]) ? '을' : '를')] : [];
+            out.push({ i: j - 1, j, to: ab, why: `'${lemma}'는 한 낱말이라 붙여 씁니다`, valid: [ab, a + '의', a + (hasJong(a[a.length - 1]) ? '을' : '를')], invalid });
+            continue;
+        }
+        // 홀로는 낱말이 아닌 조각 (먹 었다, 읽 었다, 감사합 니다)
+        if (ab.length >= 3) {
+            out.push({ i: j - 1, j, to: ab, why: '한 낱말이라 붙여 씁니다', valid: [ab], invalid: [b] });
+            out.push({ i: j - 1, j, to: ab, why: '한 낱말이라 붙여 씁니다', valid: [ab], invalid: [a] });
+        }
+    }
+    return out;
+}
+
 // 성경 구절·기도문의 옛말 꼴(하소서·없으리로다·하시니라 …) — 사전에 없어도 고치라고 하지 않는다
 const ARCHAIC = new RegExp('(' + ['소서', '나이다', '로다', '도다', '노라', '리라', '니라', '지어다', '찌어다', '더라', '시니', '옵고',
     '옵시며', '옵시고', '사옵', '시옵', '지라', '리니', '이니', '시라', '하사', '시사', '으사', '리이까', '니이까', '나이까', '오리까',
@@ -968,6 +1006,8 @@ export async function checkLines(lines, dict, { skip = () => false } = {}) {
     const ask = { ko: new Set(), en: new Set() };
     const later = [];   // 규칙으로 고치지 않은 낱말 — 사전에 물은 뒤 처리한다
     const checked = [];   // 사전으로 확인한 뒤에 고칠 두 낱말 규칙
+    const joins = [];     // 붙여 써야 할지 사전으로 확인할 두 낱말 (확인되면 두 낱말 따로 고치는 것은 버린다)
+    const refine = [];    // 규칙으로 띄운 뒤에도 붙어 있는 조각 — 사전으로 더 나눠 본다 (잘정착하실수 → 잘 정착하실 수)
     for (const line of lines) {
         const text = line.text;
         const words = wordsOf(text);
@@ -988,6 +1028,12 @@ export async function checkLines(lines, dict, { skip = () => false } = {}) {
             } else fixes.push(fix);
             used.add(r.i); used.add(r.j);
         }
+        for (const c of joinCandidates(words)) {
+            if (used.has(c.i) || used.has(c.j) || skip(words[c.i].core) || skip(words[c.j].core)) continue;
+            const a = words[c.i].ca, b = words[c.j].cb;
+            [...c.valid, ...c.invalid].forEach(x => ask.ko.add(x));
+            joins.push({ fix: { id: line.id, a, b, from: text.slice(a, b), to: c.to, type: '띄어쓰기', why: c.why, src: 'rule' }, valid: c.valid, invalid: c.invalid });
+        }
         words.forEach((w, i) => {
             if (used.has(i) || !w.lang || skip(w.core)) return;
             if (/:\/\/|www\.|@/.test(text.slice(w.a, w.b))) return;   // 주소·전자우편
@@ -997,6 +1043,14 @@ export async function checkLines(lines, dict, { skip = () => false } = {}) {
             if (w.lang === 'ko') {
                 const near = (k) => (words[k] && sentenceOf[k] === sentenceOf[i] ? words[k].core : '');
                 const r = fixKoreanWord(w.core, near(i - 1), near(i + 1));
+                if (r && r.to.replace(/ /g, '') === w.core) {
+                    const pieces = r.to.split(' ').filter(x => x.length >= 4);
+                    if (pieces.length) {
+                        pieces.forEach(x => ask.ko.add(x));
+                        refine.push({ line, w, to: r.to, why: r.whys.join(' · '), kind: r.kind });
+                        return;
+                    }
+                }
                 if (r) { rule(r.to, r.whys.join(' · '), r.kind); return; }
                 const others = words.filter((o, k) => k !== i && sentenceOf[k] === sentenceOf[i]).map(o => o.core);
                 // 이 말이 속한 마디(앞의 '-고·-서·-며' 뒤)에 '-을/-를'이 있는가 ('소식을 듣고 놀랬다'의 '소식을'은 '듣고'의 것)
@@ -1028,11 +1082,28 @@ export async function checkLines(lines, dict, { skip = () => false } = {}) {
             }
         });
     }
-    if (later.length || checked.length) {
+    if (later.length || checked.length || joins.length || refine.length) {
         const res = await dict.lookup({ ko: [...ask.ko], en: [...ask.en] });
         const known = (x) => res.ko && res.ko[x] === null;
         for (const c of checked) if (c.valid.every(known) && !c.invalid.some(known)) fixes.push(c.fix);
+        const joined = [];   // 붙여 쓰라고 한 자리 — 그 안의 낱말은 따로 고치지 않는다
+        for (const c of joins) {
+            const { fix } = c;
+            if (joined.some(x => x.id === fix.id && x.a < fix.b && fix.a < x.b)) continue;
+            if (c.valid.every(known) && !c.invalid.some(known)) { fixes.push(fix); joined.push(fix); }
+        }
+        for (const { line, w, to, why, kind } of refine) {
+            let more = false;
+            const parts = to.split(' ').map(x => {
+                const d = x.length >= 4 && res.ko && res.ko[x];
+                if (d && d.to && d.to.replace(/ /g, '') === x) { more = true; return d.to; }
+                return x;
+            });
+            const all = parts.join(' ');
+            fixes.push({ id: line.id, a: w.ca, b: w.cb, from: w.core, to: all, type: kindOf(w.core, all, kind), why: more ? why + ' · 낱말과 낱말 사이는 띄어 씁니다' : why, src: 'rule' });
+        }
         for (const { line, w, lang, q, alt } of later) {
+            if (joined.some(x => x.id === line.id && x.a <= w.ca && w.cb <= x.b)) continue;
             const d = lang === 'ko' ? res.ko && res.ko[w.core] : res.en && res.en[q];
             if (d === null || d === undefined) continue;   // 사전에 있는 말
             if (alt) {
@@ -1395,13 +1466,73 @@ function doubledFix(dict, q) {
     return found.size === 1 ? { to: [...found][0], why: '같은 글자를 두 번 썼습니다' } : null;
 }
 
+// 낱말의 첫머리에 올 수 없는 어미 ('먹 었다'의 '었다') — 비슷한 말로 고치면 엉뚱해진다 (었다 → 얻다)
+const FRAGMENT = /^(었|았|였|겠|습니|읍니|으셨|으시|으니|으면|어서|아서|어요|아요|어야|아야)/;
+
+// 통째로 붙여 쓴 말 나누기 (오늘은기분이좋다 → 오늘은 기분이 좋다)
+// 앞 조각은 모두 '두 글자 이상 명사 + 조사'여야 하고, 마지막 조각은 사전에 있는 두 글자 이상 말이어야 한다.
+// '의'는 넣지 않는다 — '사랑의교회'처럼 이름으로 붙여 쓰는 일이 많다.
+const SEG_PARTICLE = /^(.{2,}?)(은|는|이|가|을|를|에|에서|에게|께서|께|와|과|도|만|으로|로|까지|부터|처럼|보다|하고|랑|이랑|에는|에도|에서는)$/;
+// 조사 없이도 앞 조각이 될 수 있는 말 (때를 나타내는 말·한 글자 대명사 + 조사)
+const SEG_HEADS = new Set(('오늘 내일 어제 모레 지금 요즘 아까 이제 방금 아침 저녁 점심 매일 오늘도 오늘은 어제는 내일은 지금은 '
+    + '나는 너는 저는 난 내가 네가 제가 나도 너도 저도 나를 너를 저를 나와 너와 나에게 저에게 너에게').split(' '));
+const SEG_PARTICLE_START = /^(따라|대로|만큼|뿐|마다|서의|서는|서도|서만|서부터|으로|로는|로도|로만|로라도|라도|이라도|나마|의$|에게|께서|처럼|마저|조차|밖에)/;
+const SEG_ADVERBS = new Set(['제법', '그냥', '정말', '아마', '오히려', '자꾸', '마침', '얼른', '부디', '잘', '더', '꼭', '좀', '또', '덜',
+    '내', '네', '제', '새', '큰', '첫', '옛', '온', '각']);
+const SEG_VERB_END = /(고|서|며|면|니|니까|는데|은데|던데|지만|도록|려고|러|면서|다가|어도|아도|해도|더니|았더니|었더니|다며|다고|라고|자고|는|던|은|운|된|한|른|쁜|픈|진|인)$/;
+function segmentFix(dict, q) {
+    if (q.length < 4 || q.length > 60) return null;   // 아주 긴 덩어리는 나누어 보지 않는다 (느려진다)
+    const n = q.length;
+    const headOk = (piece) => {
+        if (SEG_HEADS.has(piece) || ADVERBS.has(piece) || SEG_ADVERBS.has(piece)) return true;
+        if (!dict.spell(piece)) return false;
+        const m = SEG_PARTICLE.exec(piece);
+        // 명사 + 조사 (두 글자 이상 명사, 또는 흔한 한 글자 명사: 꽃이·비가·땀을)
+        if (m && m[1].length >= 2 && isNoun(dict, m[1]) && fitParticle(m[1], m[2]) === m[2]) return true;
+        // 한 글자 명사는 '이·가·을·를·은·는·도'만 (비로그인·뒤로가기·새로고침의 '비로·뒤로·새로'는 가르지 않는다)
+        const one = /^(.)(은|는|이|가|을|를|도)$/.exec(piece);
+        if (one && ONE_NOUNS.has(one[1]) && fitParticle(one[1], one[2]) === one[2]) return true;
+        // 이어 주거나 꾸며 주는 꼴로 끝나는 풀이말 (와서·흘렸지만·취업했다는) — 명사로도 읽히는 말은 뺀다
+        return piece.length >= 2 && SEG_VERB_END.test(piece) && !isNoun(dict, piece);
+    };
+    // best[k]: q.slice(k)를 나누는 가장 적은 조각 수와 그런 나눔의 수
+    const best = new Array(n + 1).fill(null);
+    best[n] = { count: 0, ways: 1, cut: -1 };
+    for (let k = n - 2; k >= 0; k--) {
+        let top = null;
+        const consider = (count, ways, cut) => {
+            if (!top || count < top.count) top = { count, ways, cut };
+            else if (count === top.count) top = { count, ways: top.ways + ways, cut: top.cut };
+        };
+        const tail = q.slice(k);
+        if (k > 0 && tail.length <= 15 && knownKorean(dict, tail)) consider(1, 1, n);   // 마지막 조각
+        for (let e = k + 1; e <= Math.min(n - 2, k + 12); e++) {   // 앞 조각은 열두 글자까지
+            const rest = best[e];
+            if (rest && rest.count >= 1 && headOk(q.slice(k, e))) consider(rest.count + 1, rest.ways, e);
+        }
+        best[k] = top;
+    }
+    const all = best[0];
+    if (!all || all.count < 2 || all.ways !== 1) return null;   // 나눌 수 없거나 어떻게 나눌지 하나로 정해지지 않는다
+    const pieces = [];
+    for (let k = 0; k < n; k = best[k].cut) pieces.push(q.slice(k, best[k].cut));
+    // 조사가 겹친 것(사본으로라도·합계만으로는·문서에서의)을 조사 앞에서 가르면 안 된다
+    if (pieces.slice(1).some(x => PARTICLE_TAIL.test(x) || SEG_PARTICLE_START.test(x))) return null;
+    // 조사 없는 앞 조각(서로·오늘) 뒤에 조사로 시작하는 조각이 오면 '서로의기도'처럼 잘못 가른 것이다
+    if (pieces.some((x, k) => k > 0 && (SEG_HEADS.has(pieces[k - 1]) || ADVERBS.has(pieces[k - 1])) && PARTICLE_SYL.has(x[0]))) return null;
+    // 같은 말을 겹쳐 쓴 말(얼른얼른·하나하나)은 한 낱말이다
+    if (pieces.some((x, k) => k > 0 && (x === pieces[k - 1] || x.startsWith(pieces[k - 1])))) return null;
+    return { to: pieces.join(' '), why: '낱말과 낱말 사이는 띄어 씁니다' };
+}
+
 /** 한국어 낱말들 → { 낱말: null(맞음) | false(고칠 말을 모름) | { to, why } } */
 export function lookupKorean(dict, words, onEach) {
     const out = {};
     for (const w of words) {
         const q = w.normalize('NFC');
         if (!/^[가-힣]+$/.test(q) || knownKorean(dict, q)) out[w] = null;
-        else out[w] = particleFix(dict, q) || splitFix(dict, q) || spellingFix(dict, q) || doubledFix(dict, q) || false;
+        else if (FRAGMENT.test(q)) out[w] = false;   // 어미로 시작하는 조각 — 앞말과 붙일지는 checkLines가 본다
+        else out[w] = particleFix(dict, q) || splitFix(dict, q) || spellingFix(dict, q) || doubledFix(dict, q) || segmentFix(dict, q) || false;
         if (onEach) onEach();
     }
     return out;
