@@ -761,6 +761,12 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
 ::highlight(spell-error) { background-color: rgba(239, 68, 68, 0.10); text-decoration: underline wavy #EF4444; text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
 ::highlight(spell-focus) { background-color: rgba(245, 158, 11, 0.42); }
 [data-theme="dark"] ::highlight(spell-error) { background-color: rgba(248, 113, 113, 0.16); text-decoration-color: #f87171; }
+::highlight(spell-space) { background-color: rgba(22, 163, 74, 0.10); text-decoration: underline wavy #16A34A; text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+::highlight(spell-std) { background-color: rgba(139, 92, 246, 0.10); text-decoration: underline wavy #8B5CF6; text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+::highlight(spell-ctx) { background-color: rgba(59, 130, 246, 0.10); text-decoration: underline wavy #3B82F6; text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+[data-theme="dark"] ::highlight(spell-space) { background-color: rgba(74, 222, 128, 0.14); text-decoration-color: #4ade80; }
+[data-theme="dark"] ::highlight(spell-std) { background-color: rgba(167, 139, 250, 0.16); text-decoration-color: #a78bfa; }
+[data-theme="dark"] ::highlight(spell-ctx) { background-color: rgba(96, 165, 250, 0.16); text-decoration-color: #60a5fa; }
 [data-theme="dark"] ::highlight(spell-focus) { background-color: rgba(251, 191, 36, 0.38); }
 .spell-panel { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 520px; z-index: 1210; background: var(--surface-color); border-top: 1px solid var(--gray-200); border-radius: 16px 16px 0 0; box-shadow: 0 -4px 20px var(--shadow-light); font-family: var(--text-sans); padding-bottom: var(--safe-bottom); animation: ttsSlideUp 0.2s ease; }
 .spell-panel.hidden { display: none; }
@@ -770,6 +776,8 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
 .spell-summary { flex: 1; min-width: 0; font-size: 12px; color: var(--gray-500); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .spell-x { background: none; border: none; color: var(--gray-400); font-size: 18px; cursor: pointer; padding: 4px; border-radius: 6px; display: flex; flex-shrink: 0; }
 .spell-x:hover { color: var(--gray-900); background: var(--gray-100); }
+.spell-kinds { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px; border-bottom: 1px solid var(--gray-100); }
+.spell-kinds.hidden { display: none; }
 .spell-list { max-height: min(42vh, 360px); overflow-y: auto; }
 .spell-item { display: flex; flex-direction: column; gap: 4px; padding: 10px 16px; border-bottom: 1px solid var(--gray-100); cursor: pointer; }
 @media (hover: hover) { .spell-item:hover:not(.active) { background: var(--gray-100); } }
@@ -780,6 +788,15 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
 .spell-from { color: var(--danger); text-decoration: line-through; white-space: pre-wrap; }
 .spell-to { color: var(--accent); font-weight: 600; white-space: pre-wrap; }
 .spell-why { font-size: 12px; color: var(--gray-500); line-height: 1.5; }
+.spell-kind { display: inline-block; font-size: 11px; font-weight: 700; padding: 0 6px; border-radius: 4px; line-height: 18px; margin-right: 2px; }
+.spell-kind.kind-spell { color: #DC2626; background: rgba(239, 68, 68, 0.12); }
+.spell-kind.kind-space { color: #15803D; background: rgba(22, 163, 74, 0.12); }
+.spell-kind.kind-std { color: #7C3AED; background: rgba(139, 92, 246, 0.12); }
+.spell-kind.kind-ctx { color: #2563EB; background: rgba(59, 130, 246, 0.12); }
+[data-theme="dark"] .spell-kind.kind-spell { color: #f87171; }
+[data-theme="dark"] .spell-kind.kind-space { color: #4ade80; }
+[data-theme="dark"] .spell-kind.kind-std { color: #a78bfa; }
+[data-theme="dark"] .spell-kind.kind-ctx { color: #60a5fa; }
 .spell-ctx { font-size: 12.5px; color: var(--gray-900); opacity: 0.75; line-height: 1.5; white-space: pre-wrap; word-break: break-all; font-family: var(--text-serif); }
 .spell-ctx mark { background: rgba(245, 158, 11, 0.32); color: inherit; border-radius: 3px; padding: 0 1px; }
 /* 목록에서 고른 곳을 글에서 잠깐 빛나는 테두리로 보여 준다 (spellcheck.js) — 맞춤법 창(1210)보다 아래 */

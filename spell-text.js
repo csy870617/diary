@@ -1,13 +1,15 @@
 /**
  * 맞춤법 검사 — 기기 안에서 한다 (글을 밖으로 보내지 않는다).
+ * 네이버 맞춤법 검사기처럼 고친 곳을 맞춤법·띄어쓰기·표준어·문맥(통계적 교정)으로 나누어 알려 준다.
  *
- * 두 가지로 찾는다.
- *  1. 규칙: 자주 틀리는 말(되요→돼요, 몇일→며칠, 할께→할게 …)과 의존 명사 띄어쓰기(할수있다→할 수 있다 …).
- *     사전은 이런 말을 맞다고 하거나 엉뚱한 말을 권하기도 해서, 확실한 것은 규칙으로 먼저 고친다.
- *  2. 사전: Hunspell 한국어·영어 사전(spell-worker.js)에 없는 낱말에 사전이 권하는 말.
- *     사전이 권하는 말은 엉뚱한 것이 섞여 있어(예: 할수있다 → 밀수입하다), 소리가 같거나 헷갈리기 쉬운
- *     낱자 한두 개만 다른 말과 의존 명사 앞 띄어쓰기만 받는다. 사람 이름처럼 사전에 없을 뿐인 말과
- *     성경 구절의 옛말 꼴(하시니라·있나니·영혼아)은 대개 걸러진다.
+ * 네 가지로 찾는다.
+ *  1. 규칙: 자주 틀리는 말(되요→돼요, 몇일→며칠, 할께→할게 …), 표준어·외래어 표기(핑게→핑계, 메세지→메시지 …),
+ *     늘 띄어 쓰는 말(할수있다→할 수 있다, 먹고싶다→먹고 싶다 …). 사전이 맞다고 하는 말도 고친다.
+ *  2. 문맥: 둘 다 있는 말이지만 앞뒤를 보면 거의 확실한 것 (마트에 들렸다→들렀다, 나랑 틀려→달라 …)
+ *  3. 두 낱말: 붙여 쓸 조사(나 처럼→나처럼), 몇 일→며칠, 먹지 안았다→않았다 …
+ *  4. 사전: Hunspell 한국어·영어 사전(spell-worker.js)에 없는 낱말은, 자주 틀리는 꼴(띄어쓰기·조사·
+ *     헷갈리는 낱자·소리 나는 대로 적은 것)로 고쳐 본 말이 사전에 있고 하나로 정해질 때만 고친다.
+ *     사람 이름·새 낱말·외래어와 성경 구절의 옛말 꼴(하시니라·있나니·영혼아)은 그대로 둔다.
  *
  * 이 파일은 화면(DOM)과 상관없는 함수만 둔다 (Node에서 그대로 시험할 수 있게).
  */
@@ -235,15 +237,37 @@ export function wordsOf(text) {
     const re = /\S+/g;
     let m;
     while ((m = re.exec(text))) {
-        const w = m[0];
-        let s = 0, e = w.length;
-        while (s < e && !LETTER.test(w[s])) s++;
-        while (e > s && !LETTER.test(w[e - 1])) e--;
-        const core = w.slice(s, e);
-        let lang = '';
-        if (/^[가-힣]+$/.test(core)) lang = 'ko';
-        else if (/^[A-Za-z]+(?:['’][A-Za-z]+)*$/.test(core)) lang = 'en';
-        out.push({ a: m.index, b: m.index + w.length, ca: m.index + s, cb: m.index + e, core, lang });
+        // '감사합니다.오늘은'처럼 문장 부호 뒤에 띄지 않고 이어 쓴 한글은 다른 낱말로 본다
+        const tok = m[0];
+        let start = 0;
+        for (let k = 1; k <= tok.length; k++) {
+            if (k < tok.length && !(/[,.!?;…]/.test(tok[k - 1]) && /[가-힣]/.test(tok[k]))) continue;
+            pushWord(out, tok.slice(start, k), m.index + start);
+            start = k;
+        }
+    }
+    return out;
+}
+
+function pushWord(out, w, at) {
+    let s = 0, e = w.length;
+    while (s < e && !LETTER.test(w[s])) s++;
+    while (e > s && !LETTER.test(w[e - 1])) e--;
+    const core = w.slice(s, e);
+    let lang = '';
+    if (/^[가-힣]+$/.test(core)) lang = 'ko';
+    else if (/^[A-Za-z]+(?:['’][A-Za-z]+)*$/.test(core)) lang = 'en';
+    out.push({ a: at, b: at + w.length, ca: at + s, cb: at + e, core, lang });
+}
+
+/** 문장 부호 띄어쓰기 → [{ a, b, from, to, why }] ('감사합니다.오늘은' → '. ', '좋다 .' → '.') */
+export function punctuationFixes(text) {
+    const out = [];
+    for (const m of text.matchAll(/[가-힣]([,.!?])(?=[가-힣])/g)) {
+        out.push({ a: m.index + 1, b: m.index + 2, from: m[1], to: m[1] + ' ', why: '문장 부호 뒤는 띄어 씁니다' });
+    }
+    for (const m of text.matchAll(/[가-힣]( +)([,.!?])(?=$|\s+[가-힣A-Za-z0-9"'(“‘])/g)) {
+        out.push({ a: m.index + 1, b: m.index + 1 + m[1].length + 1, from: m[1] + m[2], to: m[2], why: '문장 부호는 앞말에 붙여 씁니다' });
     }
     return out;
 }
@@ -352,6 +376,13 @@ const SPELL_RULES = [
     [/십시요$/, '십시오', "'-십시오'가 맞는 말입니다"],
     [/^(어디|뭐|무엇|무엇이|누구|언제)던지$/, '$1든지', "'무엇이든 가리지 않음'을 나타낼 때는 '-든지'를 씁니다"],
     [/^않(?=하|해|했|할|한|합|함|되|돼|됐|될|된|됨|됩)/, '안 ', "'아니'가 줄어든 말은 '안'이고 뒤 말과 띄어 씁니다"],
+    [/([거꺼뭐]|누구)에요$/, '$1예요', "받침 없는 말 뒤에는 '-예요'를 씁니다 (거예요·뭐예요)"],
+    // '-구요' → '-고요' (했구요·좋구요). 앞 글자가 'ㅆ' 받침이거나 형용사 어간일 때만 ('친구요'·'가구요'는 그대로)
+    [/([가-힣])구요$/, (m, a) => (jongOf(a) === 20 || '없좋싫렇많같맞겠'.includes(a) ? a + '고요' : m), "'-고요'가 맞는 말입니다"],
+    [/^(내|제|니|네|너|우리|저희|엄마|아빠|언니|오빠|누나|형|동생)꺼(야|예요|에요|다|지|라고|인데|니|임|였어|잖아|를|는|도|만|랑|보다)?$/,
+        (m, a, b) => `${a} 거${b === '에요' ? '예요' : (b || '')}`, "'것'을 뜻하는 '거'는 예사소리로 적고 앞말과 띄어 씁니다"],
+    [/^애기(?=$|가|는|를|야|랑|와|도|의|한테|에게|들|가방|띠|침대|옷|용품|때)/, '아기', "'아기'가 표준어입니다", '표준어'],
+    [/^예기(?=를|가|는|도|만|좀|예요|야|였|로|나|$)/, '얘기', "'이야기'가 줄어든 말은 '얘기'입니다"],
     [/(할|볼|될|탈|잘|칠|뛸|쉴|을|올(?=려[고면]))려(?=고|면|는|던)/, (m, a) => ({ 할: '하', 볼: '보', 올: '오', 될: '되', 탈: '타', 잘: '자', 칠: '치', 뛸: '뛰', 쉴: '쉬', 을: '으' })[a] + '려',
         "'-려고'는 앞에 'ㄹ'을 더 적지 않습니다 (하려고·먹으려고)"],
 ];
@@ -371,6 +402,77 @@ function adverbFix(core) {
     const to = m && ADVERB_FIXES[m[1]];
     if (!to) return null;
     return { to: to + (m[2] || ''), why: `'${to}'가 맞는 말입니다 (부사의 '-이·-히')` };
+}
+
+// ─── 표준어·외래어 표기 ───
+// 네이버 맞춤법 검사기·국립국어원이 자주 틀린다고 꼽는 말. '틀린꼴 바른꼴'을 줄마다 적는다.
+// 낱말 앞부분이 틀린 꼴이면 바꾸고, 뒤에 붙은 조사·어미는 그대로 둔다(받침이 달라지면 조사도 맞춘다: 케익을 → 케이크를).
+// 틀린 꼴이 다른 뜻의 맞는 말이거나 그런 말의 앞부분일 수 있는 것(스텝·칼라·싸인·파토스·떠듬떠듬·런닝맨 …)은 넣지 않는다.
+const STANDARD_WORDS = pairsOf(`
+핑게 핑계|건내 건네|건낸 건넨|건냈 건넸|괜시리 괜스레|궁시렁 구시렁|나즈막히 나지막이|나즈막 나지막|널부러 널브러|넓직 널찍
+늘상 늘|돌맹이 돌멩이|되물림 대물림|딱다구리 딱따구리|또아리 똬리|마춤법 맞춤법|맛배기 맛보기|멋적 멋쩍|객적 객쩍|발자욱 발자국
+봉숭화 봉숭아|새침떼기 새침데기|시덥잖 시답잖|아지랭이 아지랑이|야밤도주 야반도주|장농 장롱|재털이 재떨이|졸립 졸리|주구장창 주야장천
+짭잘 짭짤|쭈꾸미 주꾸미|추스렸 추슬렀|추스려 추슬러|추스리 추스르|퍼붇 퍼붓|폭팔 폭발|풍지박산 풍비박산|해꼬지 해코지
+허구헌 허구한|호도과자 호두과자|횡경막 횡격막|흐리멍텅 흐리멍덩|깍둑이 깍두기|닭도리탕 닭볶음탕|돈까스 돈가스|오돌뼈 오도독뼈
+설농탕 설렁탕|모밀 메밀|우뢰 우레|윗어른 웃어른|숫놈 수놈|숫컷 수컷|숫소 수소|숫닭 수탉|숫개 수캐|숫돼지 수퇘지|암닭 암탉|암개 암캐
+암돼지 암퇘지|새벽녁 새벽녘|무우 무|미싯가루 미숫가루|강남콩 강낭콩|오이소배기 오이소박이|떡뽁이 떡볶이|떡복이 떡볶이
+안절부절했 안절부절못했|안절부절하 안절부절못하|사겼 사귀었|사겨 사귀어|놀래켰 놀랬|놀래켜 놀래|놀래키 놀래|만듬 만듦|베품 베풂
+이끔 이끎|요컨데 요컨대|단언컨데 단언컨대|바라건데 바라건대`, '표준어');
+const LOANWORDS = pairsOf(`
+메세지 메시지|악세사리 액세서리|악세서리 액세서리|액세사리 액세서리|컨텐츠 콘텐츠|컨텐트 콘텐트|리더쉽 리더십|멤버쉽 멤버십
+파트너쉽 파트너십|인턴쉽 인턴십|챔피언쉽 챔피언십|스포츠맨쉽 스포츠맨십|오너쉽 오너십|스칼라쉽 스칼러십|워크샵 워크숍|커피샵 커피숍
+네일샵 네일숍|헤어샵 헤어숍|기프트샵 기프트숍|펫샵 펫숍|비지니스 비즈니스|소세지 소시지|쏘세지 소시지|스탭 스태프|수퍼 슈퍼
+텔레비젼 텔레비전|플래쉬 플래시|플레쉬 플래시|알콜 알코올|알코홀 알코올|데뷰 데뷔|앵콜 앙코르|앙콜 앙코르|쥬스 주스|쵸콜렛 초콜릿
+쵸콜릿 초콜릿|초콜렛 초콜릿|초코렛 초콜릿|케익 케이크|케잌 케이크|로얄 로열|카페라떼 카페라테|바닐라라떼 바닐라라테|녹차라떼 녹차라테
+고구마라떼 고구마라테|말차라떼 말차라테|바베큐 바비큐|비스켓 비스킷|도너츠 도넛|쥬얼리 주얼리|타겟 타깃|알러지 알레르기
+라이센스 라이선스|스케쥴 스케줄|스카웃 스카우트|맛사지 마사지|메뉴얼 매뉴얼|네비게이션 내비게이션|네비 내비|레포트 리포트
+링겔 링거|링게르 링거|밧데리 배터리|바테리 배터리|샌달 샌들|크리스챤 크리스천|크리스찬 크리스천|할로윈 핼러윈|디지탈 디지털
+프리젠테이션 프레젠테이션|케릭터 캐릭터|카페트 카펫|코메디 코미디|다이나믹 다이내믹|아울렛 아웃렛|커텐 커튼|로케트 로켓|로보트 로봇
+쥬니어 주니어|앰블런스 앰뷸런스|앰블란스 앰뷸런스|플렛폼 플랫폼|스티로폴 스티로폼|컨셉 콘셉트|제스춰 제스처|쉐프 셰프|쉐이크 셰이크
+쉐도우 섀도|포크레인 포클레인|썬글라스 선글라스|썬크림 선크림|썬블록 선블록|쎈터 센터|써비스 서비스|싸이즈 사이즈|쏘스 소스|쇼파 소파
+팜플렛 팸플릿|팜플릿 팸플릿|플랭카드 플래카드|플랑카드 플래카드|플랜카드 플래카드|엔돌핀 엔도르핀|카톨릭 가톨릭|컨닝 커닝|콩쿨 콩쿠르
+판넬 패널|알미늄 알루미늄|호일 포일|애드립 애드리브|짚시 집시|데이타 데이터|렌트카 렌터카|에어콘 에어컨|부페 뷔페|화이팅 파이팅
+테잎 테이프|테입 테이프|비젼 비전|버젼 버전|휘트니스 피트니스|레크레이션 레크리에이션|시츄에이션 시추에이션|랍스타 랍스터
+화운데이션 파운데이션|까페 카페|앙케이트 앙케트`, '외래어');
+// 사이시옷 (나무가지 → 나뭇가지) — 사전이 합성어로 받아 주어 못 잡는 흔한 말
+const SAI_SIOT = pairsOf(`
+나무가지 나뭇가지|나무잎 나뭇잎|깨잎 깻잎|고추가루 고춧가루|후추가루 후춧가루|수도물 수돗물|전세집 전셋집|비누방울 비눗방울
+혼자말 혼잣말|노래말 노랫말|존대말 존댓말|시내물 시냇물|등교길 등굣길|하교길 하굣길|귀가길 귀갓길|장마비 장맛비|순대국 순댓국
+북어국 북엇국|만두국 만둣국|김치국 김칫국|고기국 고깃국|선지국 선짓국|조개국 조갯국|기차길 기찻길|뒤동산 뒷동산|뒤산 뒷산
+아래집 아랫집|바다물 바닷물|맥주집 맥줏집|회집 횟집`, '사이시옷');
+
+/** 'A B|C D' → [[A, B], [C, D]] (긴 것부터 맞춰 본다) */
+function pairsOf(text, kind) {
+    return text.trim().split(/[|\n]/).map(x => x.trim().split(/\s+/)).filter(x => x.length === 2)
+        .map(([a, b]) => [a, b, kind]).sort((x, y) => y[0].length - x[0].length);
+}
+
+// 받침에 따라 모양이 바뀌는 조사 [받침 있을 때, 없을 때]
+const ALLOMORPHS = [['이', '가'], ['을', '를'], ['은', '는'], ['과', '와'], ['으로', '로'], ['이랑', '랑'], ['이나', '나'], ['이라도', '라도'], ['이야', '야']];
+
+/** 앞말의 받침에 맞는 조사로 (케이크 + 을 → 를). rest가 조사 하나가 아니면 그대로 */
+function fitParticle(stem, rest) {
+    const pair = ALLOMORPHS.find(([a, b]) => rest === a || rest === b);
+    if (!pair) return rest;
+    const j = jongOf(stem[stem.length - 1]);
+    if (pair[0] === '으로') return j && j !== JONG_L ? '으로' : '로';
+    return j ? pair[0] : pair[1];
+}
+
+/** 따옴표로 묶은 말 + 이·가 / 을·를 */
+function subj(word) { return `'${word}'${hasJong(word[word.length - 1]) ? '이' : '가'}`; }
+function obj(word) { return `'${word}'${hasJong(word[word.length - 1]) ? '을' : '를'}`; }
+
+/** 표준어·외래어·사이시옷 표에서 고칠 것 → { to, why, kind } */
+function tableFix(core) {
+    for (const [wrong, right, kind] of [...STANDARD_WORDS, ...LOANWORDS, ...SAI_SIOT]) {
+        if (!core.startsWith(wrong)) continue;
+        const to = right + fitParticle(right, core.slice(wrong.length));
+        const why = kind === '외래어' ? `외래어 표기법에 따라 ${obj(right)} 씁니다`
+            : kind === '사이시옷' ? `사이시옷을 적어 ${subj(right)} 맞는 말입니다` : `${subj(right)} 표준어입니다`;
+        return { to, why, kind: kind === '사이시옷' ? '맞춤법' : '표준어' };
+    }
+    return null;
 }
 
 // 'ㄹ' 받침 하나로 된 말 가운데 동사의 꼴로 흔히 쓰는 것 — '할 때', '갈 수'처럼 띄운다
@@ -481,6 +583,15 @@ function chiToJi(core, next) {
     return { to: m[1] + '지' + (m[2] || '') + m[3], why: "'-하지'의 '하'가 줄면 '-지'로 적습니다 (생각지·익숙지)" };
 }
 
+/**
+ * 받침 있는 말 뒤의 '를' → '을' (책를 → 책을, 지민를 → 지민을) — 받침 뒤에 '를'이 오는 말은 거의 없다.
+ * 'ㄹ' 받침 뒤는 '들를'(들르다)이 있어 빼고, 사전으로 조사를 맞추는 곳(particleFix)에 맡긴다.
+ */
+function objectParticle(core) {
+    if (core.length < 2 || !core.endsWith('를') || !hasJong(core[core.length - 2]) || endsWithL(core[core.length - 2])) return null;
+    return { to: core.slice(0, -1) + '을', why: "받침 있는 말 뒤에는 '을'을 씁니다", kind: '맞춤법' };
+}
+
 /** -ㄹ런지 → -ㄹ는지 (올런지 → 올는지) */
 function lRunji(core) {
     const k = core.indexOf('런지');
@@ -545,16 +656,20 @@ function spaceWord(word, next) {
 export function fixKoreanWord(core, prev, next) {
     let cur = core;
     const whys = [];
+    let kind = null;   // 표준어 등 따로 정한 종류 (없으면 고친 모양으로 정한다)
     const apply = (r) => {
         if (!r || r.to === cur) return;
         cur = r.to;
+        if (r.kind && !kind) kind = r.kind;
         for (const y of [].concat(r.whys || r.why)) if (y && !whys.includes(y)) whys.push(y);
     };
-    for (const [re, rep, why] of SPELL_RULES) {
+    apply(tableFix(cur));
+    for (const [re, rep, why, k] of SPELL_RULES) {
         const out = cur.replace(re, rep);
-        if (out !== cur) apply({ to: out, why });
+        if (out !== cur) apply({ to: out, why, kind: k });
     }
     if (!/\s/.test(cur)) {
+        apply(objectParticle(cur));
         apply(adverbFix(cur));
         apply(chiToJi(cur, next));
         apply(willEnding(cur));
@@ -571,7 +686,124 @@ export function fixKoreanWord(core, prev, next) {
     if (/^바(래|랬)/.test(cur) && /(기를|길|기|기만|기도|기는)$/.test(prev || '')) {
         apply({ to: cur.replace(/^바래/, '바라').replace(/^바랬/, '바랐'), why: "'바라다'가 기본형이라 '바라요·바랐다'로 씁니다" });
     }
-    return cur === core ? null : { to: cur, whys };
+    return cur === core ? null : { to: cur, whys, kind };
+}
+
+// ─── 문맥을 보고 고치는 말 ───
+// 둘 다 사전에 있는 말이라 낱말만 보고는 모르지만, 앞뒤 말을 보면 거의 확실한 것만 고친다 (네이버의 '문맥·통계적 교정'에 해당).
+// ctx: { prev, prev2, prev3, next, others: 같은 문장의 다른 낱말들, objectBefore: 앞에 '-을/-를'이 있는가 }
+
+const PLACES = new Set(('마트 집 가게 카페 편의점 교회 회사 병원 은행 약국 서점 시장 학교 도서관 백화점 공원 식당 빵집 꽃집 사무실 우체국 '
+    + '주민센터 성당 본당 댁 문구점 미용실 세탁소 주유소 휴게소 학원 어린이집 유치원 매장 문방구 다이소 이마트 홈플러스 코스트코 '
+    + '스타벅스 공항 역 터미널 시청 구청 경찰서 박물관 미술관 놀이터 수영장 헬스장 체육관 기도원 교육관 고향 처가 시댁 친정 본가 '
+    + '친구네 언니네 오빠네 누나네 형네 엄마네 할머니댁 할머니네 이모네 고모네 삼촌네 대학 연구실 서울 부산 대구 인천 광주 대전 울산 제주').split(' '));
+const SOUND_SUBJECT = /(소리|소식|음악|노래|말|말씀|이야기|얘기|웃음|울음|천둥|박수|기도|찬양|찬송|음성|소음|벨|알람|기척|비명|함성|외침|대답)(가|이|도)$/;
+const DISEASE = /^(감기|병|상처|몸살|두통|배탈|기침|독감|목감기|코로나|장염|염증|비염|몸|허리|무릎|다리|팔|어깨|발목|손목|피부|위염|체기|멀미|입병|눈병|치통|편도|목|화상|아픈\s?곳|아픈\s?데)(이|가|은|는|도|이나|가요|이요)$/;
+const BIRTH_OBJECT = /^(아기|아이|애|아들|딸|새끼|알|자녀|쌍둥이|첫째|둘째|셋째|막내|손주|송아지|강아지|새끼들)(를|을)$/;
+const DIFFER_SUBJECT = /^(생각|의견|모양|색|색깔|성격|취향|입장|스타일|맛|방법|문화|성향|느낌|크기|모습|사정|상황|목소리|분위기|가격|기준|관점|시각|말투|습관)(이|가|도|은|는)$/;
+const PAYMENT = /(카드|현금|계좌|이체|페이|요금|금액|돈|비용|수강료|회비|월세|관리비|구매|주문|쇼핑|할부|일시불|영수증)/;
+const APPROVAL = /(상사|부장|과장|차장|사장|대표|이사님|원장|승인|서류|품의|기안|보고서)/;
+const ROLE_LOSSEO = /^(부모|엄마|아빠|어머니|아버지|학생|교사|선생님|선생|사람|친구|남편|아내|자녀|아들|딸|리더|목사|목사님|성도|신자|그리스도인|크리스천|제자|증인|일꾼|청지기|시민|국민|회원|대표|형|누나|언니|오빠|동생|맏이|장남|장녀|가장|주부|직장인|교인|사역자|봉사자|어른|신앙인|한국인|여자|남자|인간|자식|며느리|사위|할머니|할아버지|손자|손녀|군인|의사|간호사|팀장|선배|후배|이웃)(으로써|로써)/;
+
+/** 앞부분 바꾸기표 [[앞, 바꿀 앞], …]로 낱말을 바꾼다 (맞는 것이 없으면 null) */
+function swapStem(core, table) {
+    for (const [a, b] of table) if (core.startsWith(a)) return b + core.slice(a.length);
+    return null;
+}
+
+/** 문맥을 보고 고칠 말 → { to, why, kind: '문맥' } | null */
+export function contextFix(core, ctx) {
+    const { prev = '', prev2 = '', prev3 = '', next = '', others = [], objectBefore = false } = ctx;
+    const out = (to, why) => (to && to !== core ? { to, why, kind: '문맥' } : null);
+    const before = [prev, prev2, prev3];
+
+    // 들르다: '마트에 들렸다' → 들렀다 ('소리가 들렸다'처럼 듣는 뜻이면 그대로)
+    if (/^들(렸|려)/.test(core) && !others.some(x => SOUND_SUBJECT.test(x))) {
+        const place = [prev, prev2].some(x => /(에|에도|에는|에만)$/.test(x) && PLACES.has(x.replace(/(에|에도|에는|에만)$/, '')));
+        if (place) return out(swapStem(core, [['들렸', '들렀'], ['들려', '들러']]), "'들르다'(잠깐 들어가 머물다)는 '들렀다·들러'로 씁니다 ('들렸다'는 소리가 들린 것)");
+    }
+    // 놀라다: '너무 놀랬다' → 놀랐다 ('친구를 놀래 주었다'처럼 남을 놀라게 한 것은 그대로)
+    if (/^놀(랬|래|램)/.test(core) && !objectBefore && !/^(주|줬|줄|준|줍|드리|드렸)/.test(next)) {
+        const to = /^놀랬/.test(core) ? '놀랐' + core.slice(2) : /^놀램/.test(core) ? '놀람' + core.slice(2)
+            : /^놀래(서|요|도|고|며|면)?$/.test(core) ? '놀라' + core.slice(2) : null;
+        if (to) return out(to, "스스로 놀란 것은 '놀라다'라서 '놀랐다·놀라서'로 씁니다 ('놀래다'는 남을 놀라게 하는 것)");
+    }
+    // 가다: '교회에 갈려고' → 가려고 ('칼을 숫돌에 갈려고'처럼 갈 것이 있으면 그대로)
+    if (/^갈려(고|면|는|던)/.test(core) && /(에|에는|로|으로|에게|한테|까지)$/.test(prev) && !objectBefore) {
+        return out('가' + core.slice(1), "'가다'에 '-려고'가 붙으면 '가려고'입니다");
+    }
+    // 이따가: '있다가 봐' → 이따가 봐 ('집에 있다가 나갔다'는 그대로)
+    if ((core === '있다가' || core === '있다') && (!prev || /^(그럼|그러면|그래|우리|나|내가|제가|저|너|네가|엄마|아빠|그럼요)$/.test(prev))
+        && /^(봐|보자|봬|뵐|뵙|만나|연락|전화|얘기|이야기|할게|갈게|올게|먹자|하자|가자|오자|줄게)/.test(next)) {
+        return out(core === '있다가' ? '이따가' : '이따', "'조금 뒤에'라는 뜻이면 '이따가'로 씁니다");
+    }
+    // 일부러: '일부로 그런 거 아니야' → 일부러 ('재산의 일부로'는 그대로)
+    if (core === '일부로' && !/의$/.test(prev)
+        && /^(그런|그랬|그러|그렇|한|했|하|안|못|늦|모른|피|져|틀|저런|이런|천천히|크게|작게|일찍|그냥|아무|티|숨|넘어|떨어|놓|기다|참|웃|울|말|모르)/.test(next)) {
+        return out('일부러', "'일부러'(굳이 마음먹고)가 맞는 말입니다 ('일부로'는 '한 부분으로')");
+    }
+    // 낫다: '감기가 빨리 낳았으면' → 나았으면 / 낳다: '아기를 나았다' → 낳았다
+    if (/^낳/.test(core) && before.some(x => DISEASE.test(x)) && !before.some(x => BIRTH_OBJECT.test(x))) {
+        const to = swapStem(core, [['낳았', '나았'], ['낳아', '나아'], ['낳으', '나으'], ['낳을', '나을'], ['낳은', '나은'], ['낳', '낫']]);
+        return out(to, "병이 고쳐지는 것은 '낫다'라서 '나았다·낫기를'로 씁니다 ('낳다'는 아기를 낳는 것)");
+    }
+    if (BIRTH_OBJECT.test(prev) && /^(나았|나아|낫|나을|나은|나으)/.test(core)) {
+        const to = swapStem(core, [['나았', '낳았'], ['나아', '낳아'], ['나을', '낳을'], ['나은', '낳은'], ['나으', '낳으'], ['낫', '낳']]);
+        return out(to, "아기를 세상에 내놓는 것은 '낳다'입니다");
+    }
+    // 맞히다: '정답을 맞췄다' → 맞혔다 (답이 맞게 한 것. '맞추다'는 서로 비교해 보는 것)
+    if (/^(정답|문제|퀴즈|과녁|정곡|수수께끼)(을|를|도|까지)$/.test(prev) && /^맞(추|췄|춰|춘|출|춥)/.test(core)) {
+        return out(swapStem(core, [['맞췄', '맞혔'], ['맞춰', '맞혀'], ['맞춘', '맞힌'], ['맞출', '맞힐'], ['맞춥', '맞힙'], ['맞추', '맞히']]),
+            "답을 맞게 한 것은 '맞히다'입니다 ('맞추다'는 서로 비교해 보는 것)");
+    }
+    // 부치다·붙이다: '편지를 붙였다' → 부쳤다, '전을 붙였다' → 부쳤다, '우표를 부쳤다' → 붙였다
+    if (/^(편지|소포|택배|우편물|엽서|짐|전|부침개|빈대떡|김치전|파전|녹두전|호떡)(를|을|도)$/.test(prev) && /^붙(이|여|였|인|일|입)/.test(core)) {
+        return out(swapStem(core, [['붙였', '부쳤'], ['붙여', '부쳐'], ['붙인', '부친'], ['붙일', '부칠'], ['붙입', '부칩'], ['붙이', '부치']]),
+            "물건을 보내거나 전을 부치는 것은 '부치다'입니다");
+    }
+    if (/^(우표|스티커|반창고|포스트잇|테이프|파스|밴드|메모|라벨|전단|벽보)(를|을|도)$/.test(prev) && /^부(치|쳐|쳤|친|칠|칩)/.test(core)) {
+        return out(swapStem(core, [['부쳤', '붙였'], ['부쳐', '붙여'], ['부친', '붙인'], ['부칠', '붙일'], ['부칩', '붙입'], ['부치', '붙이']]),
+            "맞닿게 하는 것은 '붙이다'입니다");
+    }
+    // 다르다: '생각이 틀리다', '나랑 틀려' → 다르다 ('틀리다'는 맞지 않은 것)
+    // '생각이 틀렸다'(잘못 생각함)와 구별하려고, 견주는 말(나랑·너와·서로)이 있을 때만 본다
+    // ('-과'는 결과·효과처럼 '과'로 끝나는 명사와 헷갈려 보지 않는다)
+    const compared = others.some(x => /[가-힣](와|랑|이랑|하고|보다)$/.test(x) || /^(서로|각자|다들)$/.test(x));
+    if (((DIFFER_SUBJECT.test(prev) && compared) || /[가-힣](와|랑|이랑|하고)$/.test(prev)) && /^틀(리|려|린|렸|릴|립)/.test(core)) {
+        return out(swapStem(core, [['틀렸', '달랐'], ['틀려', '달라'], ['틀린', '다른'], ['틀릴', '다를'], ['틀립', '다릅'], ['틀리', '다르']]),
+            "같지 않은 것은 '다르다'입니다 ('틀리다'는 맞지 않은 것)");
+    }
+    // 결제·결재: 돈을 치르는 것은 '결제', 윗사람이 승인하는 것은 '결재'
+    if (/^결재/.test(core) && others.some(x => PAYMENT.test(x)) && !others.some(x => APPROVAL.test(x))) {
+        return out('결제' + core.slice(2), "돈을 치르는 것은 '결제'입니다 ('결재'는 윗사람이 승인하는 것)");
+    }
+    if (/^결제/.test(core) && others.some(x => APPROVAL.test(x)) && !others.some(x => PAYMENT.test(x))) {
+        return out('결재' + core.slice(2), "윗사람이 승인하는 것은 '결재'입니다 ('결제'는 돈을 치르는 것)");
+    }
+    // 반드시: '반듯이 해야 한다' → 반드시 ('반듯이 앉다'는 그대로)
+    if (core === '반듯이' && /^(해야|할|지켜|기억|필요|오|와|갈|돌아|이루|성공|이기|보답|갚|만나|연락|하겠|해|될|되|올|이길|응답|이뤄|좋아|잘|다시|꼭)/.test(next)
+        && !/^(앉|서|놓|눕|세|펴|걸|누|섰|자라|세워|누워|쌓|접|개)/.test(next)) {
+        return out('반드시', "'틀림없이 꼭'이라는 뜻이면 '반드시'입니다 ('반듯이'는 비뚤지 않게)");
+    }
+    // 가리키다·가르치다: '가르키다'는 없는 말
+    if (/^가르(키|켜|켰|킨|킬)/.test(core)) {
+        const all = [...others];
+        const dir = all.some(x => /(손가락|방향|쪽|곳|시계|화살표|표지판|하늘|별|지도|위치|시각|시침|분침)/.test(x));
+        const teach = all.some(x => /(학생|아이|영어|수학|공부|피아노|성경|말씀|방법|운전|수영|한글|노래|요리|기술|제자|주일학교|교회학교)/.test(x));
+        if (dir && !teach) return out(swapStem(core, [['가르켰', '가리켰'], ['가르켜', '가리켜'], ['가르킨', '가리킨'], ['가르킬', '가리킬'], ['가르키', '가리키']]),
+            "방향이나 대상을 짚는 것은 '가리키다'입니다");
+        if (teach && !dir) return out(swapStem(core, [['가르켰', '가르쳤'], ['가르켜', '가르쳐'], ['가르킨', '가르친'], ['가르킬', '가르칠'], ['가르키', '가르치']]),
+            "지식을 알려 주는 것은 '가르치다'입니다");
+    }
+    // 로서·로써: '부모로써' → 부모로서 (자격·지위는 '로서', 수단·도구는 '로써')
+    const r = ROLE_LOSSEO.exec(core);
+    if (r) return out(core.replace(/(으로|로)써/, '$1서'), "자격이나 지위를 나타낼 때는 '-로서'를 씁니다 ('-로써'는 수단·도구)");
+    if (core === '이로서') return out('이로써', "'이것으로써'라는 뜻이면 '이로써'입니다");
+    // 날아가다: '바람에 날라갔다' → 날아갔다 ('짐을 날라 갔다'처럼 나른 것은 그대로)
+    if (/^날라(가|갔|간|갈|와|왔|온|올|다니|다녔)/.test(core) && !objectBefore) {
+        return out('날아' + core.slice(2), "공중으로 나는 것은 '날다'라서 '날아가다'로 씁니다 ('날라'는 '나르다')");
+    }
+    return null;
 }
 
 // 늘 앞말에 붙여 쓰는 조사·접미사 (나 처럼 → 나처럼, 3시 까지 → 3시까지, 우리 끼리 → 우리끼리)
@@ -713,13 +945,23 @@ function checkEnglish(w, text) {
     return true;
 }
 
+// 마디를 끝내는 이음 꼴 (듣고·와서·하며·하니·했는데·하지만·하다가·하려고)
+const CLAUSE_END = /(고|서|며|면|니|는데|은데|지만|다가|려고|도록|니까|자|든지)$/;
+
+/** 고친 곳의 종류 — 띄어쓰기만 바뀌었으면 '띄어쓰기', 그 밖에는 규칙이 정한 종류(표준어·문맥)나 '맞춤법' */
+function kindOf(from, to, kind) {
+    const k = spellKind(from, to);
+    return k === '맞춤법' && kind ? kind : k;
+}
+
 /**
  * 줄들을 검사한다.
  * lines: [{ id, text }]
  * dict.lookup({ ko: [낱말], en: [낱말] }) → { ko: { 낱말: 판정 }, en: {…} }
- *   판정: null(사전에 있는 말) | false(사전에 없지만 고칠 말을 확실히 모른다 — 이름 등) | { to, why }
+ *   판정: null(사전에 있는 말) | false(사전에 없지만 고칠 말을 확실히 모른다 — 이름 등) | { to, why, kind? }
  * skip(낱말): 검사하지 않을 말인가 (사용자가 사전에 넣은 말 등)
  * → [{ id, a, b, from, to, type, why, word, src: 'rule'|'dict' }] (a, b: 그 줄에서의 위치)
+ *   type: '맞춤법' | '띄어쓰기' | '문장 부호' | '표준어' | '문맥'
  */
 export async function checkLines(lines, dict, { skip = () => false } = {}) {
     const fixes = [];
@@ -731,6 +973,11 @@ export async function checkLines(lines, dict, { skip = () => false } = {}) {
         const words = wordsOf(text);
         const code = (text.match(/[{};=<>|&]|=>|\(\)/g) || []).length >= 3;   // 프로그램 코드처럼 보이는 줄의 영어는 검사하지 않는다
         const used = new Set();
+        // 문장 나누기 — 문맥 규칙은 같은 문장 안의 말만 본다
+        const sentenceOf = [];
+        let sid = 0;
+        words.forEach((w, i) => { sentenceOf[i] = sid; if (/[.!?。…]["'”’)]*$/.test(text.slice(w.a, w.b))) sid++; });
+        if (!code) for (const f of punctuationFixes(text)) fixes.push({ id: line.id, ...f, type: '띄어쓰기', src: 'rule' });
         for (const r of pairRules(words)) {
             if (used.has(r.i) || used.has(r.j)) continue;
             const a = words[r.i].ca, b = words[r.j].cb;
@@ -745,10 +992,19 @@ export async function checkLines(lines, dict, { skip = () => false } = {}) {
             if (used.has(i) || !w.lang || skip(w.core)) return;
             if (/:\/\/|www\.|@/.test(text.slice(w.a, w.b))) return;   // 주소·전자우편
             if (w.lang === 'ko' && w.core.length >= 3 && /^[일이삼사오육칠팔구십백천만억조]+$/.test(w.core)) return;   // 한자어 수 (백이십만)
-            const rule = (to, why, type) => fixes.push({ id: line.id, a: w.ca, b: w.cb, from: w.core, to, type: type || spellKind(w.core, to), why, src: 'rule' });
+            // 종류: 맞춤법·띄어쓰기·문장 부호(고친 모양으로 정한다)·표준어·문맥(규칙이 정한다)
+            const rule = (to, why, kind) => fixes.push({ id: line.id, a: w.ca, b: w.cb, from: w.core, to, type: kindOf(w.core, to, kind), why, src: 'rule' });
             if (w.lang === 'ko') {
-                const r = fixKoreanWord(w.core, words[i - 1] && words[i - 1].core, words[i + 1] && words[i + 1].core);
-                if (r) { rule(r.to, r.whys.join(' · ')); return; }
+                const near = (k) => (words[k] && sentenceOf[k] === sentenceOf[i] ? words[k].core : '');
+                const r = fixKoreanWord(w.core, near(i - 1), near(i + 1));
+                if (r) { rule(r.to, r.whys.join(' · '), r.kind); return; }
+                const others = words.filter((o, k) => k !== i && sentenceOf[k] === sentenceOf[i]).map(o => o.core);
+                // 이 말이 속한 마디(앞의 '-고·-서·-며' 뒤)에 '-을/-를'이 있는가 ('소식을 듣고 놀랬다'의 '소식을'은 '듣고'의 것)
+                let from = i;
+                while (from > 0 && sentenceOf[from - 1] === sentenceOf[i] && !CLAUSE_END.test(words[from - 1].core)) from--;
+                const objectBefore = words.some((o, k) => k >= from && k < i && /[가-힣][을를]$/.test(o.core));
+                const c = contextFix(w.core, { prev: near(i - 1), prev2: near(i - 2), prev3: near(i - 3), next: near(i + 1), others, objectBefore });
+                if (c) { rule(c.to, c.why, c.kind); return; }
                 if (w.core.length < 2 || ARCHAIC.test(w.core)) return;   // 한 글자 낱말·옛말 꼴은 사전에 묻지 않는다
                 ask.ko.add(w.core);
                 later.push({ line, w, lang: 'ko', alt: copulaEnding(w.core) });
@@ -785,7 +1041,7 @@ export async function checkLines(lines, dict, { skip = () => false } = {}) {
             }
             if (!d) continue;   // 사전에 없지만 확실히 고칠 말이 없다 — 이름 등은 그대로 둔다
             const to = lang === 'en' && w.core.includes('’') ? d.to.replace(/'/g, '’') : d.to;
-            fixes.push({ id: line.id, a: w.ca, b: w.cb, from: w.core, to, type: spellKind(w.core, to), why: d.why, word: w.core, src: 'dict' });
+            fixes.push({ id: line.id, a: w.ca, b: w.cb, from: w.core, to, type: kindOf(w.core, to, d.kind), why: d.why, word: w.core, src: 'dict' });
         }
     }
     fixes.sort((x, y) => x.id - y.id || x.a - y.a);
@@ -1109,13 +1365,43 @@ function spellingFix(dict, word) {
     return { to: best[0].cand, why: mistakeWhy(word, best[0].cand, best[0].kind) };
 }
 
+/**
+ * 받침에 맞지 않는 조사 (사과을 → 사과를, 학교은 → 학교는, 집로 → 집으로)
+ * 앞말이 사전에 있는 명사이고 바꾼 꼴이 사전에 있을 때만 고친다 (이름 같은 말은 '-를'만 따로 규칙으로 본다)
+ */
+function particleFix(dict, q) {
+    for (const pair of ALLOMORPHS) {
+        for (const p of pair) {
+            if (!q.endsWith(p) || q.length < p.length + 2) continue;   // 앞말이 한 글자인 것은 헷갈려 보지 않는다 (댓가)
+            const stem = q.slice(0, -p.length);
+            const want = fitParticle(stem, p);
+            if (want === p || !isNoun(dict, stem) || !dict.spell(stem + want)) continue;
+            const j = hasJong(stem[stem.length - 1]);
+            return { to: stem + want, why: `받침${j ? '이 있는' : '이 없는'} 말 뒤에는 ${obj(want)} 씁니다` };
+        }
+    }
+    return null;
+}
+
+/** 같은 글자를 잘못 두 번 친 것 (감사합니니다 → 감사합니다). '하하하'처럼 되풀이하는 말은 그대로 */
+function doubledFix(dict, q) {
+    if (q.length < 3 || /^(.)\1+$/.test(q)) return null;
+    const found = new Set();
+    for (let k = 1; k < q.length; k++) {
+        if (q[k] !== q[k - 1] || q[k] === q[k + 1] || q[k - 1] === q[k - 2]) continue;
+        const cand = q.slice(0, k) + q.slice(k + 1);
+        if (dict.spell(cand)) found.add(cand);
+    }
+    return found.size === 1 ? { to: [...found][0], why: '같은 글자를 두 번 썼습니다' } : null;
+}
+
 /** 한국어 낱말들 → { 낱말: null(맞음) | false(고칠 말을 모름) | { to, why } } */
 export function lookupKorean(dict, words, onEach) {
     const out = {};
     for (const w of words) {
         const q = w.normalize('NFC');
         if (!/^[가-힣]+$/.test(q) || knownKorean(dict, q)) out[w] = null;
-        else out[w] = splitFix(dict, q) || spellingFix(dict, q) || false;
+        else out[w] = particleFix(dict, q) || splitFix(dict, q) || spellingFix(dict, q) || doubledFix(dict, q) || false;
         if (onEach) onEach();
     }
     return out;
