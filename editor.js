@@ -103,6 +103,9 @@ function restoreSnapshot(snapshot) {
     
     // 내용 복원
     editorBody.innerHTML = snapshot.body;
+    // 본문을 통째로 바꿨으니 전에 고른 사진·표는 이제 없다 — 그 둘레에 떠 있던 표 도구·사진 상자도 닫는다
+    lastClickedCell = null;
+    hideSelection();
     if (editTitle) editTitle.value = snapshot.title;
     if (editSubtitle) editSubtitle.value = snapshot.subtitle;
     
