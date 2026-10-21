@@ -19,7 +19,7 @@ const META_ITEM = 'faith_gemini_meta';      // { tier: 'paid'|'free'|'unknown', 
 const OLD_AUDIO_DB = 'diary-gemini-voice';
 const OLD_ITEMS = ['faith_gemini_style', 'faith_gemini_cps'];
 
-// 무료 등급에는 없는 모델 — 이 모델이 답하면 유료 등급이다 (8토큰까지만 받아 요금은 1원 미만)
+// 무료 등급에는 없는 모델 — 이 모델이 답하면 유료 등급이다 (64토큰까지만 받아 요금은 1원 안팎)
 const TIER_PROBE_MODEL = 'gemini-4-argon';
 const RECHECK_MS = 24 * 60 * 60 * 1000;
 export const WON_PER_USD = 1400;
@@ -70,6 +70,7 @@ export async function forgetGemini() {
         localStorage.removeItem(KEY_ITEM);
         localStorage.removeItem(META_ITEM);
     } catch (e) { /* 저장소 접근 불가 */ }
+    useGenerate = null;
     announce('disconnected');
     await removeOldVoiceData();
 }
@@ -155,7 +156,10 @@ export function classifyError(httpStatus, body) {
     const free = FREE_RE.test(everything);
     const make = (kind, extra) => {
         const text = (free && MESSAGES[kind + '_free']) || MESSAGES[kind];
-        return new GeminiError(kind, text + (kind === 'bad_request' && message ? `\n(${message.slice(0, 160)})` : ''),
+        // 서버 쪽 문제·알 수 없는 요청 오류는 Gemini가 준 설명을 함께 보여 준다 (원인을 알아내기 쉽게)
+        const why = (kind === 'bad_request' || kind === 'server') && (message || httpStatus)
+            ? `\n(Gemini 답: ${httpStatus || ''} ${message.slice(0, 160)})`.replace('( ', '(') : '';
+        return new GeminiError(kind, text + why,
             { httpStatus, code: code || status, detail: message, free, ...extra });
     };
 
@@ -224,12 +228,7 @@ async function callApi(path, body, { key, signal, timeoutMs = 60000 } = {}) {
 /** 'paid' | 'free' | 'unknown'. 키가 틀렸거나 잔액이 없거나 접속하지 못하면 오류를 던진다 */
 async function probeTier(key) {
     try {
-        await callApi('/interactions', {
-            model: TIER_PROBE_MODEL,
-            input: '1',
-            generation_config: { thinking_level: 'low', max_output_tokens: 8 },
-            store: false
-        }, { key, timeoutMs: 30000 });
+        await ask(key, { model: TIER_PROBE_MODEL, input: '1', maxOutputTokens: 64, timeoutMs: 30000 });
         return 'paid';
     } catch (err) {
         if (!(err instanceof GeminiError)) throw err;
@@ -338,38 +337,85 @@ function findText(data) {
     return text;
 }
 
+// ─── 모델 부르기: 두 가지 길 ───
+// 먼저 Interactions API로 부르고(요청을 서버에 남기지 않게 store:false), 서버 오류·없는 주소·요청 오류가 나면
+// 오래 써 온 generateContent로 다시 부른다(이 길은 원래 요청을 저장하지 않는다).
+// 새 형식의 키('AQ.'로 시작)로 Interactions API를 부르면 서버 오류가 나는 경우가 있었다.
+// 한 번 generateContent로 된 키는 그 뒤로 바로 그 길로 부른다.
+const FALLBACK_KINDS = new Set(['server', 'not_found', 'bad_request']);
+let useGenerate = null;   // 이 기기에서 generateContent로 부르는가 (meta.api에 적어 둔다)
+
+function prefersGenerate() {
+    if (useGenerate === null) useGenerate = readMeta().api === 'generate';
+    return useGenerate;
+}
+
+function rememberApi(api) {
+    useGenerate = api === 'generate';
+    const m = readMeta();
+    if (m.api !== api && getGeminiKey()) { m.api = api; writeMeta(m); }
+}
+
+async function askInteractions(key, { model, system, input, schema, thinking, maxOutputTokens, signal, timeoutMs }) {
+    const body = { model, input, generation_config: { thinking_level: thinking, max_output_tokens: maxOutputTokens }, store: false };
+    if (system) body.system_instruction = system;
+    if (schema) body.response_format = { type: 'text', mime_type: 'application/json', schema };
+    const data = await callApi('/interactions', body, { key, signal, timeoutMs });
+    const text = findText(data);
+    let blocked = false;
+    if (!text) {
+        const why = (data && (data.error || (data.status !== 'completed' && data.status))) || null;
+        if (why) blocked = classifyError(200, { error: typeof why === 'string' ? { code: why } : why }).kind === 'blocked';
+    }
+    const u = (data && data.usage) || {};
+    return { text, blocked, usage: { input: u.total_input_tokens || 0, output: (u.total_output_tokens || 0) + (u.total_thought_tokens || 0) } };
+}
+
+async function askGenerate(key, { model, system, input, schema, thinking, maxOutputTokens, signal, timeoutMs }) {
+    const generationConfig = { maxOutputTokens, thinkingConfig: { thinkingLevel: thinking } };
+    if (schema) { generationConfig.responseMimeType = 'application/json'; generationConfig.responseJsonSchema = schema; }
+    const body = { contents: [{ role: 'user', parts: [{ text: input }] }], generationConfig };
+    if (system) body.systemInstruction = { parts: [{ text: system }] };
+    const data = await callApi(`/models/${encodeURIComponent(model)}:generateContent`, body, { key, signal, timeoutMs });
+    const cand = (data && data.candidates && data.candidates[0]) || null;
+    const parts = (cand && cand.content && cand.content.parts) || [];
+    const text = parts.filter(p => p && typeof p.text === 'string' && !p.thought).map(p => p.text).join('');
+    const blocked = !text && (!!(data && data.promptFeedback && data.promptFeedback.blockReason)
+        || /SAFETY|RECITATION|PROHIBITED|BLOCKLIST|SPII/.test((cand && cand.finishReason) || ''));
+    const u = (data && data.usageMetadata) || {};
+    return { text, blocked, usage: { input: u.promptTokenCount || 0, output: (u.candidatesTokenCount || 0) + (u.thoughtsTokenCount || 0) } };
+}
+
+/** 모델을 부른다 → { text, blocked, usage } */
+async function ask(key, opts) {
+    const o = { thinking: 'low', maxOutputTokens: 16384, timeoutMs: 60000, ...opts };
+    if (prefersGenerate()) return askGenerate(key, o);
+    try {
+        return await askInteractions(key, o);
+    } catch (err) {
+        if (!(err instanceof GeminiError) || !FALLBACK_KINDS.has(err.kind)) throw err;
+        const res = await askGenerate(key, o);   // 이 길도 안 되면 이 길의 오류를 알린다
+        rememberApi('generate');
+        return res;
+    }
+}
+
 /**
  * 정해 준 모양(JSON 스키마)대로 답을 받는다 → { data, usage: { input, output } }
  * system: 지시문, input: 보낼 글(문자열), schema: 답의 모양
  */
 export function geminiJson({ system, input, schema, model = TEXT_MODEL, thinking = 'low', maxOutputTokens = 16384, signal } = {}) {
     return withKey(async (key) => {
-        const data = await callApi('/interactions', {
-            model,
-            system_instruction: system,
-            input,
-            response_format: { type: 'text', mime_type: 'application/json', schema },
-            generation_config: { thinking_level: thinking, max_output_tokens: maxOutputTokens },
-            store: false
-        }, { key, signal, timeoutMs: 90000 });
-        const text = findText(data);
-        if (!text) {
-            const why = (data && (data.error || (data.status !== 'completed' && data.status))) || null;
-            if (why) {
-                const err = classifyError(200, { error: typeof why === 'string' ? { code: why } : why });
-                if (err.kind === 'blocked') throw err;
-            }
+        const res = await ask(key, { model, system, input, schema, thinking, maxOutputTokens, signal, timeoutMs: 90000 });
+        if (!res.text) {
+            if (res.blocked) throw new GeminiError('blocked', MESSAGES.blocked);
             throw new GeminiError('bad_response', MESSAGES.bad_response);
         }
         let parsed;
-        try { parsed = JSON.parse(text); } catch (e) {
+        try { parsed = JSON.parse(res.text); } catch (e) {
             throw new GeminiError('bad_response', 'Gemini의 답을 읽지 못했습니다. 다시 시도해 주세요.');
         }
-        const u = (data && data.usage) || {};
-        return {
-            data: parsed,
-            usage: { input: u.total_input_tokens || 0, output: (u.total_output_tokens || 0) + (u.total_thought_tokens || 0) }
-        };
+        return { data: parsed, usage: res.usage };
     });
 }
 
@@ -381,20 +427,16 @@ export function geminiJson({ system, input, schema, model = TEXT_MODEL, thinking
 export async function connectGemini(rawKey) {
     const key = String(rawKey || '').replace(/\s+/g, '');
     if (key.length < 20) throw new GeminiError('invalid_key', MESSAGES.invalid_key);
+    useGenerate = false;   // 새 키는 두 길을 처음부터 다시 살핀다
     const tier = await probeTier(key);
-    await withRetry(() => callApi('/interactions', {
-        model: TEXT_MODEL,
-        input: '1',
-        generation_config: { thinking_level: 'low', max_output_tokens: 8 },
-        store: false
-    }, { key, timeoutMs: 30000 }));
+    await withRetry(() => ask(key, { model: TEXT_MODEL, input: '1', maxOutputTokens: 64, timeoutMs: 30000 }));
     try {
         localStorage.setItem(KEY_ITEM, key);
     } catch (e) {
         throw new GeminiError('bad_request', '이 기기에 키를 저장하지 못했습니다. 브라우저의 사생활 보호 모드라면 일반 창에서 다시 시도해 주세요.');
     }
     const now = Date.now();
-    writeMeta({ tier, checkedAt: now, agreedAt: now });
+    writeMeta({ tier, checkedAt: now, agreedAt: now, api: useGenerate ? 'generate' : 'interactions' });
     announce('connected');
     return { tier };
 }
