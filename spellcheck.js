@@ -2,6 +2,7 @@
  * 맞춤법 검사 (한국어·영어, 기기 안에서) — 글쓰기 도구 막대의 버튼으로 시작한다.
  *
  * 제목·소제목·본문을 줄 단위로 검사하고(spell-engine.js), 고칠 곳을 본문에 물결 밑줄로 보여 준다.
+ * 밑줄 색은 고친 종류를 나타낸다 — 맞춤법(빨강)·띄어쓰기(초록)·표준어(보라)·문맥(파랑).
  * 글은 어디로도 보내지 않는다. 사전은 처음 한 번 받아 기기에 저장한다.
  * 밑줄은 CSS Highlight API로 그린다 — 본문 HTML을 건드리지 않으므로 표시가 글에 저장될 일이 없다.
  * 아래 창의 목록에서 하나씩 고치거나 무시하고, '모두 고치기'로 한 번에 고친다.
@@ -18,7 +19,17 @@ import { state, isReadOnlyView } from './state.js';
 
 const $ = (id) => document.getElementById(id);
 const canHighlight = typeof CSS !== 'undefined' && CSS.highlights && typeof Highlight !== 'undefined';
-const ERR = 'spell-error', FOCUS = 'spell-focus';
+const FOCUS = 'spell-focus';
+// 고친 곳의 종류마다 밑줄 색을 달리한다 (네이버 맞춤법 검사기처럼) — 맞춤법 빨강·띄어쓰기 초록·표준어 보라·문맥 파랑
+const KINDS = [
+    { type: '맞춤법', mark: 'spell-error', cls: 'kind-spell' },
+    { type: '띄어쓰기', mark: 'spell-space', cls: 'kind-space' },
+    { type: '문장 부호', mark: 'spell-space', cls: 'kind-space' },
+    { type: '표준어', mark: 'spell-std', cls: 'kind-std' },
+    { type: '문맥', mark: 'spell-ctx', cls: 'kind-ctx' },
+];
+const kindOf = (type) => KINDS.find(k => k.type === type) || KINDS[0];
+const MARKS = [...new Set(KINDS.map(k => k.mark))];
 const HAS_LETTER = /\p{L}/u;
 
 let items = [];      // { id, where: 'body'|'title'|'subtitle', range | (el, a), from, to, type, why, word, src, ctx, row }
@@ -173,6 +184,19 @@ function render() {
 function updateSummary() {
     $('spell-fix-all')?.classList.toggle('hidden', items.length < 2);
     setSummary(items.length ? `${items.length}곳` : '');
+    // 종류별 개수를 밑줄과 같은 색의 꼬리표로 (맞춤법 2 · 띄어쓰기 3 …)
+    const box = $('spell-kinds');
+    if (!box) return;
+    box.innerHTML = '';
+    for (const k of KINDS.filter((k, i) => KINDS.findIndex(o => o.cls === k.cls) === i)) {
+        const n = items.filter(it => kindOf(it.type).cls === k.cls).length;
+        if (!n) continue;
+        const chip = document.createElement('span');
+        chip.className = `spell-kind ${k.cls}`;
+        chip.textContent = `${k.type} ${n}`;
+        box.appendChild(chip);
+    }
+    box.classList.toggle('hidden', !items.length);
 }
 
 function showMessage(text) {
@@ -229,7 +253,10 @@ function itemRow(it) {
     ctx.append(it.ctx.before, mark, it.ctx.after);
     const why = document.createElement('div');
     why.className = 'spell-why';
-    why.textContent = [it.where === 'title' ? '제목' : it.where === 'subtitle' ? '소제목' : '', it.type, it.why].filter(Boolean).join(' · ');
+    const kind = document.createElement('span');
+    kind.className = `spell-kind ${kindOf(it.type).cls}`;
+    kind.textContent = it.type;
+    why.append(kind, ' ' + [it.where === 'title' ? '제목' : it.where === 'subtitle' ? '소제목' : '', it.why].filter(Boolean).join(' · '));
     const actions = document.createElement('div');
     actions.className = 'spell-actions';
     actions.append(button('고치기', 'spell-btn', () => fixOne(it)), button('무시', 'spell-btn ghost', () => removeItem(it)));
@@ -241,12 +268,14 @@ function itemRow(it) {
 }
 
 function paint() {
-    if (!canHighlight) return;
-    const ranges = items.filter(it => it.where === 'body' && it.range && !it.stale).map(it => it.range);
-    if (ranges.length) CSS.highlights.set(ERR, new Highlight(...ranges));
-    else CSS.highlights.delete(ERR);
-    CSS.highlights.delete(FOCUS);
     clearSpot();
+    if (!canHighlight) return;
+    for (const mark of MARKS) {
+        const ranges = items.filter(it => it.where === 'body' && it.range && !it.stale && kindOf(it.type).mark === mark).map(it => it.range);
+        if (ranges.length) CSS.highlights.set(mark, new Highlight(...ranges));
+        else CSS.highlights.delete(mark);
+    }
+    CSS.highlights.delete(FOCUS);
 }
 
 function removeItem(it) {
@@ -514,10 +543,11 @@ function openPanel() {
 function clearResults() {
     clearSpot();
     items = [];
+    $('spell-kinds')?.classList.add('hidden');
     const list = $('spell-list');
     if (list) list.innerHTML = '';
     $('spell-fix-all')?.classList.add('hidden');
-    if (canHighlight) { CSS.highlights.delete(ERR); CSS.highlights.delete(FOCUS); }
+    if (canHighlight) { MARKS.forEach(m => CSS.highlights.delete(m)); CSS.highlights.delete(FOCUS); }
 }
 
 function closePanel() {

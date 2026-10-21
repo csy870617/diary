@@ -49,10 +49,14 @@ const COMMON = `카톡 카카오톡 단톡방 단톡 유튜브 인스타 인스�
 집순이 집돌이 깜놀 멘붕 소확행 얼죽아 꾸안꾸 내돈내산 가성비 가심비 무지출 미라클모닝 당근마켓 배민 쿠팡 쿠팡이츠 토스
 카카오뱅크 네이버페이 에어팟 애플워치 맥북 갤럭시탭 챌린지`;
 
+// 맞춤법 검사가 고쳐 주는 바른 말 가운데 사전에 없는 것 (바르게 쓴 말을 잡지 않도록)
+const CORRECTED = `주야장천 닭볶음탕 오도독뼈 콘텐트 파트너십 인턴십 챔피언십 스포츠맨십 오너십 스칼러십 네일숍 헤어숍 기프트숍 펫숍 로열
+카페라테 바닐라라테 녹차라테 고구마라테 말차라테 라테 주얼리 다이내믹 아웃렛 셰프 셰이크 섀도 선블록 피트니스 시추에이션 랍스터 조갯국`;
+
 const words = (s) => s.split(/\s+/).filter(Boolean);
 
 /** 조사가 붙을 수 있는 명사 */
-export const EXTRA_NOUNS = [...new Set([...words(BOOKS), ...words(PEOPLE), ...words(PLACES), ...words(CHURCH), ...words(COMMON)])];
+export const EXTRA_NOUNS = [...new Set([...words(BOOKS), ...words(PEOPLE), ...words(PLACES), ...words(CHURCH), ...words(COMMON), ...words(CORRECTED)])];
 
 /** 어미가 붙는 '-하다' 동사 (합력하여·큐티했다·증거하며) */
 export const EXTRA_VERBS = words(`합력하다 큐티하다 중보하다 송축하다 영접하다 역사하다 임재하다 심방하다 서원하다 안수하다
