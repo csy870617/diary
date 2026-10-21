@@ -759,9 +759,9 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
 /* ── 맞춤법 검사 (spellcheck.js) ── */
 /* 본문의 고칠 곳: CSS Highlight API — 본문 HTML은 바뀌지 않는다 */
 ::highlight(spell-error) { background-color: rgba(239, 68, 68, 0.10); text-decoration: underline wavy #EF4444; text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
-::highlight(spell-focus) { background-color: rgba(239, 68, 68, 0.28); }
+::highlight(spell-focus) { background-color: rgba(245, 158, 11, 0.42); }
 [data-theme="dark"] ::highlight(spell-error) { background-color: rgba(248, 113, 113, 0.16); text-decoration-color: #f87171; }
-[data-theme="dark"] ::highlight(spell-focus) { background-color: rgba(248, 113, 113, 0.32); }
+[data-theme="dark"] ::highlight(spell-focus) { background-color: rgba(251, 191, 36, 0.38); }
 .spell-panel { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 520px; z-index: 1210; background: var(--surface-color); border-top: 1px solid var(--gray-200); border-radius: 16px 16px 0 0; box-shadow: 0 -4px 20px var(--shadow-light); font-family: var(--text-sans); padding-bottom: var(--safe-bottom); animation: ttsSlideUp 0.2s ease; }
 .spell-panel.hidden { display: none; }
 .spell-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 10px 16px; border-bottom: 1px solid var(--gray-100); }
@@ -771,7 +771,8 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
 .spell-x { background: none; border: none; color: var(--gray-400); font-size: 18px; cursor: pointer; padding: 4px; border-radius: 6px; display: flex; flex-shrink: 0; }
 .spell-x:hover { color: var(--gray-900); background: var(--gray-100); }
 .spell-list { max-height: min(42vh, 360px); overflow-y: auto; }
-.spell-item { display: flex; flex-direction: column; gap: 4px; padding: 10px 16px; border-bottom: 1px solid var(--gray-100); }
+.spell-item { display: flex; flex-direction: column; gap: 4px; padding: 10px 16px; border-bottom: 1px solid var(--gray-100); cursor: pointer; }
+@media (hover: hover) { .spell-item:hover:not(.active) { background: var(--gray-100); } }
 .spell-item.active { background: var(--active-bg); }
 .spell-item.stale { opacity: 0.6; }
 .spell-change { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; background: none; border: none; padding: 0; text-align: left; cursor: pointer; font-family: var(--text-sans); font-size: 14px; color: var(--gray-900); }
@@ -779,6 +780,13 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
 .spell-from { color: var(--danger); text-decoration: line-through; white-space: pre-wrap; }
 .spell-to { color: var(--accent); font-weight: 600; white-space: pre-wrap; }
 .spell-why { font-size: 12px; color: var(--gray-500); line-height: 1.5; }
+.spell-ctx { font-size: 12.5px; color: var(--gray-900); opacity: 0.75; line-height: 1.5; white-space: pre-wrap; word-break: break-all; font-family: var(--text-serif); }
+.spell-ctx mark { background: rgba(245, 158, 11, 0.32); color: inherit; border-radius: 3px; padding: 0 1px; }
+/* 목록에서 고른 곳을 글에서 잠깐 빛나는 테두리로 보여 준다 (spellcheck.js) — 맞춤법 창(1210)보다 아래 */
+.spell-spot-layer { position: fixed; left: 0; right: 0; overflow: hidden; pointer-events: none; z-index: 1200; }
+.spell-spot { position: absolute; border: 2px solid #F59E0B; border-radius: 5px; animation: spellSpot 0.8s ease-out 3; }
+@keyframes spellSpot { from { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.6); } to { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); } }
+@media (prefers-reduced-motion: reduce) { .spell-spot { animation: none; box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.3); } }
 .spell-actions { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
 .spell-btn { font-family: var(--text-sans); font-size: 12px; padding: 5px 12px; border: 1px solid var(--gray-200); border-radius: 6px; background: var(--bg-color); color: var(--gray-900); cursor: pointer; white-space: nowrap; flex-shrink: 0; }
 .spell-btn:hover { border-color: var(--accent); color: var(--accent); }

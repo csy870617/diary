@@ -5,13 +5,14 @@
  * 글은 어디로도 보내지 않는다. 사전은 처음 한 번 받아 기기에 저장한다.
  * 밑줄은 CSS Highlight API로 그린다 — 본문 HTML을 건드리지 않으므로 표시가 글에 저장될 일이 없다.
  * 아래 창의 목록에서 하나씩 고치거나 무시하고, '모두 고치기'로 한 번에 고친다.
+ * 목록의 항목을 누르면 글에서 그 자리로 옮겨 가 잠깐 빛나는 테두리로 보여 준다 (책 보기면 그 쪽으로 넘긴다).
  * 고칠 때마다 되돌릴 자리를 남겨 되돌리기(Ctrl+Z) 한 번으로 돌아갈 수 있다.
  * 밑줄은 글과 함께 움직이는 Range로 잡고, 고치기 직전에 그 자리의 글자가 그대로인지 확인한다
  * (검사하는 동안이나 결과를 보는 동안 글을 고쳐도 엉뚱한 곳을 고치지 않도록).
  */
 import { diffSpans } from './spell-text.js';
 import { checkDocument, addPersonalWord } from './spell-engine.js';
-import { markEditPoint, afterProgrammaticEdit } from './editor.js';
+import { markEditPoint, afterProgrammaticEdit, jumpToPage } from './editor.js';
 import { showToast } from './tts.js';
 import { state, isReadOnlyView } from './state.js';
 
@@ -20,7 +21,7 @@ const canHighlight = typeof CSS !== 'undefined' && CSS.highlights && typeof High
 const ERR = 'spell-error', FOCUS = 'spell-focus';
 const HAS_LETTER = /\p{L}/u;
 
-let items = [];      // { id, where: 'body'|'title'|'subtitle', range | (el, a), from, to, type, why, word, src, row }
+let items = [];      // { id, where: 'body'|'title'|'subtitle', range | (el, a), from, to, type, why, word, src, ctx, row }
 let running = false;
 let runSeq = 0;      // 검사 중에 창을 닫거나 다른 글을 열면 늦게 온 결과를 버린다
 
@@ -135,12 +136,13 @@ async function startSpellcheck() {
         const starts = new Map();
         for (const f of fixes) {
             const p = plan[f.id];
-            if (p.where !== 'body') { items.push({ ...f, where: p.where, el: p.el }); continue; }
+            const ctx = around(lines[f.id].text, f.a, f.b);
+            if (p.where !== 'body') { items.push({ ...f, where: p.where, el: p.el, ctx }); continue; }
             if (!starts.has(f.id)) starts.set(f.id, relocate(index.text, p));
             const base = starts.get(f.id);
             if (base < 0) continue;
             const range = rangeAt(index, base + f.a, base + f.b);
-            if (range && range.toString() === f.from) items.push({ ...f, where: 'body', range });
+            if (range && range.toString() === f.from) items.push({ ...f, where: 'body', range, ctx });
         }
         render();
     } catch (err) {
@@ -192,13 +194,25 @@ function button(label, cls, onClick) {
     return b;
 }
 
+/** 고칠 곳 앞뒤의 글 몇 자 → { before, word, after } (목록에서 어디인지 알아보게) */
+function around(text, a, b) {
+    const n = 14;
+    let before = text.slice(Math.max(0, a - n), a);
+    let after = text.slice(b, b + n);
+    if (a > n) before = '…' + before;
+    if (b + n < text.length) after += '…';
+    return { before, word: text.slice(a, b), after };
+}
+
 function itemRow(it) {
     const row = document.createElement('div');
     row.className = 'spell-item';
+    row.title = '글에서 보기';
+    // 항목 어디를 눌러도 글에서 그 자리를 보여 준다 (고치기·무시 단추는 빼고)
+    row.addEventListener('click', (e) => { if (!e.target.closest('.spell-actions')) focusItem(it); });
     const change = document.createElement('button');
     change.type = 'button';
     change.className = 'spell-change';
-    change.title = '본문에서 보기';
     const from = document.createElement('span');
     from.className = 'spell-from';
     from.textContent = it.from;
@@ -208,7 +222,11 @@ function itemRow(it) {
     to.className = 'spell-to';
     to.textContent = it.to;
     change.append(from, arrow, to);
-    change.addEventListener('click', () => focusItem(it));
+    const ctx = document.createElement('div');
+    ctx.className = 'spell-ctx';
+    const mark = document.createElement('mark');
+    mark.textContent = it.ctx.word;
+    ctx.append(it.ctx.before, mark, it.ctx.after);
     const why = document.createElement('div');
     why.className = 'spell-why';
     why.textContent = [it.where === 'title' ? '제목' : it.where === 'subtitle' ? '소제목' : '', it.type, it.why].filter(Boolean).join(' · ');
@@ -217,7 +235,7 @@ function itemRow(it) {
     actions.append(button('고치기', 'spell-btn', () => fixOne(it)), button('무시', 'spell-btn ghost', () => removeItem(it)));
     // 사전에 없어서 잡힌 말(사람 이름 등)은 사전에 넣어 다음부터 잡지 않게 할 수 있다
     if (it.src === 'dict' && it.word && it.type === '맞춤법') actions.append(button('사전에 추가', 'spell-btn ghost', () => addToDictionary(it)));
-    row.append(change, why, actions);
+    row.append(change, ctx, why, actions);
     it.row = row;
     return row;
 }
@@ -228,6 +246,7 @@ function paint() {
     if (ranges.length) CSS.highlights.set(ERR, new Highlight(...ranges));
     else CSS.highlights.delete(ERR);
     CSS.highlights.delete(FOCUS);
+    clearSpot();
 }
 
 function removeItem(it) {
@@ -287,28 +306,101 @@ function scrollParent(el) {
     return null;
 }
 
-/** 고칠 곳을 본문에서 보여 준다 (화면 밖이면 그곳으로 옮긴다) */
+/** 글이 보이는 띠 — 도구 막대 아래부터 맞춤법 창 위까지 */
+function visibleBand() {
+    const bar = $('editor-toolbar'), container = $('editor-container'), panel = $('spell-panel');
+    const barBottom = bar && bar.offsetParent ? bar.getBoundingClientRect().bottom : 0;
+    const top = Math.max(0, barBottom, container ? container.getBoundingClientRect().top : 0);
+    const bottom = panel && !panel.classList.contains('hidden') ? panel.getBoundingClientRect().top : window.innerHeight;
+    return { top, bottom };
+}
+
+/** rect가 보이는 띠 밖이면 띠의 위쪽 3분의 1쯤으로 옮긴다 */
+function bringIntoView(rect, fromEl) {
+    const band = visibleBand();
+    if (rect.top >= band.top + 8 && rect.bottom <= band.bottom - 8) return;
+    const scroller = scrollParent(fromEl) || $('editor-container');
+    scroller?.scrollBy({ top: rect.top - (band.top + (band.bottom - band.top) * 0.33), behavior: 'smooth' });
+}
+
+// ─── 고칠 곳을 빛나는 테두리로 보여 주기 ───
+// 밑줄(CSS Highlight)을 못 그리는 브라우저에서도 보이고, 옅은 밑줄 사이에서도 눈에 띄게 잠깐 깜빡인다.
+// 맞춤법 창과 도구 막대를 덮지 않도록 글이 보이는 띠 안에만 그린다.
+let spot = null;   // { layer, place, timer }
+
+function showSpot(getRects) {
+    clearSpot();
+    const modal = $('write-modal');
+    if (!modal) return;
+    const layer = document.createElement('div');
+    layer.className = 'spell-spot-layer';
+    modal.appendChild(layer);
+    const place = () => {
+        const band = visibleBand();
+        layer.style.top = `${band.top}px`;
+        layer.style.height = `${Math.max(0, band.bottom - band.top)}px`;
+        const rects = getRects().filter(r => r && (r.width || r.height));
+        while (layer.children.length < rects.length) {
+            const d = document.createElement('div');
+            d.className = 'spell-spot';
+            layer.appendChild(d);
+        }
+        [...layer.children].forEach((d, i) => {
+            const r = rects[i];
+            d.hidden = !r;
+            if (!r) return;
+            Object.assign(d.style, { left: `${r.left - 3}px`, top: `${r.top - band.top - 2}px`, width: `${r.width + 6}px`, height: `${r.height + 4}px` });
+        });
+    };
+    place();
+    window.addEventListener('scroll', place, true);   // 본문이 움직이면 따라간다 (안쪽 스크롤도)
+    window.addEventListener('resize', place);
+    spot = { layer, place, timer: setTimeout(clearSpot, 2400) };
+}
+
+function clearSpot() {
+    if (!spot) return;
+    clearTimeout(spot.timer);
+    window.removeEventListener('scroll', spot.place, true);
+    window.removeEventListener('resize', spot.place);
+    spot.layer.remove();
+    spot = null;
+}
+
+/** 책 보기: 그 자리가 있는 쪽으로 넘긴다 */
+function turnToRange(range) {
+    const container = $('editor-container');
+    if (!container) return;
+    const stride = Math.floor(container.clientWidth);
+    const rect = range.getBoundingClientRect();
+    if (stride <= 0 || (!rect.width && !rect.height)) return;
+    const offsetX = rect.left - container.getBoundingClientRect().left + container.scrollLeft;
+    jumpToPage(Math.max(0, Math.floor(offsetX / stride)));
+}
+
+/** 고칠 곳을 글에서 보여 준다 — 화면 밖이면 옮겨 가고, 잠깐 빛나는 테두리를 두른다 */
 function focusItem(it) {
     items.forEach(o => o.row && o.row.classList.toggle('active', o === it));
     if (it.where !== 'body') {
+        // 제목·소제목 칸: 칸을 보여 주고, 마우스로 쓰는 화면이면 그 글자를 골라 둔다 (휴대폰은 자판이 올라오지 않게 고르지 않는다)
+        bringIntoView(it.el.getBoundingClientRect(), it.el);
         const a = inputOffset(it);
-        if (a >= 0) { it.el.focus(); it.el.setSelectionRange(a, a + it.from.length); }
+        if (a >= 0 && window.matchMedia && matchMedia('(pointer: fine)').matches) { it.el.focus({ preventScroll: true }); it.el.setSelectionRange(a, a + it.from.length); }
+        showSpot(() => [it.el.getBoundingClientRect()]);
         return;
     }
-    if (!it.range || !canHighlight) return;
-    const h = new Highlight(it.range);
-    h.priority = 1;
-    CSS.highlights.set(FOCUS, h);
-    if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') return;   // 책 보기는 쪽을 넘겨 찾는다
-    const rect = it.range.getBoundingClientRect();
-    if (!rect || (!rect.width && !rect.height)) return;
-    const container = $('editor-container');
-    const panel = $('spell-panel');
-    const top = Math.max(0, container ? container.getBoundingClientRect().top : 0);
-    const bottom = panel && !panel.classList.contains('hidden') ? panel.getBoundingClientRect().top : window.innerHeight;
-    if (rect.top >= top + 8 && rect.bottom <= bottom - 8) return;
-    const scroller = scrollParent(it.range.startContainer.parentElement) || container;
-    scroller?.scrollBy({ top: rect.top - (top + (bottom - top) * 0.35), behavior: 'smooth' });
+    if (!it.range || it.stale) return;
+    if (canHighlight) {
+        const h = new Highlight(it.range);
+        h.priority = 1;
+        CSS.highlights.set(FOCUS, h);
+    }
+    if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') turnToRange(it.range);
+    else {
+        const rect = it.range.getBoundingClientRect();
+        if (rect.width || rect.height) bringIntoView(rect, it.range.startContainer.parentElement);
+    }
+    showSpot(() => [...it.range.getClientRects()]);
 }
 
 /** range 안의 글자 마디들 → [{ node, from: 마디 안 시작, len, at: range 글자에서의 시작 }] */
@@ -420,6 +512,7 @@ function openPanel() {
 }
 
 function clearResults() {
+    clearSpot();
     items = [];
     const list = $('spell-list');
     if (list) list.innerHTML = '';

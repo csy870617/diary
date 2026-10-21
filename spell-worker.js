@@ -8,7 +8,8 @@
  * 메시지:
  *   → { type:'lookup', id, ko:[낱말], en:[낱말], words:[사용자가 사전에 넣은 말] }
  *   ← { type:'progress', id, stage:'download'|'open'|'check', lang, got, total } …
- *   ← { type:'result', id, ko:{ 낱말: null | [권하는 말] }, en:{…} } | { type:'error', id, message }
+ *   ← { type:'result', id, ko:{ 낱말: 판정 }, en:{…} } | { type:'error', id, message }
+ *     판정: null(사전에 있는 말) | false(사전에 없지만 고칠 말을 확실히 모름) | { to, why }
  */
 
 // 앱과 같은 판(?v=…)으로 다른 파일을 불러온다 (작업자는 화면의 import map을 쓰지 못한다)
@@ -195,7 +196,7 @@ function addUserWords(dicts, words) {
 function lookup(dict, lang, words, tick) {
     const out = {};
     const fresh = words.filter(w => !memo[lang].has(w));
-    const got = text.lookupWords(dict, fresh, tick);
+    const got = (lang === 'ko' ? text.lookupKorean : text.lookupEnglish)(dict, fresh, tick);
     for (const w of fresh) memo[lang].set(w, got[w]);
     for (const w of words) out[w] = memo[lang].get(w);
     return out;
