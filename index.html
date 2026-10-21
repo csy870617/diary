@@ -7,8 +7,8 @@
     <title>신앙일지 | Faith Log</title>
     <!-- 앱 버전: 배포할 때마다 이 값, 아래 import map, version.json을 함께 올린다.
          (화면을 다시 열 때 version.json과 비교해 새 버전이면 자동으로 새로고침한다) -->
-    <meta name="app-version" content="2026.10.21.3">
-    <link rel="stylesheet" href="style.css?v=2026.10.21.3">
+    <meta name="app-version" content="2026.10.21.4">
+    <link rel="stylesheet" href="style.css?v=2026.10.21.4">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
     <script>
         // 페이지 로드 전 다크모드 적용 (깜빡임 방지)
@@ -203,16 +203,6 @@
                         <label class="tts-lbl">음성</label>
                         <select id="tts-voice-select" class="tts-select"></select>
                     </div>
-                    <!-- Gemini 음성: 사용자가 자기 Gemini 키를 넣어 쓴다 (gemini-connect.js) -->
-                    <div class="tts-row" id="tts-gemini-row">
-                        <label class="tts-lbl">Gemini</label>
-                        <span id="tts-gemini-status" class="tts-hint">사람 같은 목소리 · Gemini 키 필요</span>
-                        <button id="tts-gemini-btn" class="tts-rbtn" type="button">연결</button>
-                    </div>
-                    <div class="tts-row hidden" id="tts-style-row">
-                        <label class="tts-lbl" for="tts-style-select">말투</label>
-                        <select id="tts-style-select" class="tts-select"></select>
-                    </div>
                     <div class="tts-row hidden" id="tts-neural-row">
                         <label class="tts-lbl">자연음</label>
                         <div class="tts-neural-box">
@@ -266,6 +256,7 @@
                 <span class="spell-title"><i class="ph ph-seal-check"></i> 맞춤법</span>
                 <span id="spell-summary" class="spell-summary" aria-live="polite"></span>
                 <button id="spell-fix-all" class="spell-btn primary hidden" type="button">모두 고치기</button>
+                <button id="spell-gemini" class="spell-x" type="button" aria-label="Gemini 연결 관리" title="Gemini 연결 관리"><i class="ph ph-key"></i></button>
                 <button id="spell-close" class="spell-x" type="button" aria-label="닫기"><i class="ph ph-x"></i></button>
             </div>
             <div id="spell-list" class="spell-list"></div>
@@ -476,14 +467,14 @@
         <div class="simple-modal gemini-modal-inner">
             <button id="gemini-close-x" class="gm-close" type="button" aria-label="닫기"><i class="ph ph-x"></i></button>
             <h3 id="gemini-modal-title">Gemini 연결</h3>
-            <p class="gm-lead">Google Gemini로 글을 사람 같은 목소리로 읽어 드리고, 맞춤법을 검사합니다. 본인의 Gemini API 키를 넣어 씁니다. 유료 등급이라면 요금은 키 주인의 Google 계정에 청구됩니다.</p>
+            <p class="gm-lead">Google Gemini로 글의 맞춤법·띄어쓰기를 검사합니다. 본인의 Gemini API 키를 넣어 씁니다. 유료 등급이라면 요금은 키 주인의 Google 계정에 청구됩니다.</p>
             <div class="gm-notice">
                 <b><i class="ph ph-info"></i> 무료 등급 키도 쓸 수 있습니다 — 차이를 알아 두세요</b>
                 <ul class="gm-tiers">
-                    <li><b>무료 등급</b>: 요금이 들지 않습니다. 대신 보낸 글이 Google의 서비스와 AI 모델을 개선하는 데 쓰일 수 있고, 사람이 읽고 검토할 수도 있습니다. 1분·하루에 쓸 수 있는 양이 적어, 긴 글은 중간에 잠시 기다리거나 그날은 더 쓰지 못할 수 있습니다.</li>
+                    <li><b>무료 등급</b>: 요금이 들지 않습니다. 대신 보낸 글이 Google의 서비스와 AI 모델을 개선하는 데 쓰일 수 있고, 사람이 읽고 검토할 수도 있습니다. 1분·하루에 쓸 수 있는 양이 적어, 긴 글은 검사 중간에 잠시 기다리거나 그날은 더 검사하지 못할 수 있습니다.</li>
                     <li><b>유료 등급</b>(AI Studio에서 결제 설정): 보낸 글이 Google 서비스 개선에 쓰이지 않습니다. 기도 제목이나 고백처럼 남이 보면 안 되는 기록이 있다면 유료 등급을 권합니다. 다만 '기여자 등급(Contributor Tier)'을 켠 프로젝트는 유료라도 글이 개선에 쓰입니다.</li>
                 </ul>
-                <span>어느 쪽이든 글은 읽기·맞춤법 검사를 누를 때 그 글만 보냅니다. 연결하면 이 창에서 지금 키의 등급을 알려 드립니다.</span>
+                <span>어느 쪽이든 맞춤법 검사를 누를 때 그 글만 보냅니다. 연결하면 이 창에서 지금 키의 등급을 알려 드립니다.</span>
             </div>
             <div id="gemini-connect-view">
                 <ol class="gm-steps">
@@ -500,16 +491,8 @@
                 <div class="gm-state"><i class="ph-fill ph-check-circle"></i> 연결됨 <span id="gemini-key-mask" class="gm-mask"></span></div>
                 <p id="gemini-tier-text" class="gm-tier"></p>
             </div>
-            <div class="gm-model-row">
-                <label for="gemini-model-select">음성 품질</label>
-                <select id="gemini-model-select" class="tts-select"></select>
-            </div>
             <p id="gemini-status" class="gm-status" role="status" aria-live="polite"></p>
-            <p class="gm-fine">키는 이 기기에만 저장되고 구글 드라이브로 동기화되지 않습니다. 한 번 만든 음성은 이 기기에 저장해, 다시 들을 때는 글을 다시 보내지 않고 요금도 들지 않습니다. 유료 등급의 맞춤법 검사는 글 한 편에 10원 안팎입니다.</p>
-            <div id="gemini-connected-actions" class="gm-actions hidden">
-                <span id="gemini-cache-text"></span>
-                <button id="gemini-clear-cache-btn" class="gm-link" type="button">저장된 음성 지우기</button>
-            </div>
+            <p class="gm-fine">키는 이 기기에만 저장되고 구글 드라이브로 동기화되지 않습니다. 유료 등급의 맞춤법 검사는 글 한 편에 10원 안팎입니다.</p>
             <div class="modal-btns">
                 <button id="gemini-connect-btn" class="primary-btn" type="button">확인하고 연결</button>
                 <button id="gemini-disconnect-btn" class="cancel-btn gm-danger hidden" type="button">연결 해제</button>
@@ -523,28 +506,27 @@
     <script type="importmap">
     {
         "imports": {
-            "./state.js": "./state.js?v=2026.10.21.3",
-            "./data.js": "./data.js?v=2026.10.21.3",
-            "./ui.js": "./ui.js?v=2026.10.21.3",
-            "./editor.js": "./editor.js?v=2026.10.21.3",
-            "./auth.js": "./auth.js?v=2026.10.21.3",
-            "./drive.js": "./drive.js?v=2026.10.21.3",
-            "./tts.js": "./tts.js?v=2026.10.21.3",
-            "./neural-tts.js": "./neural-tts.js?v=2026.10.21.3",
-            "./speech-text.js": "./speech-text.js?v=2026.10.21.3",
-            "./gemini.js": "./gemini.js?v=2026.10.21.3",
-            "./gemini-voice.js": "./gemini-voice.js?v=2026.10.21.3",
-            "./gemini-connect.js": "./gemini-connect.js?v=2026.10.21.3",
-            "./spell-text.js": "./spell-text.js?v=2026.10.21.3",
-            "./spellcheck.js": "./spellcheck.js?v=2026.10.21.3",
-            "./faiths-sso.js": "./faiths-sso.js?v=2026.10.21.3",
-            "./storage.js": "./storage.js?v=2026.10.21.3",
-            "./utils.js": "./utils.js?v=2026.10.21.3",
-            "./formula.js": "./formula.js?v=2026.10.21.3",
-            "./config.js": "./config.js?v=2026.10.21.3"
+            "./state.js": "./state.js?v=2026.10.21.4",
+            "./data.js": "./data.js?v=2026.10.21.4",
+            "./ui.js": "./ui.js?v=2026.10.21.4",
+            "./editor.js": "./editor.js?v=2026.10.21.4",
+            "./auth.js": "./auth.js?v=2026.10.21.4",
+            "./drive.js": "./drive.js?v=2026.10.21.4",
+            "./tts.js": "./tts.js?v=2026.10.21.4",
+            "./neural-tts.js": "./neural-tts.js?v=2026.10.21.4",
+            "./speech-text.js": "./speech-text.js?v=2026.10.21.4",
+            "./gemini.js": "./gemini.js?v=2026.10.21.4",
+            "./gemini-connect.js": "./gemini-connect.js?v=2026.10.21.4",
+            "./spell-text.js": "./spell-text.js?v=2026.10.21.4",
+            "./spellcheck.js": "./spellcheck.js?v=2026.10.21.4",
+            "./faiths-sso.js": "./faiths-sso.js?v=2026.10.21.4",
+            "./storage.js": "./storage.js?v=2026.10.21.4",
+            "./utils.js": "./utils.js?v=2026.10.21.4",
+            "./formula.js": "./formula.js?v=2026.10.21.4",
+            "./config.js": "./config.js?v=2026.10.21.4"
         }
     }
     </script>
-    <script type="module" src="script.js?v=2026.10.21.3"></script>
+    <script type="module" src="script.js?v=2026.10.21.4"></script>
 </body>
 </html>

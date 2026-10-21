@@ -48,9 +48,12 @@ export const NEURAL_VOICES = [
 
 // 공식 예제 기본값. 앱의 1.0배속이 모델의 1.05에 해당한다.
 const MODEL_BASE_SPEED = 1.05;
-// 모델에 맡기는 최대 속도. 이보다 빠르게 시키면 말을 빼먹는다(받아쓰기로 확인:
-// 1.37배 91%, 1.68배 43%, 2.1배 30%만 읽힘). 그 이상은 만든 소리를 음높이 그대로 빠르게 한다.
-const MODEL_MAX_SPEED = 1.2;
+// 모델에 맡기는 최대 속도. 모델에 빠르게 말하게 하면 말을 빼먹는다(받아쓰기로 확인: 1.37배 91%,
+// 1.68배 43%, 2.1배 30%만 읽힘). 예전에는 1.2배까지 맡겼는데, 그래도 짧은 문장일수록 끝이 잘렸다
+// (1.5·2배속 받아쓰기: '정말 감사한 하루였다!' → '정말 간', '많았다.' → '많았' 등 문장 60개 중 4개, 글자 오류 2.5~2.8%).
+// 이제 모델은 제 빠르기로만 말하고, 빠르게 듣는 배율은 모두 만든 소리를 음높이 그대로 빠르게 해서 맞춘다
+// (작업자의 timeStretch). 같은 시험에서 끝이 틀린 문장 1개, 글자 오류 1.2~1.3%.
+const MODEL_MAX_SPEED = MODEL_BASE_SPEED;
 // 품질 단계(반복 횟수). 많을수록 곱지만 느리다. 기기 속도에 맞춰 4~8 사이에서 자동 조절한다.
 // (측정: 단계 8은 5보다 약 1.5배 느림. 느린 기기에서 8로 고정하면 문장 사이가 끊긴다)
 const MAX_STEPS = 8, MIN_STEPS = 4;
@@ -59,8 +62,9 @@ let backendName = null;
 // 한 번에 만드는 최대 글자 수. 한국어는 120자 안쪽이 안정적이지만(공식 예제), 긴 조각은
 // 작업자 하나가 오래 붙잡고 있어 다음 조각이 늦어진다. 90자로 나눠 여러 작업자가 동시에 만들게 한다.
 export const NEURAL_MAX_CHUNK = 90;
-// 자연스러운 음성이 1배속에서 읽는 평균 글자 수/초 (측정값 약 6.5~7 — 재생 전 시간이 실제와 맞도록 6.6)
-export const NEURAL_CHARS_PER_SEC = 6.6;
+// 자연스러운 음성이 1배속에서 읽는 평균 글자 수/초 — 문장 앞뒤 무음을 걷어 낸 소리 기준
+// (측정: 문장 20개 × 목소리 4개, 7.6. 문장 사이 쉼은 tts.js가 따로 더한다)
+export const NEURAL_CHARS_PER_SEC = 7.6;
 
 /** 음성 저장소 주소: 앱이 /diary/ 에 있으면 /faith-voice/ (같은 주소라 별도 허용 설정이 필요 없다) */
 export function voiceBase() {
@@ -404,7 +408,8 @@ function workerUrl() {
 function finishAudio(p, d, genSec) {
     const audioSec = d.wav.length / d.sampleRate;
     addNeuralDiag({ type: 'synth', chars: p.chars, audioSec, genSec, steps: p.steps, stretch: p.stretch, parts: p.parts || d.parts });
-    adaptSteps(audioSec, genSec, p.steps);
+    // 이 문장을 읽는 시간과 뒤의 쉼 동안 다음 문장을 만든다
+    adaptSteps(audioSec + (p.pauseSec || 0), genSec, p.steps);
     p.resolve({ wav: d.wav, sampleRate: d.sampleRate });
 }
 
@@ -558,21 +563,24 @@ export function shutdownNeural() {
     stopNeuralAudio();
 }
 
-/** 문장 하나를 음성으로 만든다. 버려진 세대면 null */
-export async function synthesizeNeural(text, voiceValue, appSpeed, gen) {
+/**
+ * 문장 하나를 음성으로 만든다. 버려진 세대면 null.
+ * pauseSec: 이 문장 뒤에 쉬는 시간(초) — 그동안에도 다음 문장을 만들 수 있어 품질 단계 조절에 쓴다
+ */
+export async function synthesizeNeural(text, voiceValue, appSpeed, gen, pauseSec = 0) {
     await ensureNeuralReady();
     const id = ++reqSeq;
     const style = voiceValue.slice(NEURAL_PREFIX.length) || 'F1';
     const total = Math.max(0.5, Math.min(2.5, MODEL_BASE_SPEED * (appSpeed || 1)));
     const speed = Math.min(total, MODEL_MAX_SPEED);
     const stretch = total / speed;
-    // 빠르게 들을수록 같은 시간에 더 많이 만들어야 한다. CPU 기기에서 1.5배 이상이면 처음부터 가장 빠른 단계로.
-    if (backendName !== 'webgpu' && stretch >= 1.25 && denoiseSteps > MIN_STEPS && !diagLog.some(e => e.type === 'synth')) denoiseSteps = MIN_STEPS;
+    // 빠르게 들을수록 같은 시간에 더 많이 만들어야 한다. CPU 기기에서 1.4배 이상이면 처음부터 가장 빠른 단계로.
+    if (backendName !== 'webgpu' && (appSpeed || 1) >= 1.4 && denoiseSteps > MIN_STEPS && !diagLog.some(e => e.type === 'synth')) denoiseSteps = MIN_STEPS;
     const steps = denoiseSteps;
     // 맡긴 일이 가장 적은 생성 작업자에게 (GPU 기기는 작업자 1개)
     const target = workers.filter(x => x.role !== 'vocoder').reduce((a, b) => (a.n <= b.n ? a : b));
     return new Promise((resolve, reject) => {
-        pending.set(id, { resolve, reject, chars: text.length, stretch, steps });
+        pending.set(id, { resolve, reject, chars: text.length, stretch, steps, pauseSec });
         target.n++;
         target.w.postMessage({ type: 'synth', id, gen, text, lang: 'ko', style, speed, stretch, steps });
     });

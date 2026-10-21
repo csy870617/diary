@@ -223,9 +223,51 @@ async function synth({ text, lang, style, speed, steps }) {
 }
 
 /**
+ * 문장 앞뒤의 긴 무음을 걷어 낸다.
+ * 모델은 문장마다 앞에 0.2~0.6초, 뒤에 0.3~0.7초쯤 소리 없는 구간을 붙인다. 그대로 이어 틀면 문장 사이가
+ * 1초 넘게, 그것도 문장마다 들쭉날쭉하게 벌어져 느리고 어색하게 들렸다(쉼표에서 나눈 곳도 마침표처럼 오래 쉼).
+ * 쉼은 앱(tts.js)이 문장 끝·쉼표·줄바꿈에 맞춰 일정하게 둔다.
+ * 들숨·끝소리의 여운은 남기도록 가장 큰 소리보다 60dB 넘게 작은 구간만 무음으로 보고, 앞뒤에 여유를 둔다.
+ */
+const TRIM_FLOOR = 0.001;          // 가장 큰 소리 대비 -60dB
+const TRIM_LEAD_SEC = 0.05, TRIM_TAIL_SEC = 0.1, TRIM_FADE_SEC = 0.005;
+function trimSilence(x, sampleRate) {
+    const hop = Math.max(1, Math.round(sampleRate * 0.01));   // 10ms씩 소리 크기를 잰다
+    const n = Math.floor(x.length / hop);
+    if (n < 10) return x;
+    const rms = new Float32Array(n);
+    let peak = 0;
+    for (let f = 0; f < n; f++) {
+        let acc = 0;
+        for (let j = f * hop, e = j + hop; j < e; j++) acc += x[j] * x[j];
+        rms[f] = Math.sqrt(acc / hop);
+        if (rms[f] > peak) peak = rms[f];
+    }
+    if (!(peak > 0)) return x;
+    const floor = peak * TRIM_FLOOR;
+    let a = 0, b = n - 1;
+    while (a < n && rms[a] < floor) a++;
+    while (b > a && rms[b] < floor) b--;
+    if (a >= n) return x;
+    const start = Math.max(0, a * hop - Math.round(sampleRate * TRIM_LEAD_SEC));
+    const end = Math.min(x.length, (b + 1) * hop + Math.round(sampleRate * TRIM_TAIL_SEC));
+    if (start === 0 && end === x.length) return x;
+    const y = x.slice(start, end);
+    // 자른 자리가 '틱' 하고 튀지 않게 아주 짧게 줄였다 키운다
+    const fade = Math.min(Math.round(sampleRate * TRIM_FADE_SEC), y.length >> 1);
+    for (let j = 0; j < fade; j++) {
+        const g = j / fade;
+        if (start > 0) y[j] *= g;
+        if (end < x.length) y[y.length - 1 - j] *= g;
+    }
+    return y;
+}
+
+/**
  * 음높이를 바꾸지 않고 소리를 빠르게 한다 (WSOLA: 겹쳐 잇기 + 파형이 가장 잘 맞는 자리 찾기).
- * 모델에 직접 빠르게 말하게 하면 1.3배쯤부터 말을 빼먹어(받아쓰기로 확인: 1.6배에서 원문의 43%만
- * 읽힘) 모델은 안정적인 속도까지만 쓰고, 나머지 배율은 여기서 맞춘다.
+ * 모델에 직접 빠르게 말하게 하면 말을 빼먹어(받아쓰기로 확인: 모델 1.37배에서 원문의 91%, 1.68배에서 43%만
+ * 읽힘. 1.2배로 낮춰도 짧은 문장은 끝이 잘렸다 — neural-tts.js의 MODEL_MAX_SPEED) 모델은 제 빠르기로만
+ * 말하게 하고, 빠르게 듣는 배율은 모두 여기서 맞춘다.
  */
 function timeStretch(x, rate) {
     if (!(rate > 1.001) || x.length < 4096) return x;
@@ -233,13 +275,18 @@ function timeStretch(x, rate) {
     const win = new Float32Array(N);
     for (let i = 0; i < N; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / N);
     const outLen = Math.round(x.length / rate);
+    // 끝에 무음을 덧대어 마지막 조각까지 창 안에 온전히 들어오게 한다
+    // (덧대지 않으면 끝 30ms쯤을 찾을 자리가 없어 빠지고, 남은 부분도 창 모양대로 줄어들었다)
+    const src = new Float32Array(x.length + N + tol);
+    src.set(x);
     const out = new Float32Array(outLen + N);
-    for (let j = 0; j < N && j < x.length; j++) out[j] += x[j] * win[j];
+    // 첫 조각의 앞 절반은 겹칠 조각이 없으므로 줄이지 않고 그대로 둔다 (첫소리가 작아지지 않게)
+    for (let j = 0; j < N; j++) out[j] = src[j] * (j < Hs ? 1 : win[j]);
     let prev = 0;
     // 겹치는 앞 절반이 바로 앞 조각의 자연스러운 이어짐과 가장 비슷한 자리를 고른다
     const score = (pos, nat, step) => {
         let acc = 0;
-        for (let j = 0; j < Hs; j += step) acc += x[pos + j] * x[nat + j];
+        for (let j = 0; j < Hs; j += step) acc += src[pos + j] * src[nat + j];
         return acc;
     };
     for (let k = 1; ; k++) {
@@ -247,18 +294,24 @@ function timeStretch(x, rate) {
         if (outPos >= outLen) break;
         const nominal = Math.round(outPos * rate);
         const natural = prev + Hs;
-        const lo = Math.max(0, nominal - tol), hi = Math.min(x.length - N, nominal + tol);
-        if (hi < lo || natural + Hs > x.length) break;
-        // 거칠게(4칸씩) 찾은 뒤 주변을 촘촘히 다듬는다 — 계산량을 1/8로 줄인다
+        const lo = Math.max(0, nominal - tol), hi = Math.min(src.length - N, nominal + tol);
+        if (hi < lo || natural + Hs > src.length) break;
+        // 거칠게(2칸씩, 4칸 간격으로 견줘) 찾은 뒤 주변을 촘촘히 다듬는다 — 계산량을 1/8로 줄인다
         let best = lo, bestScore = -Infinity;
         for (let p = lo; p <= hi; p += 2) { const sc = score(p, natural, 4); if (sc > bestScore) { bestScore = sc; best = p; } }
         const a = Math.max(lo, best - 2), b = Math.min(hi, best + 2);
         bestScore = -Infinity;
         for (let p = a; p <= b; p++) { const sc = score(p, natural, 1); if (sc > bestScore) { bestScore = sc; best = p; } }
-        for (let j = 0; j < N; j++) out[outPos + j] += x[best + j] * win[j];
+        for (let j = 0; j < N; j++) out[outPos + j] += src[best + j] * win[j];
         prev = best;
     }
     return out.subarray(0, outLen);
+}
+
+/** 만든 소리를 다듬는다: 앞뒤 무음을 걷고, 빠르게 들을 배율만큼 빠르게 한다 */
+function finishWav(raw, sampleRate, stretch) {
+    const trimmed = trimSilence(raw, sampleRate);
+    return (stretch > 1.001) ? new Float32Array(timeStretch(trimmed, stretch)) : new Float32Array(trimmed);
 }
 
 /** 잠재값을 소리로 (보코더 전담 작업자) */
@@ -288,7 +341,7 @@ self.onmessage = (e) => {
                 self.postMessage({ type: 'ready', backend, model: modelName, sampleRate: cfgs.ae.sample_rate });
             } else if (msg.type === 'vocode') {
                 const { wav: raw, sampleRate, vocMs } = await vocode(msg);
-                const wav = (msg.stretch > 1.001) ? new Float32Array(timeStretch(raw, msg.stretch)) : raw;
+                const wav = finishWav(raw, sampleRate, msg.stretch);
                 self.postMessage({ type: 'audio', id: msg.id, wav, sampleRate, vocMs }, [wav.buffer]);
             } else if (msg.type === 'synth' && role === 'acoustic') {
                 const t0 = performance.now();
@@ -299,7 +352,7 @@ self.onmessage = (e) => {
             } else if (msg.type === 'synth') {
                 const t0 = performance.now();
                 const { wav: raw, sampleRate, parts } = await synth(msg);
-                const wav = (msg.stretch > 1.001) ? new Float32Array(timeStretch(raw, msg.stretch)) : raw;
+                const wav = finishWav(raw, sampleRate, msg.stretch);
                 self.postMessage({ type: 'audio', id: msg.id, wav, sampleRate, ms: performance.now() - t0, steps: msg.steps, parts }, [wav.buffer]);
             }
         } catch (err) {
