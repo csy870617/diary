@@ -157,7 +157,7 @@ export function classifyError(httpStatus, body) {
     const make = (kind, extra) => {
         const text = (free && MESSAGES[kind + '_free']) || MESSAGES[kind];
         // 서버 쪽 문제·알 수 없는 요청 오류는 Gemini가 준 설명을 함께 보여 준다 (원인을 알아내기 쉽게)
-        const why = (kind === 'bad_request' || kind === 'server') && (message || httpStatus)
+        const why = ['bad_request', 'server', 'rate_limit', 'quota'].includes(kind) && (message || httpStatus)
             ? `\n(Gemini 답: ${httpStatus || ''} ${message.slice(0, 160)})`.replace('( ', '(') : '';
         return new GeminiError(kind, text + why,
             { httpStatus, code: code || status, detail: message, free, ...extra });
@@ -429,7 +429,15 @@ export async function connectGemini(rawKey) {
     if (key.length < 20) throw new GeminiError('invalid_key', MESSAGES.invalid_key);
     useGenerate = false;   // 새 키는 두 길을 처음부터 다시 살핀다
     const tier = await probeTier(key);
-    await withRetry(() => ask(key, { model: TEXT_MODEL, input: '1', maxOutputTokens: 64, timeoutMs: 30000 }));
+    // 사용량 한도에 걸렸다는 답은 키가 맞다는 뜻이다 — 연결은 하고, 조금 뒤에 검사하라고 알린다
+    // (무료 등급은 1분 한도가 작아 연결을 몇 번 다시 시도하다 보면 한도에 걸린다. 기다리게 하지 않는다)
+    let limited = null;
+    try {
+        await ask(key, { model: TEXT_MODEL, input: '1', maxOutputTokens: 64, timeoutMs: 30000 });
+    } catch (err) {
+        if (!(err instanceof GeminiError) || !['rate_limit', 'quota'].includes(err.kind)) throw err;
+        limited = err;
+    }
     try {
         localStorage.setItem(KEY_ITEM, key);
     } catch (e) {
@@ -438,5 +446,5 @@ export async function connectGemini(rawKey) {
     const now = Date.now();
     writeMeta({ tier, checkedAt: now, agreedAt: now, api: useGenerate ? 'generate' : 'interactions' });
     announce('connected');
-    return { tier };
+    return { tier, limited };
 }
