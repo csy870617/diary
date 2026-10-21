@@ -1,5 +1,5 @@
 /**
- * Gemini(구글 AI) 연결 — 사용자가 자기 Gemini API 키를 넣어 쓴다.
+ * Gemini(구글 AI) 연결 — 사용자가 자기 Gemini API 키를 넣어 맞춤법 검사에 쓴다.
  *
  * 무료 등급 키와 유료 등급 키를 모두 받는다. 다만 무료 등급에서는 보낸 글이 Google 서비스 개선에 쓰이고
  * 사람이 읽을 수도 있어(가격표의 '제품 개선에 사용: 예') 연결 창에 그 차이를 안내하고, 지금 키의 등급을 보여 준다.
@@ -14,41 +14,15 @@
 
 const API = 'https://generativelanguage.googleapis.com/v1beta';
 const KEY_ITEM = 'faith_gemini_key';
-const META_ITEM = 'faith_gemini_meta';      // { model, tier: 'paid'|'free'|'unknown', checkedAt, agreedAt }
-export const GEMINI_AUDIO_DB = 'diary-gemini-voice';   // 받은 음성 저장소 (gemini-voice.js)
+const META_ITEM = 'faith_gemini_meta';      // { tier: 'paid'|'free'|'unknown', checkedAt, agreedAt }
+// 예전 Gemini 음성 기능이 남긴 것 — 기능을 뺐으므로 지운다 (removeOldVoiceData)
+const OLD_AUDIO_DB = 'diary-gemini-voice';
+const OLD_ITEMS = ['faith_gemini_style', 'faith_gemini_cps'];
 
 // 무료 등급에는 없는 모델 — 이 모델이 답하면 유료 등급이다 (8토큰까지만 받아 요금은 1원 미만)
 const TIER_PROBE_MODEL = 'gemini-4-argon';
 const RECHECK_MS = 24 * 60 * 60 * 1000;
-export const SAMPLE_RATE = 24000;
-
-export const GEMINI_TTS_MODELS = [
-    { id: 'gemini-3.8-flash-tts', label: '가장 자연스럽게' },
-    { id: 'gemini-3.8-flash-lite-tts', label: '빠르고 저렴하게' }
-];
-export const DEFAULT_TTS_MODEL = 'gemini-3.8-flash-tts';
-
-// 가격: 1백만 토큰당 달러(글자 입력 / 소리 출력). 소리는 1초에 25토큰.
-// 2027년 1월 1일부터 두 배로 오른다고 공지되어 있다 (ai.google.dev/gemini-api/docs/pricing).
-const PRICES = {
-    'gemini-3.8-flash-tts':      [{ until: Date.UTC(2027, 0, 1), text: 0.5, audio: 9 }, { text: 1, audio: 18 }],
-    'gemini-3.8-flash-lite-tts': [{ until: Date.UTC(2027, 0, 1), text: 0.5, audio: 6 }, { text: 1, audio: 12 }]
-};
-const AUDIO_TOKENS_PER_SEC = 25;
 export const WON_PER_USD = 1400;
-
-/** 소리 audioSec초(글자 chars자)를 만드는 데 드는 대략의 요금(원) */
-export function estimateWon(audioSec, chars, model) {
-    const table = PRICES[model] || PRICES[DEFAULT_TTS_MODEL];
-    const now = Date.now();
-    const p = table.find(x => !x.until || now < x.until);
-    const usd = ((audioSec || 0) * AUDIO_TOKENS_PER_SEC * p.audio + (chars || 0) * p.text) / 1e6;
-    return usd * WON_PER_USD;
-}
-
-export function wonPerMinute(model) {
-    return estimateWon(60, 0, model);
-}
 
 export function formatWon(won) {
     if (!(won >= 1)) return '1원 미만';
@@ -80,18 +54,9 @@ export function getGeminiInfo() {
     return {
         connected: !!key,
         last4: key ? key.slice(-4) : '',
-        model: PRICES[meta.model] ? meta.model : DEFAULT_TTS_MODEL,
         tier: meta.tier === 'paid' || meta.tier === 'free' ? meta.tier : 'unknown',
         checkedAt: meta.checkedAt || 0
     };
-}
-
-export function setGeminiModel(model) {
-    if (!PRICES[model]) return;
-    const meta = readMeta();
-    meta.model = model;
-    writeMeta(meta);
-    announce('model');
 }
 
 function announce(what, extra) {
@@ -99,22 +64,31 @@ function announce(what, extra) {
     window.dispatchEvent(new CustomEvent('gemini-change', { detail: { what, ...extra } }));
 }
 
-/** 키·설정과 이 기기에 저장한 Gemini 음성을 모두 지운다 (연결 해제·로그아웃) */
+/** 키·설정을 지운다 (연결 해제·로그아웃) */
 export async function forgetGemini() {
     try {
         localStorage.removeItem(KEY_ITEM);
         localStorage.removeItem(META_ITEM);
     } catch (e) { /* 저장소 접근 불가 */ }
     announce('disconnected');
-    await deleteAudioDb();
+    await removeOldVoiceData();
 }
 
-function deleteAudioDb() {
+/**
+ * 예전 Gemini 음성 기능이 이 기기에 남긴 음성 저장소와 설정을 지운다.
+ * 음성 기능을 뺐으므로 앱을 열 때 한 번 부른다 (없으면 아무 일도 하지 않는다).
+ */
+export function removeOldVoiceData() {
+    try { OLD_ITEMS.forEach(k => localStorage.removeItem(k)); } catch (e) { /* 저장소 접근 불가 */ }
+    try {
+        const v = localStorage.getItem('faith_tts_voice');
+        if (v && v.startsWith('gm:')) localStorage.removeItem('faith_tts_voice');   // 고르던 Gemini 음성
+    } catch (e) { /* 저장소 접근 불가 */ }
     return new Promise((resolve) => {
         if (typeof indexedDB === 'undefined') { resolve(); return; }
         let timer = null;
         try {
-            const req = indexedDB.deleteDatabase(GEMINI_AUDIO_DB);
+            const req = indexedDB.deleteDatabase(OLD_AUDIO_DB);
             req.onsuccess = req.onerror = () => { clearTimeout(timer); resolve(); };
             // 열려 있는 연결이 닫히기를 기다리는 중 — 너무 오래 붙잡지 않는다 (닫히면 이어서 지워진다)
             req.onblocked = () => { timer = setTimeout(resolve, 3000); };
@@ -144,14 +118,15 @@ const MESSAGES = {
     rate_limit_free: '무료 등급은 1분에 쓸 수 있는 양이 적습니다. 1분쯤 뒤에 다시 시도해 주세요.',
     quota: '오늘 쓸 수 있는 Gemini 사용량을 다 썼습니다. AI Studio에서 사용 한도를 확인해 주세요.',
     quota_free: '무료 등급의 오늘 사용량을 다 썼습니다. 내일 다시 쓰거나, AI Studio에서 결제를 연결하면 한도가 늘어납니다.',
-    blocked: 'Gemini가 이 부분은 읽지 않았습니다(내용 정책).',
+    blocked: 'Gemini가 이 글은 처리하지 않았습니다(내용 정책).',
     server: 'Gemini 서버가 잠시 응답하지 않습니다. 조금 뒤 다시 시도해 주세요.',
     network: '인터넷에 연결되어 있지 않거나 Gemini에 접속하지 못했습니다.',
     timeout: 'Gemini가 너무 오래 응답하지 않습니다. 조금 뒤 다시 시도해 주세요.',
-    not_found: 'Gemini 음성 모델을 찾지 못했습니다. 앱을 새로 고친 뒤 다시 시도해 주세요.',
-    no_key: 'Gemini가 연결되어 있지 않습니다. 음성 설정에서 Gemini를 연결해 주세요.',
-    bad_response: 'Gemini의 답에서 소리를 찾지 못했습니다. 다시 시도해 주세요.',
-    bad_request: 'Gemini가 요청을 처리하지 못했습니다.'
+    not_found: 'Gemini 모델을 찾지 못했습니다. 앱을 새로 고친 뒤 다시 시도해 주세요.',
+    no_key: 'Gemini가 연결되어 있지 않습니다. 맞춤법 버튼을 눌러 Gemini를 연결해 주세요.',
+    bad_response: 'Gemini가 답을 주지 않았습니다. 다시 시도해 주세요.',
+    bad_request: 'Gemini가 요청을 처리하지 못했습니다.',
+    tier_changed: 'Gemini 키가 무료 등급으로 바뀌었습니다(결제 연결이 끊긴 것 같습니다).\n무료 등급에서는 보낸 글이 Google 서비스 개선에 쓰일 수 있어, 이번에는 글을 보내지 않았습니다.\n그래도 괜찮다면 맞춤법 버튼을 다시 누르세요. 원하지 않으면 AI Studio에서 결제를 다시 연결하거나 Gemini 연결을 해제해 주세요.'
 };
 
 const BLOCKED_CODES = new Set(['safety', 'recitation', 'language', 'prohibited_content', 'spii', 'blocklist', 'content_blocked']);
@@ -267,10 +242,13 @@ async function probeTier(key) {
 
 let tierCheck = null;
 
-/** 하루에 한 번 키의 등급을 다시 살펴 적어 둔다. 등급이 바뀌었으면 알린다 (결제를 연결하거나 끊은 경우) */
+/**
+ * 하루에 한 번 키의 등급을 다시 살펴 적어 둔다 (결제를 연결하거나 끊으면 바뀐다).
+ * 등급이 바뀌었으면 알리고 { tier, from }을 돌려준다.
+ */
 function refreshTier(key) {
     const meta = readMeta();
-    if (meta.checkedAt && Date.now() - meta.checkedAt < RECHECK_MS) return Promise.resolve();
+    if (meta.checkedAt && Date.now() - meta.checkedAt < RECHECK_MS) return Promise.resolve(null);
     if (!tierCheck) {
         tierCheck = (async () => {
             let tier;
@@ -278,14 +256,16 @@ function refreshTier(key) {
                 tier = await probeTier(key);
             } catch (err) {
                 if (err.kind === 'invalid_key' || err.kind === 'no_credit') throw err;
-                return;   // 잠시 접속이 안 되는 등 — 다음에 다시 살핀다
+                return null;   // 잠시 접속이 안 되는 등 — 다음에 다시 살핀다
             }
             const m = readMeta();
             const before = m.tier || 'unknown';
             if (tier !== 'unknown') m.tier = tier;
             m.checkedAt = Date.now();
             writeMeta(m);
-            if (tier !== 'unknown' && tier !== before) announce('tier', { tier, from: before });
+            if (tier === 'unknown' || tier === before) return null;
+            announce('tier', { tier, from: before });
+            return { tier, from: before };
         })().finally(() => { tierCheck = null; });
     }
     return tierCheck;
@@ -317,99 +297,17 @@ export async function withRetry(task) {
     }
 }
 
-// ─── 음성 만들기 ───
-
-function findAudioBlock(data) {
-    let found = null;
-    for (const step of (data && data.steps) || []) {
-        for (const c of (step && step.content) || []) if (c && c.type === 'audio' && c.data) found = c;
-    }
-    if (!found) for (const o of (data && data.outputs) || []) if (o && o.type === 'audio' && o.data) found = o;
-    return found;
-}
-
-async function base64ToBytes(b64) {
-    try {
-        const res = await fetch('data:application/octet-stream;base64,' + b64);
-        return new Uint8Array(await res.arrayBuffer());
-    } catch (e) {
-        const bin = atob(b64);
-        const out = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-        return out;
-    }
-}
-
-/** 받은 소리(WAV 또는 머리말 없는 16비트 PCM)를 { pcm: Int16Array, sampleRate }로 */
-export function pcmFromBytes(bytes, fallbackRate = SAMPLE_RATE) {
-    const tag = (o) => String.fromCharCode(bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]);
-    let start = 0, end = bytes.length, rate = fallbackRate, channels = 1;
-    if (bytes.length >= 12 && tag(0) === 'RIFF' && tag(8) === 'WAVE') {
-        const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-        for (let o = 12; o + 8 <= bytes.length;) {
-            const id = tag(o);
-            const size = view.getUint32(o + 4, true);
-            if (id === 'fmt ') {
-                channels = view.getUint16(o + 10, true) || 1;
-                rate = view.getUint32(o + 12, true) || fallbackRate;
-            } else if (id === 'data') {
-                start = o + 8;
-                end = Math.min(bytes.length, start + size);
-                break;
-            }
-            o += 8 + size + (size & 1);
-        }
-    }
-    const count = Math.floor((end - start) / 2);
-    // Int16Array는 2바이트 경계에서만 만들 수 있다 — 어긋나 있으면 복사한다
-    const aligned = ((bytes.byteOffset + start) & 1) === 0;
-    let pcm = aligned
-        ? new Int16Array(bytes.buffer, bytes.byteOffset + start, count)
-        : new Int16Array(bytes.slice(start, start + count * 2).buffer);
-    if (channels === 2) {
-        const mono = new Int16Array(count >> 1);
-        for (let i = 0; i < mono.length; i++) mono[i] = (pcm[2 * i] + pcm[2 * i + 1]) >> 1;
-        pcm = mono;
-    }
-    return { pcm, sampleRate: rate };
-}
-
-async function speakWithKey(key, text, { voice, style, model, signal } = {}) {
-    const content = { type: 'text', text };
-    if (style) content.annotations = [{ type: 'speech_metadata', style }];
-    const data = await callApi('/interactions', {
-        model: PRICES[model] ? model : DEFAULT_TTS_MODEL,
-        input: [{ type: 'user_input', content: [content] }],
-        response_format: { type: 'audio', mime_type: 'audio/l16', sample_rate: SAMPLE_RATE },
-        generation_config: { speech_config: [{ voice }] },
-        store: false
-    }, { key, signal, timeoutMs: 90000 });
-    const block = findAudioBlock(data);
-    if (!block) {
-        // 소리 없이 끝났다 — 내용 정책으로 막혔는지 살핀다
-        const why = (data && (data.error || (data.status !== 'completed' && data.status))) || null;
-        if (why) {
-            const err = classifyError(200, { error: typeof why === 'string' ? { code: why } : why });
-            if (err.kind === 'blocked') throw err;
-        }
-        throw new GeminiError('bad_response', MESSAGES.bad_response);
-    }
-    const bytes = await base64ToBytes(block.data);
-    const rateMatch = /rate=(\d+)/.exec(block.mime_type || '');
-    return pcmFromBytes(bytes, rateMatch ? Number(rateMatch[1]) : SAMPLE_RATE);
-}
-
-/** 저장된 키로 Gemini를 부르는 모든 기능이 거치는 길 (하루 한 번 등급을 다시 살핀다) */
+/**
+ * 저장된 키로 Gemini를 부르는 모든 기능이 거치는 길 (하루 한 번 등급을 다시 살핀다).
+ * 결제가 끊겨 무료 등급이 된 것을 방금 알았다면, 글을 보내기 전에 멈추고 알린다
+ * (무료 등급에서는 보낸 글이 Google 개선에 쓰일 수 있다 — 모르고 보내지 않게).
+ */
 async function withKey(run) {
     const key = getGeminiKey();
     if (!key) throw new GeminiError('no_key', MESSAGES.no_key);
-    await refreshTier(key);
+    const change = await refreshTier(key);
+    if (change && change.from === 'paid' && change.tier === 'free') throw new GeminiError('tier_changed', MESSAGES.tier_changed);
     return run(key);
-}
-
-/** 저장된 키로 음성을 만든다 → { pcm: Int16Array, sampleRate } */
-export function geminiSpeak(text, options = {}) {
-    return withKey(key => speakWithKey(key, text, options));
 }
 
 // ─── 글 다루기 (맞춤법 검사 등) ───
@@ -461,7 +359,7 @@ export function geminiJson({ system, input, schema, model = TEXT_MODEL, thinking
                 const err = classifyError(200, { error: typeof why === 'string' ? { code: why } : why });
                 if (err.kind === 'blocked') throw err;
             }
-            throw new GeminiError('bad_response', 'Gemini가 답을 주지 않았습니다. 다시 시도해 주세요.');
+            throw new GeminiError('bad_response', MESSAGES.bad_response);
         }
         let parsed;
         try { parsed = JSON.parse(text); } catch (e) {
@@ -476,22 +374,27 @@ export function geminiJson({ system, input, schema, model = TEXT_MODEL, thinking
 }
 
 /**
- * 키를 확인하고 저장한다. 순서: 등급 확인(안내용 — 무료 등급도 받는다) → 짧은 인사말로 음성 확인 → 저장.
- * 인사말 소리를 돌려주어 고른 목소리를 바로 들려줄 수 있게 한다.
+ * 키를 확인하고 저장한다. 순서: 등급 확인(안내용 — 무료 등급도 받는다)
+ * → 맞춤법 검사에 쓰는 모델을 아주 짧게 불러 이 키로 쓸 수 있는지 확인 → 저장.
+ * (키의 사용 제한·지역 때문에 못 쓰는 경우를 검사하기 전에 알 수 있다. 1원 미만)
  */
-export async function connectGemini(rawKey, { model, voice, style, sampleText } = {}) {
+export async function connectGemini(rawKey) {
     const key = String(rawKey || '').replace(/\s+/g, '');
     if (key.length < 20) throw new GeminiError('invalid_key', MESSAGES.invalid_key);
     const tier = await probeTier(key);
-    const use = PRICES[model] ? model : DEFAULT_TTS_MODEL;
-    const sample = await withRetry(() => speakWithKey(key, sampleText || '안녕하세요. 이제 이 목소리로 글을 읽어 드릴게요.', { voice, style, model: use }));
+    await withRetry(() => callApi('/interactions', {
+        model: TEXT_MODEL,
+        input: '1',
+        generation_config: { thinking_level: 'low', max_output_tokens: 8 },
+        store: false
+    }, { key, timeoutMs: 30000 }));
     try {
         localStorage.setItem(KEY_ITEM, key);
     } catch (e) {
         throw new GeminiError('bad_request', '이 기기에 키를 저장하지 못했습니다. 브라우저의 사생활 보호 모드라면 일반 창에서 다시 시도해 주세요.');
     }
     const now = Date.now();
-    writeMeta({ model: use, tier, checkedAt: now, agreedAt: now });
+    writeMeta({ tier, checkedAt: now, agreedAt: now });
     announce('connected');
-    return { tier, sample };
+    return { tier };
 }

@@ -812,17 +812,13 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
 .gemini-modal-inner .gm-tier { font-size: 12px; color: var(--gray-500); line-height: 1.5; margin-bottom: 12px; }
 .gemini-modal-inner .gm-tier.free { color: #B45309; }
 [data-theme="dark"] .gemini-modal-inner .gm-tier.free { color: #FCD34D; }
-.gemini-modal-inner .gm-model-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.gemini-modal-inner .gm-model-row label { font-size: 12px; font-weight: 600; color: var(--gray-500); flex-shrink: 0; }
 .gemini-modal-inner .gm-status { font-size: 12.5px; line-height: 1.5; margin-bottom: 10px; white-space: pre-line; color: var(--gray-500); }
 .gemini-modal-inner .gm-status:empty { display: none; }
 .gemini-modal-inner .gm-status.ok { color: var(--accent); }
 .gemini-modal-inner .gm-status.err { color: var(--danger); }
 .gemini-modal-inner .gm-fine { font-size: 11px; color: var(--gray-400); line-height: 1.6; margin-bottom: 12px; }
-.gemini-modal-inner .gm-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--gray-500); margin-bottom: 12px; }
-.gemini-modal-inner .gm-link { background: none; border: none; color: var(--gray-500); text-decoration: underline; font-size: 12px; cursor: pointer; font-family: var(--text-sans); flex-shrink: 0; }
 .gemini-modal-inner .gm-danger { color: var(--danger); }
-.gemini-modal-inner button:disabled, .gemini-modal-inner input:disabled, .gemini-modal-inner select:disabled { opacity: 0.5; cursor: default; }
+.gemini-modal-inner button:disabled, .gemini-modal-inner input:disabled { opacity: 0.5; cursor: default; }
 
 /* ── 표 도구 바 ──────────────────────────────────────────────
    표 안을 누르면 표 옆에 떠서, 지금 어느 줄·칸을 다루는지 보여주고

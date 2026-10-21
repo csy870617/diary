@@ -9,7 +9,7 @@
  * (검사하는 동안이나 결과를 보는 동안 글을 고쳐도 엉뚱한 곳을 고치지 않도록).
  */
 import { checkSpelling, diffSpans } from './spell-text.js';
-import { isGeminiConnected, getGeminiInfo, textUsageWon, formatWon } from './gemini.js';
+import { isGeminiConnected, getGeminiInfo, textUsageWon, formatWon, removeOldVoiceData } from './gemini.js';
 import { openGeminiModal } from './gemini-connect.js';
 import { markEditPoint, afterProgrammaticEdit } from './editor.js';
 import { showToast } from './tts.js';
@@ -463,6 +463,7 @@ export function initSpellcheck() {
     $('toolbar-spell-btn')?.addEventListener('click', startSpellcheck);
     $('spell-close')?.addEventListener('click', closePanel);
     $('spell-fix-all')?.addEventListener('click', fixAll);
+    $('spell-gemini')?.addEventListener('click', () => openGeminiModal());
     $('editor-body')?.addEventListener('click', onBodyClick);
     window.addEventListener('bottom-panel-open', (e) => {
         if (e.detail !== 'spell' && !$('spell-panel')?.classList.contains('hidden')) closePanel();
@@ -473,4 +474,6 @@ export function initSpellcheck() {
         const sec = Math.ceil(((e.detail && e.detail.ms) || 0) / 1000);
         setSummary(`${e.detail && e.detail.free ? '무료 등급 사용량 한도로' : '요청이 몰려'} ${sec}초 기다리는 중…`);
     });
+    // 예전 Gemini 음성 기능이 이 기기에 남긴 음성·설정을 지운다 (음성 기능은 뺐다)
+    setTimeout(() => { removeOldVoiceData(); }, 3000);
 }
