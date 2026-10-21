@@ -321,6 +321,8 @@ export function toggleTTSPanel() {
     const isHidden = panel.classList.contains('hidden');
     if (isHidden) {
         watchSettingsDrawer();
+        // 화면 아래의 다른 창(맞춤법 검사)은 닫는다 — 같은 자리를 쓴다
+        window.dispatchEvent(new CustomEvent('bottom-panel-open', { detail: 'tts' }));
         panel.classList.remove('hidden');
         document.getElementById('write-modal')?.classList.add('tts-open');
         // 새 기능 안내: 처음 몇 번만 알려 준다
@@ -709,7 +711,7 @@ export function clearTTSRangeForNewEntry() {
     clearTTSHighlight();
 }
 
-function showToast(msg, ms = 1800) {
+export function showToast(msg, ms = 1800) {
     let toast = document.getElementById('tts-toast');
     if (!toast) {
         toast = document.createElement('div');
@@ -1687,6 +1689,10 @@ export function initTTS() {
     document.getElementById('tts-style-select')?.addEventListener('change', onStyleChange);
     document.getElementById('tts-gemini-btn')?.addEventListener('click', () => openGeminiModal());
     window.addEventListener('gemini-change', (e) => onGeminiChange(e.detail));
+    // 화면 아래의 다른 창(맞춤법 검사)이 열리면 음성 바를 닫는다
+    window.addEventListener('bottom-panel-open', (e) => {
+        if (e.detail !== 'tts' && !document.getElementById('tts-panel')?.classList.contains('hidden')) toggleTTSPanel();
+    });
     document.getElementById('editor-body')?.addEventListener('click', onEditorTapForTTS);
     // 사용자가 직접 스크롤하는 동안에는 읽는 문장을 따라가지 않는다
     const markUserScroll = () => { lastUserScrollMs = Date.now(); };

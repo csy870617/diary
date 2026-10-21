@@ -226,6 +226,17 @@ function saveBeforeChange(actionType = 'unknown') {
     lastLocalEditTime = Date.now();
 }
 
+/** 맞춤법 고치기처럼 프로그램이 글을 고치기 직전에 부른다 — 되돌리기 한 번으로 돌아갈 자리를 남긴다 */
+export function markEditPoint(actionType = 'replace') {
+    saveBeforeChange(actionType);
+}
+
+/** 프로그램이 글을 고친 뒤에 부른다 — 자동 저장하고, 책 보기라면 쪽을 다시 나눈다 */
+export function afterProgrammaticEdit() {
+    triggerAutoSave();
+    if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') { updateBookLayout(); updateBookNav(); }
+}
+
 /**
  * 현재 커서 위치를 저장 (표 삽입 등 모달 열기 전에 호출)
  */
@@ -1971,6 +1982,8 @@ export function openEditor(isEdit, entryData) {
     state.isEditMode = isEdit; const writeModal = document.getElementById('write-modal'); openModal(writeModal); writeModal.scrollTop = 0; currentBookPageIndex = 0; savedRange = null; setupBasicHandling();
     // 이전 글의 TTS 구간이 남아 새 글을 엉뚱한 위치부터 읽는 것을 방지
     import('./tts.js').then(m => m.clearTTSRangeForNewEntry && m.clearTTSRangeForNewEntry()).catch(() => {});
+    // 이전 글의 맞춤법 검사 결과(밑줄·목록)도 지운다
+    import('./spellcheck.js').then(m => m.resetSpellcheck && m.resetSpellcheck()).catch(() => {});
     const catName = state.allCategories.find(c => c.id === state.currentCategory)?.name || '기록';
     document.getElementById('display-category').innerText = catName; document.getElementById('display-date').innerText = entryData ? entryData.date : new Date().toLocaleDateString('ko-KR');
     const editTitle = document.getElementById('edit-title'), editSubtitle = document.getElementById('edit-subtitle'), editBody = document.getElementById('editor-body');

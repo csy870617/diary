@@ -5,6 +5,7 @@ import { equalizeColumns, equalizeRows, insertTableFunction, clearTableFunction,
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, handleAuthClick, syncNow, syncSoon, pullFromDrive, ensureTokenOnResume, startKeepAlive, setSyncStatus } from './drive.js';
 import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, updateSpeedDisplay, updatePitchDisplay, updateGapDisplay, initTTS, seekTTSByPercent, saveTTSVoice } from './tts.js';
+import { initSpellcheck } from './spellcheck.js';
 import { initFaithsSSO } from './faiths-sso.js';
 import { flushEntries } from './storage.js';
 import { isSafeUrl } from './utils.js';
@@ -562,6 +563,9 @@ function setupUIListeners() {
     document.getElementById('tts-voice-select')?.addEventListener('change', saveTTSVoice);
     document.getElementById('tts-progress-slider')?.addEventListener('input', (e) => seekTTSByPercent(e.target.value));
     initTTS();
+
+    // --- 맞춤법 검사 (Gemini) ---
+    initSpellcheck();
 
     document.getElementById('toolbar-link-btn')?.addEventListener('click', () => { createHyperlink(); });
 

@@ -1,5 +1,6 @@
 /**
  * Gemini 연결 창 — 사용자가 자기 Gemini API 키(결제를 연결한 유료 등급)를 넣고 확인한 뒤 연결한다.
+ * 이 키로 Gemini 음성(tts.js)과 맞춤법 검사(spellcheck.js)를 쓴다.
  * 키 확인·저장은 gemini.js, 받은 음성 저장소는 gemini-voice.js가 맡고, 이 파일은 창만 다룬다.
  */
 import { connectGemini, forgetGemini, getGeminiInfo, setGeminiModel, GEMINI_TTS_MODELS, wonPerMinute, formatWon } from './gemini.js';
@@ -10,7 +11,8 @@ const $ = (id) => document.getElementById(id);
 let wired = false;
 let busy = false;
 
-export function openGeminiModal() {
+/** hint: 창을 연 까닭 (예: 맞춤법 검사를 누르면 '먼저 연결해 주세요') */
+export function openGeminiModal({ hint } = {}) {
     const modal = $('gemini-modal');
     if (!modal) return;
     wire();
@@ -18,7 +20,7 @@ export function openGeminiModal() {
     if (input) { input.value = ''; input.type = 'password'; }
     const check = $('gemini-paid-check');
     if (check) check.checked = false;
-    setStatus('');
+    setStatus(hint || '');
     render();
     modal.classList.remove('hidden');
     if (!getGeminiInfo().connected) setTimeout(() => $('gemini-key-input')?.focus(), 60);
@@ -102,9 +104,8 @@ async function onConnect() {
         const input = $('gemini-key-input');
         if (input) input.value = '';
         render();
-        setStatus(res.tier === 'paid'
-            ? '연결했습니다. 유료 등급을 확인했습니다.\n음성 목록의 🎙️ 음성으로 읽어 드립니다.'
-            : '연결했습니다. 음성 목록의 🎙️ 음성으로 읽어 드립니다.', 'ok');
+        setStatus((res.tier === 'paid' ? '연결했습니다. 유료 등급을 확인했습니다.\n' : '연결했습니다.\n')
+            + '음성 목록의 🎙️ 음성으로 읽어 드리고, 글쓰기 도구 막대의 맞춤법 버튼으로 검사할 수 있습니다.', 'ok');
         if (res.sample && res.sample.pcm.length) playNeuralAudio(int16ToFloat(res.sample.pcm), res.sample.sampleRate);
     } catch (err) {
         setStatus((err && err.message) || String(err), 'err');

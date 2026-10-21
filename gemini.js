@@ -372,13 +372,16 @@ async function speakWithKey(key, text, { voice, style, model, signal } = {}) {
     return pcmFromBytes(bytes, rateMatch ? Number(rateMatch[1]) : SAMPLE_RATE);
 }
 
-/** 저장된 키로 음성을 만든다 → { pcm: Int16Array, sampleRate } */
-export async function geminiSpeak(text, options = {}) {
+/**
+ * 저장된 키로 Gemini를 부르는 모든 기능이 거치는 길: 하루 한 번 유료 등급을 살핀 뒤에야 글을 보내고,
+ * 무료 등급이라는 답이 오면 연결을 끊는다.
+ */
+async function withPaidKey(run) {
     const key = getGeminiKey();
     if (!key) throw new GeminiError('no_key', MESSAGES.no_key);
     await ensurePaidTier(key);
     try {
-        return await speakWithKey(key, text, options);
+        return await run(key);
     } catch (err) {
         if (err instanceof GeminiError && err.kind === 'free_tier' && !err.disconnected) {
             await forgetGemini({ auto: true });
@@ -387,6 +390,74 @@ export async function geminiSpeak(text, options = {}) {
         }
         throw err;
     }
+}
+
+/** 저장된 키로 음성을 만든다 → { pcm: Int16Array, sampleRate } */
+export function geminiSpeak(text, options = {}) {
+    return withPaidKey(key => speakWithKey(key, text, options));
+}
+
+// ─── 글 다루기 (맞춤법 검사 등) ───
+
+// 가격: 1백만 토큰당 달러(입력 / 출력 — 출력에는 생각하는 데 쓴 토큰도 들어간다). 2027년부터 두 배.
+const TEXT_PRICES = {
+    'gemini-3.8-flash': [{ until: Date.UTC(2027, 0, 1), input: 0.75, output: 3.75 }, { input: 1.5, output: 7.5 }]
+};
+export const TEXT_MODEL = 'gemini-3.8-flash';
+
+/** 사용량({ input, output } 토큰) → 대략의 요금(원) */
+export function textUsageWon(usage, model = TEXT_MODEL) {
+    if (!usage) return 0;
+    const table = TEXT_PRICES[model] || TEXT_PRICES[TEXT_MODEL];
+    const now = Date.now();
+    const p = table.find(x => !x.until || now < x.until);
+    return ((usage.input || 0) * p.input + (usage.output || 0) * p.output) / 1e6 * WON_PER_USD;
+}
+
+function findText(data) {
+    let text = '';
+    for (const step of (data && data.steps) || []) {
+        if (step && step.type && step.type !== 'model_output') continue;
+        const parts = ((step && step.content) || []).filter(c => c && c.type === 'text' && typeof c.text === 'string');
+        if (parts.length) text = parts.map(c => c.text).join('');
+    }
+    if (!text) for (const o of (data && data.outputs) || []) if (o && o.type === 'text' && typeof o.text === 'string') text += o.text;
+    return text;
+}
+
+/**
+ * 정해 준 모양(JSON 스키마)대로 답을 받는다 → { data, usage: { input, output } }
+ * system: 지시문, input: 보낼 글(문자열), schema: 답의 모양
+ */
+export function geminiJson({ system, input, schema, model = TEXT_MODEL, thinking = 'low', maxOutputTokens = 16384, signal } = {}) {
+    return withPaidKey(async (key) => {
+        const data = await callApi('/interactions', {
+            model,
+            system_instruction: system,
+            input,
+            response_format: { type: 'text', mime_type: 'application/json', schema },
+            generation_config: { thinking_level: thinking, max_output_tokens: maxOutputTokens },
+            store: false
+        }, { key, signal, timeoutMs: 90000 });
+        const text = findText(data);
+        if (!text) {
+            const why = (data && (data.error || (data.status !== 'completed' && data.status))) || null;
+            if (why) {
+                const err = classifyError(200, { error: typeof why === 'string' ? { code: why } : why });
+                if (err.kind === 'blocked') throw err;
+            }
+            throw new GeminiError('bad_response', 'Gemini가 답을 주지 않았습니다. 다시 시도해 주세요.');
+        }
+        let parsed;
+        try { parsed = JSON.parse(text); } catch (e) {
+            throw new GeminiError('bad_response', 'Gemini의 답을 읽지 못했습니다. 다시 시도해 주세요.');
+        }
+        const u = (data && data.usage) || {};
+        return {
+            data: parsed,
+            usage: { input: u.total_input_tokens || 0, output: (u.total_output_tokens || 0) + (u.total_thought_tokens || 0) }
+        };
+    });
 }
 
 /**
