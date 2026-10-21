@@ -2,6 +2,7 @@
  * TTS (Text-to-Speech) 모듈 v2
  * Web Speech API 기반 - 미니 플레이어 UI
  * + 자연스러운 음성(Supertonic 3, 내려받아 기기에서 생성) — neural-tts.js
+ * + Gemini 음성(사용자의 유료 등급 키로 Google Gemini가 생성) — gemini-voice.js, gemini.js
  */
 
 import {
@@ -11,6 +12,13 @@ import {
     stopNeuralAudio, pauseNeuralAudio, resumeNeuralAudio, lowerNeuralQuality, getNeuralInfo,
     checkNeuralUpdate, addNeuralDiag, getNeuralMinSteps, neuralWasEvicted, inAppBrowserName
 } from './neural-tts.js';
+import {
+    GEMINI_PREFIX, GEMINI_VOICES, GEMINI_STYLES, GEMINI_MAX_CHUNK, DEFAULT_GEMINI_VOICE,
+    isGeminiVoice, geminiCharsPerSec, getGeminiSegment, prefetchGemini, isGeminiSegmentReady,
+    geminiGapAfterMs, geminiPassageLast, getGeminiStyle, setGeminiStyle
+} from './gemini-voice.js';
+import { isGeminiConnected, getGeminiInfo, estimateWon, formatWon, wonPerMinute } from './gemini.js';
+import { openGeminiModal } from './gemini-connect.js';
 import { state } from './state.js';
 import { jumpToPage } from './editor.js';
 import { normalizeForSpeech, noBreakMask } from './speech-text.js';
@@ -42,8 +50,16 @@ function selectedVoiceValue() {
 function usingNeural() {
     return isNeuralVoice(selectedVoiceValue());
 }
+function usingGemini() {
+    return isGeminiVoice(selectedVoiceValue());
+}
+// 소리를 만들어 직접 재생하는 음성(자연음·Gemini) — 소리 장치 깨우기·일시정지·재개 방식이 같다
+function usingMadeAudio() {
+    return usingNeural() || usingGemini();
+}
 // 자연스러운 음성은 기본 음성보다 천천히 읽는다 (재생 시간 예상·탐색 위치 계산용)
 function charsPerSec() {
+    if (usingGemini()) return geminiCharsPerSec(selectedVoiceValue());
     return timingNeural() ? NEURAL_CHARS_PER_SEC : CHARS_PER_SEC;
 }
 // 음성 바를 연 직후에는 받아 둔 음성 확인이 끝나기 전이라 목록에 아직 기본 음성이 골라져 있다.
@@ -242,9 +258,9 @@ function onEditorTapForTTS(e) {
 }
 
 function playFromOffset(pos) {
-    const neural = usingNeural();
-    if (!neural && !('speechSynthesis' in window)) return;
-    if (neural) unlockNeuralAudio();   // 누른 순간에 소리 장치를 깨워 둔다 (아이폰)
+    const made = usingMadeAudio();
+    if (!made && !('speechSynthesis' in window)) return;
+    if (made) unlockNeuralAudio();   // 누른 순간에 소리 장치를 깨워 둔다 (아이폰)
     const src = getSpeechSource();
     if (!src.text) return;
     const chunks = splitChunks(src.text, getMaxChunkLen(), src.map);
@@ -329,7 +345,10 @@ export function toggleTTSSettings() {
     const settings = document.getElementById('tts-settings');
     if (!settings) return;
     settings.classList.toggle('hidden');
-    if (!settings.classList.contains('hidden')) refreshNeuralRow();   // 계산 장치·품질 표시를 최신으로
+    if (!settings.classList.contains('hidden')) {
+        refreshNeuralRow();   // 계산 장치·품질 표시를 최신으로
+        refreshGeminiRows();  // 지금 글의 예상 요금
+    }
 }
 
 function closeTTSSettings() {
@@ -358,26 +377,54 @@ async function addNeuralGroup(sel, saved) {
             o.textContent = '✨ ' + v.label;
             g.appendChild(o);
         });
-        sel.insertBefore(g, sel.firstChild);
+        // Gemini 음성이 있으면 그 바로 아래에 둔다
+        const gemini = sel.querySelector('optgroup[data-gemini]');
+        sel.insertBefore(g, gemini ? gemini.nextSibling : sel.firstChild);
         if (isNeuralVoice(saved)) sel.value = saved;
     } else if (isNeuralVoice(sel.value)) {
-        // 받아 둔 음성이 지워졌으면 기본 음성 중 첫 번째로
-        const first = sel.querySelector('option:not([value^="' + NEURAL_PREFIX + '"])');
+        // 받아 둔 음성이 지워졌으면 기본 음성 중 첫 번째로 (요금이 드는 Gemini 음성으로 몰래 바꾸지 않는다)
+        const first = sel.querySelector(`option:not([value^="${NEURAL_PREFIX}"]):not([value^="${GEMINI_PREFIX}"])`)
+            || sel.querySelector('option:not([value^="' + NEURAL_PREFIX + '"])');
         if (first) sel.value = first.value;
     }
     updatePitchAvailability();
+    refreshGeminiRows();
     // 받아 둔 음성 확인은 조금 늦게 끝난다 — 음성이 정해진 뒤 그 음성의 빠르기로 시간을 다시 계산한다
     if (!isTTSSpeaking) refreshTTSTotalTime();
+}
+
+// Gemini가 연결되어 있으면 Gemini 음성을 목록 맨 위에 넣는다
+function addGeminiGroup(sel) {
+    sel.querySelector('optgroup[data-gemini]')?.remove();
+    if (!isGeminiConnected()) return;
+    const g = document.createElement('optgroup');
+    g.label = '🎙️ Gemini 음성';
+    g.dataset.gemini = '1';
+    GEMINI_VOICES.forEach(v => {
+        const o = document.createElement('option');
+        o.value = GEMINI_PREFIX + v.id;
+        o.textContent = '🎙️ ' + v.label;
+        g.appendChild(o);
+    });
+    sel.insertBefore(g, sel.firstChild);
+}
+
+function hasVoiceOption(sel, value) {
+    return !!value && [...sel.options].some(o => o.value === value);
 }
 
 export function loadVoices() {
     const sel = document.getElementById('tts-voice-select');
     if (!sel) return;
     if (!('speechSynthesis' in window)) {
-        // 기본 음성 엔진이 없어도 자연스러운 음성은 쓸 수 있다
+        // 기본 음성 엔진이 없어도 자연스러운 음성·Gemini 음성은 쓸 수 있다
         sel.innerHTML = '';
-        addNeuralGroup(sel, localStorage.getItem('faith_tts_voice'));
+        const saved = localStorage.getItem('faith_tts_voice');
+        addGeminiGroup(sel);
+        if (isGeminiVoice(saved) && hasVoiceOption(sel, saved)) sel.value = saved;
+        addNeuralGroup(sel, saved);
         refreshNeuralRow();
+        refreshGeminiRows();
         return;
     }
     refreshNeuralRow();
@@ -425,17 +472,20 @@ export function loadVoices() {
 
         addGroup(ko, '🇰🇷 한국어');
         addGroup(enUs, '🇺🇸 English (US)');
+        addGeminiGroup(sel);
 
         // 저장된 음성 복원, 없으면 가장 자연스러운 한국어 음성 우선 선택
         const allowed = [...ko, ...enUs];
         const saved = localStorage.getItem('faith_tts_voice');
-        if (saved && allowed.find(v => v.name === saved)) {
+        if (saved && (allowed.find(v => v.name === saved) || (isGeminiVoice(saved) && hasVoiceOption(sel, saved)))) {
             sel.value = saved;
         } else if (ko.length) {
             sel.value = ko[0].name;
         } else if (enUs.length) {
             sel.value = enUs[0].name;
         }
+        updatePitchAvailability();
+        refreshGeminiRows();
         addNeuralGroup(sel, saved);
     };
 
@@ -455,17 +505,91 @@ export function loadVoices() {
     }
 }
 
-// 자연스러운 음성은 음높이를 바꿀 수 없다 → 슬라이더를 잠그고 이유를 알려 준다
+// 자연스러운 음성·Gemini 음성은 음높이를 바꿀 수 없다 → 슬라이더를 잠그고 이유를 알려 준다
 function updatePitchAvailability() {
     const slider = document.getElementById('tts-pitch-slider');
     if (!slider) return;
-    const neural = usingNeural();
-    slider.disabled = neural;
+    const neural = usingNeural(), gemini = usingGemini();
+    slider.disabled = neural || gemini;
     const row = slider.closest('.tts-row');
     if (row) {
-        row.classList.toggle('tts-row-disabled', neural);
-        row.title = neural ? '자연스러운 음성은 음높이를 바꿀 수 없습니다' : '';
+        row.classList.toggle('tts-row-disabled', neural || gemini);
+        row.title = gemini ? 'Gemini 음성은 음높이를 바꿀 수 없습니다 — 말투를 바꿔 보세요'
+            : neural ? '자연스러운 음성은 음높이를 바꿀 수 없습니다' : '';
     }
+}
+
+// ─── Gemini 연결 줄 · 말투 줄 ───
+
+/** 이 글을 Gemini로 처음부터 끝까지 읽을 때 만드는 소리의 길이(초, 1배속·쉼 없이) — 요금 어림용 */
+function estimateGeminiAudioSec() {
+    const text = getTextToSpeak();
+    if (!text) return 0;
+    const timings = buildChunkTimings(splitChunks(text, getMaxChunkLen()), 1, 0);
+    const last = timings[timings.length - 1];
+    return last ? last.startSec + last.speakSec : 0;
+}
+
+function refreshGeminiRows() {
+    document.getElementById('tts-style-row')?.classList.toggle('hidden', !usingGemini());
+    const status = document.getElementById('tts-gemini-status');
+    const btn = document.getElementById('tts-gemini-btn');
+    if (!status || !btn) return;
+    const info = getGeminiInfo();
+    if (!info.connected) {
+        status.textContent = '사람 같은 목소리 · 유료 등급 키 필요';
+        btn.textContent = '연결';
+        return;
+    }
+    btn.textContent = '관리';
+    if (!usingGemini()) {
+        status.textContent = '연결됨 · 음성 목록에서 🎙️ 음성을 고르세요';
+        return;
+    }
+    const sec = estimateGeminiAudioSec();
+    status.textContent = sec > 0
+        ? `이 글은 처음 들을 때 ${formatWon(estimateWon(sec, getTextToSpeak().length, info.model))} · 다시 들으면 무료`
+        : `연결됨 · 1분에 ${formatWon(wonPerMinute(info.model))}`;
+}
+
+function fillStyleSelect() {
+    const sel = document.getElementById('tts-style-select');
+    if (!sel) return;
+    if (!sel.options.length) {
+        GEMINI_STYLES.forEach(s => {
+            const o = document.createElement('option');
+            o.value = s.id;
+            o.textContent = s.label;
+            sel.appendChild(o);
+        });
+    }
+    sel.value = getGeminiStyle();
+}
+
+function onStyleChange() {
+    const sel = document.getElementById('tts-style-select');
+    if (!sel) return;
+    setGeminiStyle(sel.value);
+    // 말투가 바뀌면 소리를 새로 만들어야 한다 — 읽는 중이면 지금 문장부터 새 말투로 읽는다
+    if (isTTSSpeaking && usingGemini()) { clearTimeout(liveApplyTimer); liveApplyTimer = null; restartFromCurrentChunk(); }
+    else refreshTTSTotalTime();
+    refreshGeminiRows();
+}
+
+/** Gemini 연결·해제·음질이 바뀌었을 때 (gemini.js가 알린다) */
+function onGeminiChange(detail) {
+    const what = detail && detail.what;
+    if (what === 'connected') {
+        // 막 연결했으면 Gemini 음성을 골라 둔다
+        if (isTTSSpeaking || isTTSPaused) stopTTS();
+        if (!isGeminiVoice(localStorage.getItem('faith_tts_voice'))) {
+            localStorage.setItem('faith_tts_voice', GEMINI_PREFIX + DEFAULT_GEMINI_VOICE);
+        }
+    } else if (what === 'disconnected' && usingGemini() && !detail.auto && (isTTSSpeaking || isTTSPaused)) {
+        stopTTS();
+    }
+    loadVoices();
+    if (!isTTSSpeaking) refreshTTSTotalTime();
 }
 
 // ─── 자연스러운 음성 내려받기 ───
@@ -612,6 +736,9 @@ function formatTime(sec) {
 
 /** Chrome의 ~15초 발화 중단을 피하기 위해 속도에 비례해 청크 최대 길이 산정 */
 function getMaxChunkLen() {
+    // Gemini는 문장들을 묶어 한 번에 만들므로 조각은 강조 단위일 뿐이다.
+    // 속도와 상관없이 고정해야 묶음이 늘 같아, 저장해 둔 소리를 다시 쓴다
+    if (usingGemini()) return GEMINI_MAX_CHUNK;
     const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1;
     const len = Math.max(60, Math.min(300, Math.round(180 * speed)));
     // 자연스러운 음성은 한 번에 120자 안쪽으로 만들어야 안정적이다
@@ -648,17 +775,21 @@ function updateTimeDisplay() {
 function buildChunkTimings(chunks, speed, gapSec) {
     const timings = [];
     const neural = timingNeural();
+    const gemini = usingGemini();
+    const spokenOf = (k) => cleanForSpeech(chunks[k].text);
     const cps = charsPerSec();
     let elapsed = 0;
     for (let i = 0; i < chunks.length; i++) {
-        const spokenLen = cleanForSpeech(chunks[i].text).length;
+        const spokenLen = spokenOf(i).length;
         const speakSec = spokenLen / cps / speed;
         timings.push({ index: i, startSec: elapsed, speakSec });
         elapsed += speakSec;
         if (i < chunks.length - 1) {
-            // 실제 재생(advanceAfterChunk)과 같은 쉼: 설정한 쉼과 자연스러운 음성의 문장 끝 쉼 중 긴 쪽
+            // 실제 재생(advanceAfterChunk)과 같은 쉼: 설정한 쉼과 음성이 스스로 두는 쉼 중 긴 쪽
+            // (Gemini는 묶음 안의 쉼이 소리에 들어 있어 묶음 사이에서만 쉰다)
             const set = gapSec + extraPauseForDots(chunks[i].dots);
-            elapsed += neural ? Math.max(neuralGapAfter(chunks[i]) / 1000, set) : set;
+            if (gemini) elapsed += Math.max(geminiGapAfterMs(chunks, i, spokenOf) / 1000, set);
+            else elapsed += neural ? Math.max(neuralGapAfter(chunks[i]) / 1000, set) : set;
         }
     }
     return timings;
@@ -703,7 +834,7 @@ function stopTimeTicker() {
 function startTTSHeartbeat() {
     stopTTSHeartbeat();
     ttsHeartbeatTimer = setInterval(() => {
-        if (isTTSSpeaking && !isTTSPaused && 'speechSynthesis' in window && !usingNeural()) speechSynthesis.resume();
+        if (isTTSSpeaking && !isTTSPaused && 'speechSynthesis' in window && !usingMadeAudio()) speechSynthesis.resume();
     }, 10000);
 }
 
@@ -811,13 +942,13 @@ function cancelSystemSpeech() {
 }
 
 export function playTTS() {
-    const neural = usingNeural();
-    if (!neural && !('speechSynthesis' in window)) {
+    const made = usingMadeAudio();
+    if (!made && !('speechSynthesis' in window)) {
         alert('이 브라우저는 TTS를 지원하지 않습니다.');
         return;
     }
     // 아이폰은 재생 버튼을 누른 순간에 소리 장치를 깨워 두어야 이후 생성된 음성이 재생된다
-    if (neural) unlockNeuralAudio();
+    if (made) unlockNeuralAudio();
 
     // 일시정지 → 재개
     if (isTTSPaused) {
@@ -831,9 +962,9 @@ export function playTTS() {
             // 청크 간 쉼 도중 일시정지된 경우 → 살아있는 발화가 없으므로 speakNext로 재진입
             ttsGapInterrupted = false;
             // 엔진이 paused로 남아 있으면 새 발화가 무음 대기하므로 먼저 해제 (발화 없을 땐 무해)
-            if (!neural && 'speechSynthesis' in window) speechSynthesis.resume();
+            if (!made && 'speechSynthesis' in window) speechSynthesis.resume();
             speakNext();
-        } else if (neural) {
+        } else if (made) {
             resumeNeuralAudio();
         } else {
             speechSynthesis.resume();
@@ -931,7 +1062,7 @@ function splitChunks(text, max, map) {
         while (a < b && isWs(text[a])) a++;
         while (b > a && isWs(text[b - 1])) b--;
         if (a >= b) return;
-        const c = { text: text.slice(a, b), dots };
+        const c = { text: text.slice(a, b), dots, textStart: a, textEnd: b };
         if (map) { c.fullStart = map[a]; c.fullEnd = map[b - 1] + 1; }
         chunks.push(c);
     };
@@ -1001,6 +1132,12 @@ function splitChunks(text, max, map) {
             add(a, b, dots);
         }
     }
+    // 다음 조각과의 사이에 줄바꿈이 몇 번 있는가 (1 = 줄이 바뀜, 2 이상 = 빈 줄로 문단이 바뀜)
+    // — Gemini 음성이 문장을 묶을 때 문단에서 나누는 데 쓴다
+    for (let i = 0; i < chunks.length - 1; i++) {
+        const gap = text.slice(chunks[i].textEnd, chunks[i + 1].textStart);
+        chunks[i].nl = (gap.match(/\n/g) || []).length;
+    }
     if (chunks.length) return chunks;
     const only = { text, dots: 0 };
     if (map && text) { only.fullStart = map[0]; only.fullEnd = map[text.length - 1] + 1; }
@@ -1039,6 +1176,7 @@ function speakNext() {
         return;
     }
 
+    if (usingGemini()) { speakNextGemini(currentChunk); return; }
     if (usingNeural()) { speakNextNeural(currentChunk); return; }
 
     const utt = new SpeechSynthesisUtterance(spoken);
@@ -1239,6 +1377,89 @@ async function speakNextNeural(currentChunk) {
     advanceAfterChunk(currentChunk, neuralGapAfter(currentChunk));
 }
 
+// ─── Gemini 음성 재생 ───
+// 문단 안의 몇 문장을 묶어 한 번에 만든 소리를 문장마다 잘라 차례로 재생한다 (gemini-voice.js).
+// 처음 만드는 묶음만 몇 초 기다리고, 읽는 동안 다음 묶음을 미리 만들어 둔다.
+let geminiWaitTimer = null;
+let geminiWaitShown = false;
+let geminiErrorShown = false;
+
+function geminiOptions(chunks) {
+    return {
+        voiceValue: selectedVoiceValue(),
+        speed: parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1,
+        spokenOf: (k) => cleanForSpeech(chunks[k]?.text || '')
+    };
+}
+
+function clearGeminiWait() {
+    clearTimeout(geminiWaitTimer);
+    geminiWaitTimer = null;
+    if (geminiWaitShown) {
+        geminiWaitShown = false;
+        document.getElementById('tts-toast')?.classList.remove('show');
+    }
+}
+
+async function speakNextGemini(currentChunk) {
+    const myGen = ttsGen;
+    const index = ttsChunkIndex;
+    const chunks = ttsChunks;
+    localStorage.setItem('faith_tts_voice', selectedVoiceValue());
+    setProgress(Math.round((index / chunks.length) * 100));
+    const opts = geminiOptions(chunks);
+    let seg;
+    clearGeminiWait();
+    try {
+        const pending = getGeminiSegment(chunks, index, opts);
+        prefetchGemini(chunks, index, opts);
+        if (!isGeminiSegmentReady(chunks, index, opts)) {
+            geminiWaitTimer = setTimeout(() => {
+                if (myGen !== ttsGen || isTTSPaused) return;
+                geminiWaitShown = true;
+                showToast('Gemini가 음성을 만들고 있습니다…', 6000);
+            }, 600);
+        }
+        seg = await pending;
+    } catch (err) {
+        if (myGen !== ttsGen) return;
+        clearGeminiWait();
+        if (err && err.kind === 'blocked') {
+            // 내용 정책으로 이 묶음만 못 읽었다 — 알리고 다음 묶음으로 넘어간다
+            showToast('Gemini가 읽지 않은 부분을 건너뜁니다.', 3000);
+            ttsChunkIndex = geminiPassageLast(chunks, index, opts.spokenOf);
+            advanceAfterChunk(chunks[ttsChunkIndex] || currentChunk, 0);
+            return;
+        }
+        console.error('Gemini 음성 생성 실패:', err);
+        isTTSSpeaking = false;
+        isTTSPaused = false;
+        stopTimeTicker();
+        stopTTSHeartbeat();
+        clearTTSHighlight();
+        syncUI();
+        if (!geminiErrorShown) {
+            geminiErrorShown = true;
+            setTimeout(() => { geminiErrorShown = false; }, 3000);
+            alert(err && err.kind ? err.message : 'Gemini 음성을 만들지 못했습니다.\n' + ((err && err.message) || err));
+        }
+        if (err && err.disconnected) loadVoices();   // 연결이 끊겼으면 목록에서 Gemini 음성을 뺀다
+        return;
+    }
+    if (myGen !== ttsGen) return;
+    clearGeminiWait();
+    if (!seg) { advanceAfterChunk(currentChunk, 0); return; }
+    // 만드는 동안 일시정지를 눌렀다면, 재개할 때 이 문장부터 읽는다 (만든 소리는 저장되어 있다)
+    if (isTTSPaused) { ttsGapInterrupted = true; return; }
+
+    isTTSSpeaking = true;
+    syncUI();
+    highlightChunk(currentChunk);
+    const finished = await playNeuralAudio(seg.wav, seg.sampleRate);
+    if (myGen !== ttsGen || !finished) return;
+    advanceAfterChunk(currentChunk, seg.gapAfterMs);
+}
+
 export function pauseTTS() {
     if (isTTSSpeaking && !isTTSPaused) {
         // 청크 간 쉼(gap) 도중이면 대기 타이머를 해제하고 재개 시 speakNext로 진입하도록 표시
@@ -1248,8 +1469,8 @@ export function pauseTTS() {
             ttsGapInterrupted = true;
             // 살아있는 발화가 없는데 pause()를 호출하면 엔진이 paused로 고착되어
             // 다음 발화가 무음 대기하므로, 이 경우에는 pause()를 건너뛴다
-        } else if (usingNeural()) {
-            pauseNeuralAudio();   // 만드는 중이었다면 끝난 뒤 speakNextNeural이 재개를 기다린다
+        } else if (usingMadeAudio()) {
+            pauseNeuralAudio();   // 만드는 중이었다면 끝난 뒤 speakNextNeural·speakNextGemini가 재개를 기다린다
         } else {
             speechSynthesis.pause();
         }
@@ -1275,6 +1496,7 @@ export function stopTTS() {
     stopNeuralAudio();
     cancelNeuralBefore(ttsGen);
     neuralCache = null;
+    clearGeminiWait();
     clearTTSHighlight();
     clearTimeout(ttsGapTimer);
     ttsGapTimer = null;
@@ -1342,13 +1564,14 @@ export function updatePitchDisplay() {
         localStorage.setItem('faith_tts_pitch', String(v));
     }
     // 높낮이는 기본 음성만 쓴다 — 읽는 중이면 지금 문장부터 새 높낮이로 다시 읽는다
-    if (isTTSSpeaking && !usingNeural()) scheduleLiveApply('restart');
+    if (isTTSSpeaking && !usingMadeAudio()) scheduleLiveApply('restart');
 }
 
 export function saveTTSVoice() {
     const sel = document.getElementById('tts-voice-select');
     if (sel && sel.value) localStorage.setItem('faith_tts_voice', sel.value);
     updatePitchAvailability();
+    refreshGeminiRows();
     // 음성마다 문장을 나누는 길이·읽는 속도가 달라 읽는 중이면 지금 문장부터 새 음성으로 다시 읽는다
     if (isTTSSpeaking) { clearTimeout(liveApplyTimer); liveApplyTimer = null; restartFromCurrentChunk(); }
     else refreshTTSTotalTime();
@@ -1460,6 +1683,10 @@ export function initTTS() {
     if (pitch && ps) { ps.value = pitch; updatePitchDisplay(); }
     if (gap && gs) { gs.value = gap; updateGapDisplay(); }
     document.getElementById('tts-neural-btn')?.addEventListener('click', onNeuralButton);
+    fillStyleSelect();
+    document.getElementById('tts-style-select')?.addEventListener('change', onStyleChange);
+    document.getElementById('tts-gemini-btn')?.addEventListener('click', () => openGeminiModal());
+    window.addEventListener('gemini-change', (e) => onGeminiChange(e.detail));
     document.getElementById('editor-body')?.addEventListener('click', onEditorTapForTTS);
     // 사용자가 직접 스크롤하는 동안에는 읽는 문장을 따라가지 않는다
     const markUserScroll = () => { lastUserScrollMs = Date.now(); };
