@@ -564,7 +564,7 @@ function setupUIListeners() {
     document.getElementById('tts-progress-slider')?.addEventListener('input', (e) => seekTTSByPercent(e.target.value));
     initTTS();
 
-    // --- 맞춤법 검사 (Gemini) ---
+    // --- 맞춤법 검사 (한국어·영어, 기기 안에서) ---
     initSpellcheck();
 
     document.getElementById('toolbar-link-btn')?.addEventListener('click', () => { createHyperlink(); });

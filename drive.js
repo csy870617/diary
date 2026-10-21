@@ -5,7 +5,7 @@ import { refreshEditorContent, reloadEntryIntoEditor } from './editor.js';
 import { sanitizeExternalHtml } from './utils.js';
 import { genEntryId } from './data.js';
 import { saveEntries, clearEntries } from './storage.js';
-import { forgetGemini } from './gemini.js';
+import { forgetSpellData } from './spell-engine.js';
 
 let tokenClient;
 let gapiInited = false;
@@ -506,8 +506,8 @@ export async function handleSignoutClick(callback) {
     // 문서가 파괴되어 이전 사용자의 글이 기기에 남고, 다음 계정으로 로그인할 때 그 계정 드라이브로
     // 올라갈 수 있다(공용 PC). 반드시 완료를 기다린다.
     try { await clearEntries(); } catch (e) { console.error('저장소 초기화 실패:', e); }
-    // Gemini 키는 요금이 청구되는 열쇠이고, 저장한 음성은 글을 읽은 소리다 — 같은 이유로 함께 지운다
-    try { await forgetGemini(); } catch (e) { console.error('Gemini 정보 삭제 실패:', e); }
+    // 맞춤법 사전에 넣은 말(사람 이름 등)도 같은 이유로 지운다
+    try { forgetSpellData(); } catch (e) { console.error('맞춤법 사전 정리 실패:', e); }
     localStorage.removeItem('faithCatData');
     localStorage.removeItem('faithSyncBase');
     syncBaseMap = {};

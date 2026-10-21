@@ -790,35 +790,6 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
 #write-modal.spell-open .editor-body { padding-bottom: 45vh; }
 #toolbar-spell-btn:disabled { opacity: 0.6; cursor: default; }
 
-/* ── Gemini 연결 창 (gemini-connect.js) ── */
-.gemini-modal-inner { max-width: 400px; width: 92%; text-align: left; max-height: 90vh; max-height: 90dvh; overflow-y: auto; padding: 22px 20px 18px; }
-.gemini-modal-inner h3 { text-align: center; margin-bottom: 10px; }
-.gemini-modal-inner .gm-close { position: absolute; top: 10px; right: 10px; background: none; border: none; font-size: 18px; color: var(--gray-400); cursor: pointer; padding: 6px; border-radius: 6px; }
-.gemini-modal-inner .gm-close:hover { color: var(--gray-900); background: var(--gray-100); }
-.gemini-modal-inner .gm-lead { font-size: 13px; color: var(--gray-500); line-height: 1.6; margin-bottom: 12px; }
-.gemini-modal-inner .gm-notice { display: flex; flex-direction: column; gap: 4px; background: #FEF3C7; border: 1px solid #FCD34D; color: #78350F; border-radius: 10px; padding: 10px 12px; font-size: 12.5px; line-height: 1.6; margin-bottom: 14px; }
-[data-theme="dark"] .gemini-modal-inner .gm-notice { background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.4); color: #FCD34D; }
-.gemini-modal-inner .gm-notice > b { display: flex; align-items: center; gap: 5px; font-size: 13px; }
-.gemini-modal-inner .gm-tiers { margin: 2px 0 2px 16px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.gemini-modal-inner .gm-steps { font-size: 12.5px; color: var(--gray-900); line-height: 1.7; padding-left: 18px; margin-bottom: 12px; }
-.gemini-modal-inner .gm-steps a { color: var(--active-text); }
-.gemini-modal-inner .gm-field { display: flex; gap: 6px; margin-bottom: 10px; }
-.gemini-modal-inner .gm-field input { flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid var(--gray-200); border-radius: 8px; font-size: 14px; background: var(--bg-color); color: var(--gray-900); font-family: ui-monospace, monospace; }
-.gemini-modal-inner .gm-field input:focus { border-color: var(--accent); }
-.gemini-modal-inner .gm-eye { border: 1px solid var(--gray-200); background: var(--bg-color); color: var(--gray-500); border-radius: 8px; padding: 0 10px; cursor: pointer; font-size: 16px; }
-.gemini-modal-inner .gm-state { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; color: var(--gray-900); margin-bottom: 4px; }
-.gemini-modal-inner .gm-state i { color: var(--accent); font-size: 18px; }
-.gemini-modal-inner .gm-mask { font-family: ui-monospace, monospace; font-weight: 400; font-size: 12px; color: var(--gray-500); }
-.gemini-modal-inner .gm-tier { font-size: 12px; color: var(--gray-500); line-height: 1.5; margin-bottom: 12px; }
-.gemini-modal-inner .gm-tier.free { color: #B45309; }
-[data-theme="dark"] .gemini-modal-inner .gm-tier.free { color: #FCD34D; }
-.gemini-modal-inner .gm-status { font-size: 12.5px; line-height: 1.5; margin-bottom: 10px; white-space: pre-line; color: var(--gray-500); }
-.gemini-modal-inner .gm-status:empty { display: none; }
-.gemini-modal-inner .gm-status.ok { color: var(--accent); }
-.gemini-modal-inner .gm-status.err { color: var(--danger); }
-.gemini-modal-inner .gm-fine { font-size: 11px; color: var(--gray-400); line-height: 1.6; margin-bottom: 12px; }
-.gemini-modal-inner .gm-danger { color: var(--danger); }
-.gemini-modal-inner button:disabled, .gemini-modal-inner input:disabled { opacity: 0.5; cursor: default; }
 
 /* ── 표 도구 바 ──────────────────────────────────────────────
    표 안을 누르면 표 옆에 떠서, 지금 어느 줄·칸을 다루는지 보여주고
