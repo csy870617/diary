@@ -372,7 +372,6 @@ async function addNeuralGroup(sel, saved) {
         const first = sel.querySelector('option:not([value^="' + NEURAL_PREFIX + '"])');
         if (first) sel.value = first.value;
     }
-    updatePitchAvailability();
     // 받아 둔 음성 확인은 조금 늦게 끝난다 — 음성이 정해진 뒤 그 음성의 빠르기로 시간을 다시 계산한다
     if (!isTTSSpeaking) refreshTTSTotalTime();
 }
@@ -443,7 +442,6 @@ export function loadVoices() {
         } else if (enUs.length) {
             sel.value = enUs[0].name;
         }
-        updatePitchAvailability();
         addNeuralGroup(sel, saved);
     };
 
@@ -460,19 +458,6 @@ export function loadVoices() {
             }
         };
         speechSynthesis.addEventListener('voiceschanged', ttsVoicesListener);
-    }
-}
-
-// 자연스러운 음성은 음높이를 바꿀 수 없다 → 슬라이더를 잠그고 이유를 알려 준다
-function updatePitchAvailability() {
-    const slider = document.getElementById('tts-pitch-slider');
-    if (!slider) return;
-    const neural = usingNeural();
-    slider.disabled = neural;
-    const row = slider.closest('.tts-row');
-    if (row) {
-        row.classList.toggle('tts-row-disabled', neural);
-        row.title = neural ? '자연스러운 음성은 음높이를 바꿀 수 없습니다' : '';
     }
 }
 
@@ -1126,13 +1111,10 @@ function speakNext() {
     }
     if (voiceName) localStorage.setItem('faith_tts_voice', voiceName);
 
-    // 속도 & 피치
+    // 속도 (음높이는 음성 그대로 둔다)
     const speed = parseFloat(document.getElementById('tts-speed-slider')?.value || '1');
-    const pitch = parseFloat(document.getElementById('tts-pitch-slider')?.value || '1');
     utt.rate = speed;
-    utt.pitch = pitch;
     localStorage.setItem('faith_tts_speed', String(speed));
-    localStorage.setItem('faith_tts_pitch', String(pitch));
 
     const myGen = ttsGen; // 발화 세대 캡처 — 교체된 발화의 stale 이벤트 무시
     let done = false;     // 끝 알림과 지켜보기(startSystemWatch) 중 먼저 온 쪽만 다음 문장으로 넘긴다
@@ -1440,25 +1422,9 @@ export function updateSpeedDisplay() {
     else { retimeFromCurrent(); scheduleLiveApply(usingNeural() ? 'neural-speed' : 'restart'); }
 }
 
-export function updatePitchDisplay() {
-    const s = document.getElementById('tts-pitch-slider');
-    const d = document.getElementById('tts-pitch-value');
-    if (s) {
-        const v = parseFloat(s.value);
-        if (d) {
-            let label = v < 0.9 ? '낮음' : v > 1.1 ? '높음' : '보통';
-            d.textContent = label;
-        }
-        localStorage.setItem('faith_tts_pitch', String(v));
-    }
-    // 높낮이는 기본 음성만 쓴다 — 읽는 중이면 지금 문장부터 새 높낮이로 다시 읽는다
-    if (isTTSSpeaking && !usingNeural()) scheduleLiveApply('restart');
-}
-
 export function saveTTSVoice() {
     const sel = document.getElementById('tts-voice-select');
     if (sel && sel.value) localStorage.setItem('faith_tts_voice', sel.value);
-    updatePitchAvailability();
     // 음성마다 문장을 나누는 길이·읽는 속도가 달라 읽는 중이면 지금 문장부터 새 음성으로 다시 읽는다
     if (isTTSSpeaking) { clearTimeout(liveApplyTimer); liveApplyTimer = null; restartFromCurrentChunk(); }
     else refreshTTSTotalTime();
@@ -1569,13 +1535,11 @@ function restartFromCurrentChunk() {
 
 export function initTTS() {
     const speed = localStorage.getItem('faith_tts_speed');
-    const pitch = localStorage.getItem('faith_tts_pitch');
     const gap = localStorage.getItem('faith_tts_gap');
     const ss = document.getElementById('tts-speed-slider');
-    const ps = document.getElementById('tts-pitch-slider');
     const gs = document.getElementById('tts-gap-slider');
     if (speed && ss) { ss.value = speed; updateSpeedDisplay(); }
-    if (pitch && ps) { ps.value = pitch; updatePitchDisplay(); }
+    localStorage.removeItem('faith_tts_pitch');   // 예전에 저장한 음높이는 더 쓰지 않는다
     if (gap && gs) { gs.value = gap; updateGapDisplay(); }
     document.getElementById('tts-neural-btn')?.addEventListener('click', onNeuralButton);
     // 화면 아래의 다른 창(맞춤법 검사)이 열리면 음성 바를 닫는다
