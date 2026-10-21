@@ -454,6 +454,35 @@ function setupUIListeners() {
     const fontSizeDropdown = document.getElementById('font-size-dropdown');
     const fontSizeCombo = document.getElementById('font-size-combo');
 
+    // 크기 칸을 누르면 커서가 그 칸으로 옮겨 가 본문에서 골라 둔 글자가 풀린다.
+    // 누르기 직전의 선택을 기억해 두었다가, 크기를 정할 때 되살려 그 글자에만 적용한다.
+    let sizeRange = null;
+    const rememberSizeRange = () => {
+        // 이미 크기 칸 안에서 다시 누른 것(숫자 고르기)이면 처음에 기억한 선택을 그대로 둔다
+        if (document.activeElement === fontSizeInput) return;
+        const sel = window.getSelection();
+        const body = document.getElementById('editor-body');
+        sizeRange = null;
+        if (!sel || !sel.rangeCount || sel.isCollapsed || !body) return;
+        const r = sel.getRangeAt(0);
+        if (body.contains(r.commonAncestorContainer)) sizeRange = r.cloneRange();
+    };
+    const applySize = (size) => {
+        const body = document.getElementById('editor-body');
+        const r = sizeRange;
+        sizeRange = null;
+        if (r && body && body.contains(r.startContainer) && body.contains(r.endContainer)) {
+            body.focus({ preventScroll: true });
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(r);
+        }
+        changeGlobalFontSize(size);
+        triggerAutoSave();
+    };
+    // 포커스가 옮겨 가기 전(누르는 순간)에 기억한다
+    fontSizeInput?.addEventListener('pointerdown', rememberSizeRange);
+
     // 드롭다운 옵션 생성
     if (fontSizeDropdown) {
         FONT_SIZE_PRESETS.forEach(size => {
@@ -464,8 +493,7 @@ function setupUIListeners() {
             opt.addEventListener('mousedown', (e) => {
                 e.preventDefault();
                 fontSizeInput.value = size;
-                changeGlobalFontSize(size);
-                triggerAutoSave();
+                applySize(size);
                 fontSizeDropdown.classList.remove('show');
             });
             fontSizeDropdown.appendChild(opt);
@@ -492,10 +520,7 @@ function setupUIListeners() {
             if (e.key === 'Enter') {
                 e.preventDefault();
                 const size = parseInt(fontSizeInput.value);
-                if (size >= 1 && size <= 200) {
-                    changeGlobalFontSize(size);
-                    triggerAutoSave();
-                }
+                if (size >= 1 && size <= 200) applySize(size);
                 fontSizeInput.blur();
                 fontSizeDropdown?.classList.remove('show');
             }
@@ -518,6 +543,8 @@ function setupUIListeners() {
     document.addEventListener('selectionchange', () => {
         const writeModal = document.getElementById('write-modal');
         if (!writeModal || writeModal.classList.contains('hidden')) return;
+        // 크기 칸에 숫자를 치는 동안에도 이 알림이 와서, 친 숫자를 지금 크기로 덮어쓰고 있었다
+        if (document.activeElement === fontSizeInput) return;
         const detected = detectSelectionFontSize();
         if (detected && fontSizeInput) {
             fontSizeInput.value = detected;
@@ -617,9 +644,26 @@ function setupUIListeners() {
     // mousedown 단계에서 막아야 편집 영역의 포커스(=대상 셀)를 잃지 않는다.
     const tableTools = document.getElementById('table-tools');
     tableTools?.addEventListener('mousedown', (e) => e.preventDefault());
+    // 휴대폰: touchstart를 막으면 셀의 포커스는 지켜지지만 브라우저가 click을 보내지 않는다.
+    // 그래서 손을 뗄 때(touchend) 그 버튼을 직접 눌러 준다. 손가락이 많이 움직였으면 누르지 않는다.
+    let ttTouch = null;
     tableTools?.addEventListener('touchstart', (e) => {
-        if (e.target.closest('button')) e.preventDefault();
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        e.preventDefault();
+        const t = e.touches[0];
+        ttTouch = { btn, x: t.clientX, y: t.clientY };
     }, { passive: false });
+    tableTools?.addEventListener('touchend', (e) => {
+        const start = ttTouch;
+        ttTouch = null;
+        if (!start) return;
+        e.preventDefault();
+        const t = e.changedTouches[0];
+        if (Math.abs(t.clientX - start.x) > 12 || Math.abs(t.clientY - start.y) > 12) return;
+        if (!start.btn.disabled) start.btn.click();
+    }, { passive: false });
+    tableTools?.addEventListener('touchcancel', () => { ttTouch = null; });
 
     const ttBind = (id, fn) => document.getElementById(id)?.addEventListener('click', (e) => {
         e.preventDefault(); e.stopPropagation(); fn();
