@@ -10,7 +10,7 @@
  *
  * 화면(DOM)은 건드리지 않는다 — 재생은 tts.js가 자연음과 같은 길(playNeuralAudio)로 한다.
  */
-import { geminiSpeak, getGeminiInfo, isGeminiConnected, GEMINI_AUDIO_DB, GeminiError } from './gemini.js';
+import { geminiSpeak, getGeminiInfo, isGeminiConnected, withRetry, GEMINI_AUDIO_DB, GeminiError } from './gemini.js';
 
 export const GEMINI_PREFIX = 'gm:';   // 음성 목록에서 Gemini 음성을 구분하는 접두어
 
@@ -473,13 +473,17 @@ async function cacheId(str) {
 
 // ─── 요청 줄 세우기 ───
 // 지금 읽을 묶음이 미리 만들기보다 먼저다. 동시에 두 개까지만 보낸다 (사용량 한도·요금 보호).
+// 무료 등급은 1분에 쓸 수 있는 양이 적어 하나씩 보낸다.
 
-const MAX_PARALLEL = 2;
 let running = 0;
 const waiting = [];
 
+function maxParallel() {
+    return getGeminiInfo().tier === 'free' ? 1 : 2;
+}
+
 function pump() {
-    while (running < MAX_PARALLEL && waiting.length) waiting.shift().start();
+    while (running < maxParallel() && waiting.length) waiting.shift().start();
 }
 
 function queued(task, urgent, entry) {
@@ -500,25 +504,6 @@ function queued(task, urgent, entry) {
 function promote(entry) {
     const i = entry && entry.item ? waiting.indexOf(entry.item) : -1;
     if (i > 0) { waiting.splice(i, 1); waiting.unshift(entry.item); }
-}
-
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
-/** 잠깐의 문제(요청 몰림·서버 오류·접속 끊김)는 조금 기다렸다가 다시 시도한다 */
-async function withRetry(task) {
-    let delay = 1500;
-    for (let attempt = 0; ; attempt++) {
-        try {
-            return await task();
-        } catch (err) {
-            const kind = err && err.kind;
-            const again = (kind === 'rate_limit' || kind === 'server') ? attempt < 3
-                : (kind === 'network' || kind === 'timeout') ? attempt < 1 : false;
-            if (!again || (typeof navigator !== 'undefined' && navigator.onLine === false)) throw err;
-            await sleep(Math.min(20000, err.retryAfterMs || delay) + Math.random() * 400);
-            delay *= 2;
-        }
-    }
 }
 
 // ─── 묶음 소리 (메모리 → 기기 저장소 → Gemini) ───

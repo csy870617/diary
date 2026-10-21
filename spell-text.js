@@ -7,7 +7,7 @@
  *
  * 이 파일은 화면(DOM)과 상관없는 함수만 둔다 (Node에서 그대로 시험할 수 있게).
  */
-import { geminiJson } from './gemini.js';
+import { geminiJson, withRetry } from './gemini.js';
 
 const BATCH_CHARS = 1500;   // 한 번에 보내는 분량 — 길면 답이 늦고, 짧으면 앞뒤 줄의 맥락이 끊긴다
 const PARALLEL = 2;
@@ -224,11 +224,12 @@ export async function checkSpelling(lines, { onProgress, ask = geminiJson } = {}
     const worker = async () => {
         while (next < batches.length) {
             const batch = batches[next++];
-            const res = await ask({
+            // 요청이 몰리거나(무료 등급은 1분 한도가 작다) 서버가 잠시 답하지 않으면 기다렸다가 다시 묻는다
+            const res = await withRetry(() => ask({
                 system: SYSTEM,
                 input: JSON.stringify({ lines: batch.map(l => ({ id: l.id, text: l.text })) }),
                 schema: SCHEMA
-            });
+            }));
             usage.input += (res.usage && res.usage.input) || 0;
             usage.output += (res.usage && res.usage.output) || 0;
             const ids = new Set(batch.map(l => l.id));

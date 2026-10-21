@@ -9,7 +9,7 @@
  * (검사하는 동안이나 결과를 보는 동안 글을 고쳐도 엉뚱한 곳을 고치지 않도록).
  */
 import { checkSpelling, diffSpans } from './spell-text.js';
-import { isGeminiConnected, textUsageWon, formatWon } from './gemini.js';
+import { isGeminiConnected, getGeminiInfo, textUsageWon, formatWon } from './gemini.js';
 import { openGeminiModal } from './gemini-connect.js';
 import { markEditPoint, afterProgrammaticEdit } from './editor.js';
 import { showToast } from './tts.js';
@@ -103,7 +103,7 @@ async function startSpellcheck() {
     if (running) return;
     if (isReadOnlyView()) { showToast('편집 화면에서 쓸 수 있습니다.'); return; }
     if (!isGeminiConnected()) {
-        openGeminiModal({ hint: '맞춤법 검사는 Gemini로 합니다. 먼저 유료 등급 키를 연결해 주세요.' });
+        openGeminiModal({ hint: '맞춤법 검사는 Gemini로 합니다. 먼저 Gemini 키를 연결해 주세요.' });
         return;
     }
     const body = $('editor-body');
@@ -141,8 +141,9 @@ async function startSpellcheck() {
             const range = rangeAt(index, base + f.a, base + f.b);
             if (range && range.toString() === f.from) items.push({ ...f, where: 'body', range });
         }
+        // 무료 등급은 요금이 없다
         const won = textUsageWon(res.usage);
-        costText = won >= 1 ? `검사 비용 ${formatWon(won)}` : '';
+        costText = getGeminiInfo().tier === 'free' ? '무료 등급' : won >= 1 ? `검사 비용 ${formatWon(won)}` : '';
         render();
     } catch (err) {
         if (seq !== runSeq) return;
@@ -465,5 +466,11 @@ export function initSpellcheck() {
     $('editor-body')?.addEventListener('click', onBodyClick);
     window.addEventListener('bottom-panel-open', (e) => {
         if (e.detail !== 'spell' && !$('spell-panel')?.classList.contains('hidden')) closePanel();
+    });
+    // 사용량 한도로 기다리는 동안 (무료 등급은 1분 한도가 작다)
+    window.addEventListener('gemini-wait', (e) => {
+        if (!running) return;
+        const sec = Math.ceil(((e.detail && e.detail.ms) || 0) / 1000);
+        setSummary(`${e.detail && e.detail.free ? '무료 등급 사용량 한도로' : '요청이 몰려'} ${sec}초 기다리는 중…`);
     });
 }

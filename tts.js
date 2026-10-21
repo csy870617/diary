@@ -2,7 +2,7 @@
  * TTS (Text-to-Speech) 모듈 v2
  * Web Speech API 기반 - 미니 플레이어 UI
  * + 자연스러운 음성(Supertonic 3, 내려받아 기기에서 생성) — neural-tts.js
- * + Gemini 음성(사용자의 유료 등급 키로 Google Gemini가 생성) — gemini-voice.js, gemini.js
+ * + Gemini 음성(사용자의 Gemini 키로 Google Gemini가 생성) — gemini-voice.js, gemini.js
  */
 
 import {
@@ -539,13 +539,17 @@ function refreshGeminiRows() {
     if (!status || !btn) return;
     const info = getGeminiInfo();
     if (!info.connected) {
-        status.textContent = '사람 같은 목소리 · 유료 등급 키 필요';
+        status.textContent = '사람 같은 목소리 · Gemini 키 필요';
         btn.textContent = '연결';
         return;
     }
     btn.textContent = '관리';
     if (!usingGemini()) {
         status.textContent = '연결됨 · 음성 목록에서 🎙️ 음성을 고르세요';
+        return;
+    }
+    if (info.tier === 'free') {
+        status.textContent = '무료 등급 · 요금 없음 · 보낸 글이 Google 개선에 쓰일 수 있음';
         return;
     }
     const sec = estimateGeminiAudioSec();
@@ -578,16 +582,24 @@ function onStyleChange() {
     refreshGeminiRows();
 }
 
-/** Gemini 연결·해제·음질이 바뀌었을 때 (gemini.js가 알린다) */
+/** Gemini 연결·해제·음질·등급이 바뀌었을 때 (gemini.js가 알린다) */
 function onGeminiChange(detail) {
     const what = detail && detail.what;
+    if (what === 'tier') {
+        // 결제 연결이 끊겨 무료 등급이 되면 글이 Google 개선에 쓰이기 시작한다 — 모르고 지나가지 않게 알린다
+        if (detail.from === 'paid' && detail.tier === 'free') {
+            alert('Gemini 키가 무료 등급으로 바뀌었습니다 (결제 연결이 끊긴 것 같습니다).\n이제부터 보내는 글은 Google 서비스 개선에 쓰일 수 있습니다.\n원하지 않으면 AI Studio에서 결제를 다시 연결하거나, 음성 설정의 Gemini에서 연결을 해제해 주세요.');
+        }
+        refreshGeminiRows();
+        return;
+    }
     if (what === 'connected') {
         // 막 연결했으면 Gemini 음성을 골라 둔다
         if (isTTSSpeaking || isTTSPaused) stopTTS();
         if (!isGeminiVoice(localStorage.getItem('faith_tts_voice'))) {
             localStorage.setItem('faith_tts_voice', GEMINI_PREFIX + DEFAULT_GEMINI_VOICE);
         }
-    } else if (what === 'disconnected' && usingGemini() && !detail.auto && (isTTSSpeaking || isTTSPaused)) {
+    } else if (what === 'disconnected' && usingGemini() && (isTTSSpeaking || isTTSPaused)) {
         stopTTS();
     }
     loadVoices();
@@ -1384,6 +1396,7 @@ async function speakNextNeural(currentChunk) {
 // 처음 만드는 묶음만 몇 초 기다리고, 읽는 동안 다음 묶음을 미리 만들어 둔다.
 let geminiWaitTimer = null;
 let geminiWaitShown = false;
+let geminiLimitNoticeAt = 0;    // 사용량 한도로 기다린다는 안내를 띄운 때 — '만드는 중' 안내로 덮지 않는다
 let geminiErrorShown = false;
 
 function geminiOptions(chunks) {
@@ -1417,7 +1430,7 @@ async function speakNextGemini(currentChunk) {
         prefetchGemini(chunks, index, opts);
         if (!isGeminiSegmentReady(chunks, index, opts)) {
             geminiWaitTimer = setTimeout(() => {
-                if (myGen !== ttsGen || isTTSPaused) return;
+                if (myGen !== ttsGen || isTTSPaused || Date.now() - geminiLimitNoticeAt < 8000) return;
                 geminiWaitShown = true;
                 showToast('Gemini가 음성을 만들고 있습니다…', 6000);
             }, 600);
@@ -1445,7 +1458,6 @@ async function speakNextGemini(currentChunk) {
             setTimeout(() => { geminiErrorShown = false; }, 3000);
             alert(err && err.kind ? err.message : 'Gemini 음성을 만들지 못했습니다.\n' + ((err && err.message) || err));
         }
-        if (err && err.disconnected) loadVoices();   // 연결이 끊겼으면 목록에서 Gemini 음성을 뺀다
         return;
     }
     if (myGen !== ttsGen) return;
@@ -1689,6 +1701,15 @@ export function initTTS() {
     document.getElementById('tts-style-select')?.addEventListener('change', onStyleChange);
     document.getElementById('tts-gemini-btn')?.addEventListener('click', () => openGeminiModal());
     window.addEventListener('gemini-change', (e) => onGeminiChange(e.detail));
+    // 사용량 한도로 기다리는 동안 (무료 등급은 1분 한도가 작다) — 멈춘 것이 아님을 알린다
+    // (첫 문장을 기다리는 동안에는 아직 '읽는 중'이 아니므로 음성 바가 열려 있는지로 판단한다)
+    window.addEventListener('gemini-wait', (e) => {
+        if (!ttsPanelOpen() || isTTSPaused || !usingGemini()) return;
+        const sec = Math.ceil(((e.detail && e.detail.ms) || 0) / 1000);
+        geminiLimitNoticeAt = Date.now();
+        geminiWaitShown = true;
+        showToast(`${e.detail && e.detail.free ? '무료 등급 사용량 한도로' : 'Gemini 요청이 몰려'} ${sec}초 기다리는 중…`, Math.min(8000, sec * 1000));
+    });
     // 화면 아래의 다른 창(맞춤법 검사)이 열리면 음성 바를 닫는다
     window.addEventListener('bottom-panel-open', (e) => {
         if (e.detail !== 'tts' && !document.getElementById('tts-panel')?.classList.contains('hidden')) toggleTTSPanel();
