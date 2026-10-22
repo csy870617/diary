@@ -729,6 +729,12 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
 }
 .tts-rbtn:hover { border-color: var(--accent); color: var(--accent); }
 .tts-rbtn:active { background: var(--active-bg); }
+/* 미리 듣기 버튼 (음성 고르기 옆) */
+.tts-preview-btn { flex-shrink: 0; width: 34px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; color: var(--accent); }
+.tts-spin { display: inline-block; animation: ttsSpin 0.9s linear infinite; }
+@keyframes ttsSpin { to { transform: rotate(360deg); } }
+/* 자연음 안내는 휴대폰에서도 한 줄로 (넘치면 …) */
+.tts-neural-status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* 토스트 알림 */
 .tts-toast {

@@ -464,12 +464,12 @@ export function loadVoices() {
 // ─── 자연스러운 음성 내려받기 ───
 let neuralDownloading = false;
 
-function setNeuralRow(statusText, btnText, progressPct) {
+function setNeuralRow(statusText, btnText, progressPct, detail) {
     const status = document.getElementById('tts-neural-status');
     const btn = document.getElementById('tts-neural-btn');
     const bar = document.getElementById('tts-neural-progress');
     const fill = document.getElementById('tts-neural-progress-fill');
-    if (status) status.textContent = statusText;
+    if (status) { status.textContent = statusText; status.title = detail || statusText; }
     if (btn) btn.textContent = btnText;
     if (bar) bar.classList.toggle('hidden', progressPct == null);
     if (fill && progressPct != null) fill.style.width = progressPct + '%';
@@ -496,22 +496,23 @@ async function refreshNeuralRow() {
     if (neuralDownloading) return;
     if (ready) {
         const info = getNeuralInfo();
-        const where = info.backend ? `${info.backend === 'webgpu' ? ' · GPU로 계산' : ' · CPU로 계산'} · 품질 ${info.steps}/8` : '';
-        setNeuralRow('받아 둠 · 인터넷 없이 사용 가능' + where, '삭제', null);
+        // 받은 뒤에는 짧게 한 줄만 (계산 방식·품질은 누르고 있으면 보이는 설명으로)
+        const where = info.backend ? `${info.backend === 'webgpu' ? 'GPU로 계산' : 'CPU로 계산'} · 품질 ${info.steps}/8` : '';
+        setNeuralRow('받아 둠 ✓', '삭제', null, where ? '인터넷 없이 사용 가능 · ' + where : '인터넷 없이 사용 가능');
         // 더 자연스럽거나 빠른 엔진 등 새 버전이 있으면 업데이트를 권한다 (확인은 인터넷이 될 때만)
         neuralUpdate = await checkNeuralUpdate();
         if (neuralUpdate && !neuralDownloading) {
             const mb = Math.max(1, Math.round(neuralUpdate.bytes / 1e6));
-            setNeuralRow(`${neuralUpdateName()}이 있습니다 (약 ${mb}MB)`, '업데이트', null);
+            setNeuralRow(`새 버전 · 약 ${mb}MB`, '업데이트', null, `${neuralUpdateName()}이 있습니다 (약 ${mb}MB)`);
         }
     } else {
         // 받아 둔 파일을 브라우저가 지웠다면 이유를 알려 준다 (앱 안 브라우저·사생활 보호 모드·종료 시 데이터 삭제 설정 등)
         const app = inAppBrowserName();
-        let msg = neuralWasEvicted()
-            ? '브라우저가 받아 둔 음성을 지웠습니다 · 다시 받아 주세요'
-            : '약 250~500MB · 와이파이에서 받기를 권장합니다';
-        if (app) msg += ` · ${app} 안에서는 받은 음성이 지워질 수 있어 Chrome·Safari로 여는 것을 권장합니다`;
-        setNeuralRow(msg, '내려받기', null);
+        // 휴대폰에서도 한 줄에 들어가게 짧게 쓰고, 자세한 안내는 누르고 있으면 보이는 설명과 내려받기 확인 창에 둔다
+        const msg = neuralWasEvicted() ? '지워짐 · 다시 받아 주세요' : '약 250~500MB · 와이파이 권장';
+        let detail = neuralWasEvicted() ? '브라우저가 받아 둔 음성을 지웠습니다. 다시 받아 주세요.' : '약 250~500MB · 와이파이에서 받기를 권장합니다';
+        if (app) detail += ` · ${app} 안에서는 받은 음성이 지워질 수 있어 Chrome·Safari로 여는 것을 권장합니다`;
+        setNeuralRow(msg, '내려받기', null, detail);
     }
 }
 
@@ -530,7 +531,7 @@ async function onNeuralButton() {
         try {
             await downloadNeuralVoice((got, total) => {
                 const pct = total ? Math.floor(got / total * 100) : 0;
-                setNeuralRow(`받는 중… ${pct}% (${Math.round(got / 1e6)} / ${Math.round(total / 1e6)}MB)`, '취소', pct);
+                setNeuralRow(`받는 중… ${pct}%`, '취소', pct, `${Math.round(got / 1e6)} / ${Math.round(total / 1e6)}MB`);
             });
             neuralUpdate = null;
             showToast('음성 엔진을 업데이트했습니다.');
@@ -559,7 +560,7 @@ async function onNeuralButton() {
     try {
         await downloadNeuralVoice((got, total) => {
             const pct = total ? Math.floor(got / total * 100) : 0;
-            setNeuralRow(`받는 중… ${pct}% (${Math.round(got / 1e6)} / ${Math.round(total / 1e6)}MB)`, '취소', pct);
+            setNeuralRow(`받는 중… ${pct}% (${Math.round(got / 1e6)}/${Math.round(total / 1e6)}MB)`, '취소', pct);
         });
         neuralDownloading = false;
         localStorage.setItem('faith_tts_voice', NEURAL_PREFIX + 'F1');
@@ -571,6 +572,69 @@ async function onNeuralButton() {
         else alert('자연스러운 음성을 받지 못했습니다.\n' + (err && err.message || err) + '\n\n받은 부분은 남아 있어 다시 누르면 이어서 받습니다.');
         refreshNeuralRow();
     }
+}
+
+// ─── 미리 듣기 ───
+// 음성을 고를 때 글을 재생하지 않고도 목소리를 들어 볼 수 있게, 고른 음성으로 짧은 문장 하나를 읽는다.
+const PREVIEW_KO = '안녕하세요. 오늘도 주님의 은혜 안에서 평안한 하루 보내세요.';
+const PREVIEW_EN = 'Hello. May the grace of the Lord be with you today.';
+let previewGen = 0;   // 미리 듣기 차례 — 다시 누르거나 재생을 시작하면 앞의 것은 버린다
+let previewing = false;
+
+function setPreviewButton(mode) {   // 'play' | 'stop' | 'wait'
+    const btn = document.getElementById('tts-preview-btn');
+    if (!btn) return;
+    btn.innerHTML = mode === 'wait' ? '<i class="ph ph-spinner-gap tts-spin"></i>' : `<i class="ph-fill ph-${mode === 'stop' ? 'stop' : 'play'}"></i>`;
+    btn.title = mode === 'play' ? '미리 듣기' : mode === 'wait' ? '목소리를 준비하는 중' : '미리 듣기 멈추기';
+    btn.setAttribute('aria-label', btn.title);
+}
+
+/** 미리 듣기를 멈춘다 (재생을 시작하거나 음성을 바꿀 때도 부른다) */
+export function stopVoicePreview() {
+    if (!previewing) return;
+    previewGen++;
+    previewing = false;
+    stopNeuralAudio();
+    if ('speechSynthesis' in window) speechSynthesis.cancel();
+    setPreviewButton('play');
+}
+
+export async function previewVoice() {
+    if (previewing) { stopVoicePreview(); return; }
+    const value = selectedVoiceValue();
+    if (!value) return;
+    const neural = usingNeural();
+    if (neural) unlockNeuralAudio();   // 아이폰: 누른 순간에 소리 장치를 깨운다
+    else if (!('speechSynthesis' in window)) return;
+    if (isTTSSpeaking || isTTSPaused) stopTTS();   // 글을 읽던 중이면 멈추고 들려준다
+    const my = ++previewGen;
+    previewing = true;
+    const voice = neural ? null : selectedSystemVoice();
+    const english = voice && /^en/i.test(voice.lang || '');
+    const text = english ? PREVIEW_EN : PREVIEW_KO;
+    const done = () => { if (my === previewGen) { previewing = false; setPreviewButton('play'); } };
+    if (!neural) {
+        cancelSystemSpeech();
+        const utt = new SpeechSynthesisUtterance(text);
+        if (voice) { utt.voice = voice; utt.lang = voice.lang; }
+        utt.rate = currentSpeed();
+        utt.onend = done;
+        utt.onerror = done;
+        currentUtterance = utt;   // 크롬이 읽는 도중 객체를 치워 끝 알림이 오지 않는 일을 막는다
+        setPreviewButton('stop');
+        speechSynthesis.speak(utt);
+        return;
+    }
+    setPreviewButton('wait');
+    try {
+        const audio = await synthesizeNeural(text, value, currentSpeed(), neuralSynthGen(ttsGen));
+        if (my !== previewGen || !audio) { done(); return; }
+        setPreviewButton('stop');
+        await playNeuralAudio(audio.wav, audio.sampleRate);
+    } catch (err) {
+        if (my === previewGen) showToast('목소리를 들려주지 못했습니다.');
+    }
+    done();
 }
 
 // 다른 글을 열 때 호출 — 이전 글의 강조 표시를 지운다
@@ -860,6 +924,7 @@ function cancelSystemSpeech() {
 }
 
 export function playTTS() {
+    stopVoicePreview();
     const neural = usingNeural();
     if (!neural && !('speechSynthesis' in window)) {
         alert('이 브라우저는 TTS를 지원하지 않습니다.');
@@ -1358,6 +1423,7 @@ export function pauseTTS() {
 }
 
 export function stopTTS() {
+    stopVoicePreview();
     ttsGen++; // 이전 발화의 stale 이벤트 무효화
     ttsGapInterrupted = false;
     // 음성 읽기를 지원하지 않는 브라우저(일부 앱 내 WebView)에서는 여기서 예외가 나
@@ -1423,6 +1489,7 @@ export function updateSpeedDisplay() {
 }
 
 export function saveTTSVoice() {
+    stopVoicePreview();
     const sel = document.getElementById('tts-voice-select');
     if (sel && sel.value) localStorage.setItem('faith_tts_voice', sel.value);
     // 음성마다 문장을 나누는 길이·읽는 속도가 달라 읽는 중이면 지금 문장부터 새 음성으로 다시 읽는다
@@ -1538,7 +1605,7 @@ export function initTTS() {
     const gap = localStorage.getItem('faith_tts_gap');
     const ss = document.getElementById('tts-speed-slider');
     const gs = document.getElementById('tts-gap-slider');
-    if (speed && ss) { ss.value = speed; updateSpeedDisplay(); }
+    if (speed && ss) { ss.value = String(Math.max(0.7, parseFloat(speed) || 1)); updateSpeedDisplay(); }
     localStorage.removeItem('faith_tts_pitch');   // 예전에 저장한 음높이는 더 쓰지 않는다
     if (gap && gs) { gs.value = gap; updateGapDisplay(); }
     document.getElementById('tts-neural-btn')?.addEventListener('click', onNeuralButton);

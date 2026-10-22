@@ -7,8 +7,8 @@
     <title>신앙일지 | Faith Log</title>
     <!-- 앱 버전: 배포할 때마다 이 값, 아래 import map, version.json을 함께 올린다.
          (화면을 다시 열 때 version.json과 비교해 새 버전이면 자동으로 새로고침한다) -->
-    <meta name="app-version" content="2026.10.21.13">
-    <link rel="stylesheet" href="style.css?v=2026.10.21.13">
+    <meta name="app-version" content="2026.10.22.1">
+    <link rel="stylesheet" href="style.css?v=2026.10.22.1">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
     <script>
         // 페이지 로드 전 다크모드 적용 (깜빡임 방지)
@@ -202,11 +202,12 @@
                     <div class="tts-row">
                         <label class="tts-lbl">음성</label>
                         <select id="tts-voice-select" class="tts-select"></select>
+                        <button id="tts-preview-btn" class="tts-rbtn tts-preview-btn" type="button" title="미리 듣기" aria-label="미리 듣기"><i class="ph-fill ph-play"></i></button>
                     </div>
                     <div class="tts-row hidden" id="tts-neural-row">
                         <label class="tts-lbl">자연음</label>
                         <div class="tts-neural-box">
-                            <span id="tts-neural-status" class="tts-hint">약 250~500MB · 와이파이에서 받기를 권장합니다</span>
+                            <span id="tts-neural-status" class="tts-hint tts-neural-status">약 250~500MB · 와이파이 권장</span>
                             <div id="tts-neural-progress" class="tts-neural-progress hidden"><div id="tts-neural-progress-fill" class="tts-neural-progress-fill"></div></div>
                         </div>
                         <button id="tts-neural-btn" class="tts-rbtn" type="button">내려받기</button>
@@ -214,7 +215,7 @@
                     <div class="tts-row">
                         <label class="tts-lbl">속도</label>
                         <div class="tts-slider-row">
-                            <input type="range" id="tts-speed-slider" class="tts-slider" min="0.5" max="2.0" step="0.1" value="1.0">
+                            <input type="range" id="tts-speed-slider" class="tts-slider" min="0.7" max="2.0" step="0.1" value="1.0">
                             <span id="tts-speed-value" class="tts-val">1.0x</span>
                         </div>
                     </div>
@@ -460,27 +461,27 @@
     <script type="importmap">
     {
         "imports": {
-            "./state.js": "./state.js?v=2026.10.21.13",
-            "./data.js": "./data.js?v=2026.10.21.13",
-            "./ui.js": "./ui.js?v=2026.10.21.13",
-            "./editor.js": "./editor.js?v=2026.10.21.13",
-            "./auth.js": "./auth.js?v=2026.10.21.13",
-            "./drive.js": "./drive.js?v=2026.10.21.13",
-            "./tts.js": "./tts.js?v=2026.10.21.13",
-            "./neural-tts.js": "./neural-tts.js?v=2026.10.21.13",
-            "./speech-text.js": "./speech-text.js?v=2026.10.21.13",
-            "./spell-text.js": "./spell-text.js?v=2026.10.21.13",
-            "./spell-words.js": "./spell-words.js?v=2026.10.21.13",
-            "./spell-engine.js": "./spell-engine.js?v=2026.10.21.13",
-            "./spellcheck.js": "./spellcheck.js?v=2026.10.21.13",
-            "./faiths-sso.js": "./faiths-sso.js?v=2026.10.21.13",
-            "./storage.js": "./storage.js?v=2026.10.21.13",
-            "./utils.js": "./utils.js?v=2026.10.21.13",
-            "./formula.js": "./formula.js?v=2026.10.21.13",
-            "./config.js": "./config.js?v=2026.10.21.13"
+            "./state.js": "./state.js?v=2026.10.22.1",
+            "./data.js": "./data.js?v=2026.10.22.1",
+            "./ui.js": "./ui.js?v=2026.10.22.1",
+            "./editor.js": "./editor.js?v=2026.10.22.1",
+            "./auth.js": "./auth.js?v=2026.10.22.1",
+            "./drive.js": "./drive.js?v=2026.10.22.1",
+            "./tts.js": "./tts.js?v=2026.10.22.1",
+            "./neural-tts.js": "./neural-tts.js?v=2026.10.22.1",
+            "./speech-text.js": "./speech-text.js?v=2026.10.22.1",
+            "./spell-text.js": "./spell-text.js?v=2026.10.22.1",
+            "./spell-words.js": "./spell-words.js?v=2026.10.22.1",
+            "./spell-engine.js": "./spell-engine.js?v=2026.10.22.1",
+            "./spellcheck.js": "./spellcheck.js?v=2026.10.22.1",
+            "./faiths-sso.js": "./faiths-sso.js?v=2026.10.22.1",
+            "./storage.js": "./storage.js?v=2026.10.22.1",
+            "./utils.js": "./utils.js?v=2026.10.22.1",
+            "./formula.js": "./formula.js?v=2026.10.22.1",
+            "./config.js": "./config.js?v=2026.10.22.1"
         }
     }
     </script>
-    <script type="module" src="script.js?v=2026.10.21.13"></script>
+    <script type="module" src="script.js?v=2026.10.22.1"></script>
 </body>
 </html>
