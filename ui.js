@@ -32,6 +32,17 @@ export function applyCategorySort() {
     if (icon) icon.className = sort.sortOrder === 'desc' ? 'ph ph-sort-descending' : 'ph ph-sort-ascending';
 }
 
+/**
+ * 글이 검색어에 맞는가 — 제목·소제목·본문에서 찾는다.
+ * 대소문자는 가리지 않고, 띄어 쓴 여러 낱말은 모두 들어 있어야 한다 ('감사 기도' → 둘 다 있는 글).
+ */
+function matchesSearch(entry, keyword) {
+    const terms = (keyword || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (!terms.length) return true;
+    const text = [entry.title || '', entry.subtitle || '', stripHtml(entry.body)].join('\n').toLowerCase();
+    return terms.every(t => text.includes(t));
+}
+
 export function renderEntries(keyword) {
     // 호출부가 키워드를 넘기지 않아도 현재 검색어를 유지해,
     // 선택 모드 전환 등 재렌더링 시 검색 결과가 풀리는 문제를 방지
@@ -52,7 +63,7 @@ export function renderEntries(keyword) {
         !entry.isPurged && 
         !entry.isDeleted && 
         entry.category === state.currentCategory && 
-        ((entry.title || '').includes(keyword) || stripHtml(entry.body).includes(keyword))
+        matchesSearch(entry, keyword)
     );
     
     filtered.sort((a, b) => { 
@@ -1315,7 +1326,7 @@ export function selectAllEntries() {
     const keyword = getEl('search-input')?.value || '';
     const filtered = state.entries.filter(entry =>
         !entry.isPurged && !entry.isDeleted && entry.category === state.currentCategory &&
-        ((entry.title || '').includes(keyword) || stripHtml(entry.body).includes(keyword))
+        matchesSearch(entry, keyword)
     );
     const filteredIds = filtered.map(e => e.id);
     const allSelected = filteredIds.length > 0 && filteredIds.every(id => state.selectedEntries.includes(id))
