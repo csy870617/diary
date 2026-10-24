@@ -784,6 +784,15 @@ body { transition: background-color 0.3s ease, color 0.3s ease; }
 .spell-kinds { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px; border-bottom: 1px solid var(--gray-100); }
 .spell-kinds.hidden { display: none; }
 .spell-list { max-height: min(42vh, 360px); overflow-y: auto; }
+/* 정밀 검사 줄 (문맥 언어 모델 받기·진행·결과) */
+.spell-lm { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; padding: 7px 12px 7px 16px; border-bottom: 1px solid var(--gray-100); font-size: 12px; color: var(--gray-500); }
+.spell-lm.hidden { display: none; }
+.spell-lm-text { flex: 1; min-width: 0; line-height: 1.5; }
+.spell-lm-text b { color: var(--gray-900); font-weight: 600; }
+.spell-lm-text i { vertical-align: -2px; margin-right: 2px; }
+.spell-lm-bar { flex-basis: 100%; order: 3; height: 4px; background: var(--gray-200); border-radius: 2px; overflow: hidden; }
+.spell-lm-bar > div { height: 100%; background: var(--accent); transition: width 0.2s; }
+.spell-kind.kind-lm { color: var(--gray-500); background: var(--gray-100); font-weight: 600; }
 .spell-item { display: flex; flex-direction: column; gap: 4px; padding: 10px 16px; border-bottom: 1px solid var(--gray-100); cursor: pointer; }
 @media (hover: hover) { .spell-item:hover:not(.active) { background: var(--gray-100); } }
 .spell-item.active { background: var(--active-bg); }
