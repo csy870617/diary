@@ -701,6 +701,8 @@ const PLACES = new Set(('마트 집 가게 카페 편의점 교회 회사 병원
     + '친구네 언니네 오빠네 누나네 형네 엄마네 할머니댁 할머니네 이모네 고모네 삼촌네 대학 연구실 서울 부산 대구 인천 광주 대전 울산 제주').split(' '));
 const SOUND_SUBJECT = /(소리|소식|음악|노래|말|말씀|이야기|얘기|웃음|울음|천둥|박수|기도|찬양|찬송|음성|소음|벨|알람|기척|비명|함성|외침|대답)(가|이|도)$/;
 const DISEASE = /^(감기|병|상처|몸살|두통|배탈|기침|독감|목감기|코로나|장염|염증|비염|몸|허리|무릎|다리|팔|어깨|발목|손목|피부|위염|체기|멀미|입병|눈병|치통|편도|목|화상|아픈\s?곳|아픈\s?데)(이|가|은|는|도|이나|가요|이요)$/;
+// 무치다(나물 등을 양념에 버무리다)의 대상
+const SEASON_OBJECT = /^(나물|시금치|콩나물|숙주|고사리|도라지|무|무말랭이|오이|겉절이|미역|파|부추|상추|가지|취나물|비름|냉이|달래|두릅|오징어|골뱅이|양념|무침|반찬)(을|를|도|만|이랑|하고)?$/;
 const BIRTH_OBJECT = /^(아기|아이|애|아들|딸|새끼|알|자녀|쌍둥이|첫째|둘째|셋째|막내|손주|송아지|강아지|새끼들)(를|을)$/;
 const DIFFER_SUBJECT = /^(생각|의견|모양|색|색깔|성격|취향|입장|스타일|맛|방법|문화|성향|느낌|크기|모습|사정|상황|목소리|분위기|가격|기준|관점|시각|말투|습관)(이|가|도|은|는)$/;
 const PAYMENT = /(카드|현금|계좌|이체|페이|요금|금액|돈|비용|수강료|회비|월세|관리비|구매|주문|쇼핑|할부|일시불|영수증)/;
@@ -723,6 +725,14 @@ export function contextFix(core, ctx) {
     if (/^들(렸|려)/.test(core) && !others.some(x => SOUND_SUBJECT.test(x))) {
         const place = [prev, prev2].some(x => /(에|에도|에는|에만)$/.test(x) && PLACES.has(x.replace(/(에|에도|에는|에만)$/, '')));
         if (place) return out(swapStem(core, [['들렸', '들렀'], ['들려', '들러']]), "'들르다'(잠깐 들어가 머물다)는 '들렀다·들러'로 씁니다 ('들렸다'는 소리가 들린 것)");
+    }
+    // 무치다: '나물을 묻쳐서' → 무쳐서 (음식이 아니면 사전 단계에서 '묻혀서'로 고친다)
+    if (/^묻(쳐|쳤|치|친|칠|침|칩)/.test(core) && before.some(x => SEASON_OBJECT.test(x))) {
+        return out('무' + core.slice(1), "나물 등을 양념에 버무리는 것은 '무치다'입니다");
+    }
+    // 닫히다: '문이 닫쳤다' → 닫혔다 ('닫치다'는 힘주어 닫는 것이라 '-을/-를'이 있어야 한다)
+    if (/^닫(쳤|쳐|친|칠|침)/.test(core) && !objectBefore) {
+        return out('닫' + String.fromCharCode(core.charCodeAt(1) + (18 - 14) * 588) + core.slice(2), "저절로 닫힌 것은 '닫히다'입니다 ('닫치다'는 힘주어 닫는 것)");
     }
     // 놀라다: '너무 놀랬다' → 놀랐다 ('친구를 놀래 주었다'처럼 남을 놀라게 한 것은 그대로)
     if (/^놀(랬|래|램)/.test(core) && !objectBefore && !/^(주|줬|줄|준|줍|드리|드렸)/.test(next)) {
@@ -759,8 +769,9 @@ export function contextFix(core, ctx) {
             "답을 맞게 한 것은 '맞히다'입니다 ('맞추다'는 서로 비교해 보는 것)");
     }
     // 부치다·붙이다: '편지를 붙였다' → 부쳤다, '전을 붙였다' → 부쳤다, '우표를 부쳤다' → 붙였다
-    if (/^(편지|소포|택배|우편물|엽서|짐|전|부침개|빈대떡|김치전|파전|녹두전|호떡)(를|을|도)$/.test(prev) && /^붙(이|여|였|인|일|입)/.test(core)) {
-        return out(swapStem(core, [['붙였', '부쳤'], ['붙여', '부쳐'], ['붙인', '부친'], ['붙일', '부칠'], ['붙입', '부칩'], ['붙이', '부치']]),
+    if (/^(편지|소포|택배|우편물|엽서|짐|전|부침개|빈대떡|김치전|파전|녹두전|호떡)(를|을|도)$/.test(prev) && /^붙(이|여|였|인|일|입|치|쳐|쳤|친|칠|칩)/.test(core)) {
+        return out(swapStem(core, [['붙였', '부쳤'], ['붙여', '부쳐'], ['붙인', '부친'], ['붙일', '부칠'], ['붙입', '부칩'], ['붙이', '부치'],
+            ['붙쳤', '부쳤'], ['붙쳐', '부쳐'], ['붙친', '부친'], ['붙칠', '부칠'], ['붙칩', '부칩'], ['붙치', '부치']]),
             "물건을 보내거나 전을 부치는 것은 '부치다'입니다");
     }
     if (/^(우표|스티커|반창고|포스트잇|테이프|파스|밴드|메모|라벨|전단|벽보)(를|을|도)$/.test(prev) && /^부(치|쳐|쳤|친|칠|칩)/.test(core)) {
@@ -1525,6 +1536,29 @@ function segmentFix(dict, q) {
     return { to: pieces.join(' '), why: '낱말과 낱말 사이는 띄어 씁니다' };
 }
 
+/**
+ * 소리 나는 대로 '치'로 적은 '-히-·-이-' (묻쳐서 → 묻혀서, 갇쳤다 → 갇혔다, 맞쳤다 → 맞혔다, 붙쳐서 → 붙여서)
+ * 받침 'ㄷ·ㅈ' 뒤의 '히', 받침 'ㅌ' 뒤의 '이'는 [치]로 소리 난다. 받침을 그대로 둔 것을 보면 쓴 사람은
+ * '묻다·갇다·맞다·붙다'를 생각한 것이다 — 그래서 소리가 같은 다른 말(무쳐서)보다 이쪽을 고른다.
+ * 바꾼 말이 사전에 있고, 바꿀 곳이 하나로 정해질 때만 고친다.
+ */
+const CHO_CH = 14, CHO_H = 18, CHO_NONE = 11;
+function palatalFix(dict, q) {
+    const found = new Set();
+    for (let k = 1; k < q.length; k++) {
+        const prev = jongOf(q[k - 1]);
+        const code = q.charCodeAt(k) - SBASE;
+        if (code < 0 || code >= SCOUNT || Math.floor(code / 588) !== CHO_CH) continue;
+        const to = prev === 7 || prev === 22 ? CHO_H : prev === 25 ? CHO_NONE : -1;   // ㄷ·ㅈ → ㅎ, ㅌ → ㅇ
+        if (to < 0) continue;
+        const cand = q.slice(0, k) + String.fromCharCode(SBASE + to * 588 + code % 588) + q.slice(k + 1);
+        if (dict.spell(cand)) found.add(cand);
+    }
+    if (found.size !== 1) return null;
+    const to = [...found][0];
+    return { to, why: `소리는 [치]로 나지만 ${obj(to)} 씁니다` };
+}
+
 /** 한국어 낱말들 → { 낱말: null(맞음) | false(고칠 말을 모름) | { to, why } } */
 export function lookupKorean(dict, words, onEach) {
     const out = {};
@@ -1532,7 +1566,7 @@ export function lookupKorean(dict, words, onEach) {
         const q = w.normalize('NFC');
         if (!/^[가-힣]+$/.test(q) || knownKorean(dict, q)) out[w] = null;
         else if (FRAGMENT.test(q)) out[w] = false;   // 어미로 시작하는 조각 — 앞말과 붙일지는 checkLines가 본다
-        else out[w] = particleFix(dict, q) || splitFix(dict, q) || spellingFix(dict, q) || doubledFix(dict, q) || segmentFix(dict, q) || false;
+        else out[w] = particleFix(dict, q) || palatalFix(dict, q) || splitFix(dict, q) || spellingFix(dict, q) || doubledFix(dict, q) || segmentFix(dict, q) || false;
         if (onEach) onEach();
     }
     return out;
