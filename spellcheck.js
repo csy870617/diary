@@ -8,11 +8,12 @@
  * 아래 창의 목록에서 하나씩 고치거나 무시하고, '모두 고치기'로 한 번에 고친다.
  * 목록의 항목을 누르면 글에서 그 자리로 옮겨 가 잠깐 빛나는 테두리로 보여 준다 (책 보기면 그 쪽으로 넘긴다).
  * 고칠 때마다 되돌릴 자리를 남겨 되돌리기(Ctrl+Z) 한 번으로 돌아갈 수 있다.
+ * 정밀 검사(문맥 언어 모델, 약 80MB)를 받아 두면 기본 검사 결과를 먼저 보여 준 뒤 문맥으로 더 찾은 곳을 덧붙인다.
  * 밑줄은 글과 함께 움직이는 Range로 잡고, 고치기 직전에 그 자리의 글자가 그대로인지 확인한다
  * (검사하는 동안이나 결과를 보는 동안 글을 고쳐도 엉뚱한 곳을 고치지 않도록).
  */
 import { diffSpans } from './spell-text.js';
-import { checkDocument, addPersonalWord } from './spell-engine.js';
+import { checkDocument, addPersonalWord, lmSupported, lmStatus, lmDownload, lmCancel, lmDelete, checkDocumentLM } from './spell-engine.js';
 import { markEditPoint, afterProgrammaticEdit, jumpToPage } from './editor.js';
 import { showToast } from './tts.js';
 import { state, isReadOnlyView } from './state.js';
@@ -35,6 +36,8 @@ const HAS_LETTER = /\p{L}/u;
 let items = [];      // { id, where: 'body'|'title'|'subtitle', range | (el, a), from, to, type, why, word, src, ctx, row }
 let running = false;
 let runSeq = 0;      // 검사 중에 창을 닫거나 다른 글을 열면 늦게 온 결과를 버린다
+let lastRun = null;  // { seq, lines, plan, base } — 정밀 검사를 받은 뒤 같은 결과에 바로 덧붙이려고 기억한다
+let dismissed = new Set();   // 무시한 자리 ('줄:시작:끝') — 정밀 검사가 같은 자리를 다시 내놓지 않게
 
 // ─── 본문 글자 펼치기 ───
 // 음성 읽기(tts.js)와 같은 방식이지만 표의 칸(TD·TH)도 줄로 나눈다 — 칸끼리 붙어 '띄어쓰기 틀림'으로 보이지 않게.
@@ -156,6 +159,8 @@ async function startSpellcheck() {
             if (range && range.toString() === f.from) items.push({ ...f, where: 'body', range, ctx });
         }
         render();
+        lastRun = { seq, lines, plan, base: fixes };
+        runPrecision(lastRun);
     } catch (err) {
         if (seq !== runSeq) return;
         setSummary('');
@@ -163,6 +168,133 @@ async function startSpellcheck() {
     } finally {
         if (seq === runSeq) { running = false; setBusy(false); }
     }
+}
+
+// ─── 정밀 검사 (문맥 언어 모델) ───
+
+/** 기본 검사 결과 뒤에 정밀 검사로 더 찾은 곳을 덧붙인다 (모델이 없으면 받기를 권한다) */
+async function runPrecision(run) {
+    if (!lmSupported()) return;
+    const st = await lmStatus();
+    if (run.seq !== runSeq) return;
+    if (!st.ready) { showLmOffer(); return; }
+    if (st.broken) { showLmBroken(st.broken); return; }
+    setLmRow('<i class="ph ph-spinner-gap tts-spin"></i> 정밀 검사로 문맥을 살피는 중…');
+    try {
+        const extra = await checkDocumentLM(run.lines, run.base, {
+            onProgress: (p) => {
+                if (run.seq !== runSeq) return;
+                if (p.stage === 'open') setLmRow('<i class="ph ph-spinner-gap tts-spin"></i> 정밀 검사 모델을 여는 중… (처음엔 조금 걸립니다)');
+                else if (p.stage === 'check' && p.total) setLmRow(`<i class="ph ph-spinner-gap tts-spin"></i> 정밀 검사 중… (${p.got}/${p.total})`);
+            }
+        });
+        if (run.seq !== runSeq) return;
+        const added = mergePrecision(run, extra);
+        setLmRow(added ? `정밀 검사 ✓ ${added}곳 더 찾았습니다` : '정밀 검사 ✓ 더 찾은 곳이 없습니다', [['삭제', 'ghost', deletePrecision]]);
+    } catch (err) {
+        if (run.seq !== runSeq) return;
+        showLmBroken((err && err.message) || String(err));
+    }
+}
+
+/** 정밀 검사 결과를 목록에 넣는다 → 새로 찾았거나 고쳐 고른 곳의 수 */
+function mergePrecision(run, extra) {
+    const body = $('editor-body');
+    const index = indexText(body);
+    const starts = new Map();
+    let count = 0;
+    for (const f of extra) {
+        const key = `${f.id}:${f.a}:${f.b}`;
+        if (dismissed.has(key)) continue;
+        if (f.replaces) {
+            // 기본 검사가 사전으로 고른 말을 문맥에 맞는 말로 바꾼다 (아직 목록에 남아 있을 때만)
+            const it = items.find(o => o.id === f.replaces.id && o.a === f.replaces.a && o.b === f.replaces.b && o.src === 'dict' && !o.stale);
+            if (!it) continue;
+            Object.assign(it, { to: f.to, why: f.why, type: f.type, src: 'lm', word: f.word });
+            count++;
+            continue;
+        }
+        if (items.some(o => o.id === f.id && o.a < f.b && f.a < o.b)) continue;   // 이미 다른 고침이 있는 자리
+        const p = run.plan[f.id];
+        if (!p) continue;
+        const ctx = around(run.lines[f.id].text, f.a, f.b);
+        if (p.where !== 'body') {
+            if ((p.el.value || '').slice(f.a, f.b) !== f.from) continue;
+            items.push({ ...f, where: p.where, el: p.el, ctx });
+            count++;
+            continue;
+        }
+        if (!starts.has(f.id)) starts.set(f.id, relocate(index.text, p));
+        const base = starts.get(f.id);
+        if (base < 0) continue;
+        const range = rangeAt(index, base + f.a, base + f.b);
+        if (!range || range.toString() !== f.from) continue;
+        items.push({ ...f, where: 'body', range, ctx });
+        count++;
+    }
+    if (count) {
+        items.sort((x, y) => x.id - y.id || x.a - y.a);
+        render();
+    }
+    return count;
+}
+
+function lmRow() { return $('spell-lm'); }
+
+/** 정밀 검사 줄 — html: 안내(아이콘 포함), buttons: [[이름, 'primary'|'ghost', 누를 때]] */
+function setLmRow(html, buttons = [], pct = null) {
+    const row = lmRow();
+    if (!row) return;
+    row.innerHTML = '';
+    const text = document.createElement('span');
+    text.className = 'spell-lm-text';
+    text.innerHTML = html;
+    row.appendChild(text);
+    if (pct != null) {
+        const bar = document.createElement('div');
+        bar.className = 'spell-lm-bar';
+        const fill = document.createElement('div');
+        fill.style.width = `${pct}%`;
+        bar.appendChild(fill);
+        row.appendChild(bar);
+    }
+    for (const [label, kind, fn] of buttons) row.appendChild(button(label, 'spell-btn ' + kind, fn));
+    row.classList.remove('hidden');
+}
+
+function hideLmRow() { lmRow()?.classList.add('hidden'); }
+
+function showLmOffer() {
+    setLmRow('<b>정밀 검사</b> · 문맥을 보고 더 찾아냅니다 (약 80MB)', [['받기', 'primary', downloadPrecision]]);
+}
+
+function showLmBroken(message) {
+    setLmRow(message, [['다시 받기', 'ghost', downloadPrecision], ['삭제', 'ghost', deletePrecision]]);
+}
+
+async function downloadPrecision() {
+    if (!confirm('맞춤법 정밀 검사 모델(약 80MB)을 내려받습니다.\n데이터 요금이 들 수 있으니 와이파이에서 받기를 권장합니다.\n\n한 번 받으면 인터넷 없이도 쓸 수 있고, 글은 기기 밖으로 나가지 않습니다. 계속할까요?')) return;
+    setLmRow('받는 중… 0%', [['취소', 'ghost', () => lmCancel()]], 0);
+    try {
+        await lmDownload((p) => {
+            const pct = p.total ? Math.floor(p.got / p.total * 100) : 0;
+            setLmRow(`받는 중… ${pct}% (${Math.round(p.got / 1e6)}/${Math.round(p.total / 1e6)}MB)`, [['취소', 'ghost', () => lmCancel()]], pct);
+        });
+        showToast('정밀 검사 모델을 받았습니다.');
+        // 창이 열려 있으면 지금 결과에 바로 정밀 검사를 덧붙인다
+        if (lastRun && lastRun.seq === runSeq && !$('spell-panel')?.classList.contains('hidden')) runPrecision(lastRun);
+        else hideLmRow();
+    } catch (err) {
+        if (err && err.abort) { showToast('받기를 멈췄습니다. 다시 누르면 이어서 받습니다.'); showLmOffer(); return; }
+        setLmRow('정밀 검사 모델을 받지 못했습니다. ' + ((err && err.message) || ''), [['다시 받기', 'ghost', downloadPrecision]]);
+    }
+}
+
+async function deletePrecision() {
+    if (!confirm('맞춤법 정밀 검사 모델을 기기에서 지울까요?\n(필요하면 언제든 다시 받을 수 있습니다)')) return;
+    try { await lmDelete(); } catch (e) { /* 지우지 못했으면 다음에 다시 */ }
+    showToast('정밀 검사 모델을 지웠습니다.');
+    showLmOffer();
 }
 
 // ─── 목록 ───
@@ -256,12 +388,20 @@ function itemRow(it) {
     const kind = document.createElement('span');
     kind.className = `spell-kind ${kindOf(it.type).cls}`;
     kind.textContent = it.type;
-    why.append(kind, ' ' + [it.where === 'title' ? '제목' : it.where === 'subtitle' ? '소제목' : '', it.why].filter(Boolean).join(' · '));
+    why.append(kind);
+    if (it.src === 'lm') {
+        const lm = document.createElement('span');
+        lm.className = 'spell-kind kind-lm';
+        lm.textContent = '정밀';
+        lm.title = '정밀 검사(문맥 언어 모델)가 찾았습니다';
+        why.append(lm);
+    }
+    why.append(' ' + [it.where === 'title' ? '제목' : it.where === 'subtitle' ? '소제목' : '', it.why].filter(Boolean).join(' · '));
     const actions = document.createElement('div');
     actions.className = 'spell-actions';
     actions.append(button('고치기', 'spell-btn', () => fixOne(it)), button('무시', 'spell-btn ghost', () => removeItem(it)));
     // 사전에 없어서 잡힌 말(사람 이름 등)은 사전에 넣어 다음부터 잡지 않게 할 수 있다
-    if (it.src === 'dict' && it.word && it.type === '맞춤법') actions.append(button('사전에 추가', 'spell-btn ghost', () => addToDictionary(it)));
+    if ((it.src === 'dict' || it.src === 'lm') && it.word && it.type === '맞춤법') actions.append(button('사전에 추가', 'spell-btn ghost', () => addToDictionary(it)));
     row.append(change, ctx, why, actions);
     it.row = row;
     return row;
@@ -279,6 +419,7 @@ function paint() {
 }
 
 function removeItem(it) {
+    dismissed.add(`${it.id}:${it.a}:${it.b}`);
     items = items.filter(o => o !== it);
     it.row?.remove();
     paint();
@@ -288,7 +429,7 @@ function removeItem(it) {
 
 function addToDictionary(it) {
     addPersonalWord(it.word);
-    const same = items.filter(o => o.src === 'dict' && o.word === it.word);
+    const same = items.filter(o => (o.src === 'dict' || o.src === 'lm') && o.word === it.word);
     same.forEach(o => { items = items.filter(x => x !== o); o.row?.remove(); });
     paint();
     showToast(`'${it.word}'을(를) 사전에 넣었습니다.`);
@@ -543,6 +684,9 @@ function openPanel() {
 function clearResults() {
     clearSpot();
     items = [];
+    dismissed = new Set();
+    lastRun = null;
+    hideLmRow();
     $('spell-kinds')?.classList.add('hidden');
     const list = $('spell-list');
     if (list) list.innerHTML = '';

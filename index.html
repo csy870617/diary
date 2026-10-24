@@ -7,8 +7,8 @@
     <title>신앙일지 | Faith Log</title>
     <!-- 앱 버전: 배포할 때마다 이 값, 아래 import map, version.json을 함께 올린다.
          (화면을 다시 열 때 version.json과 비교해 새 버전이면 자동으로 새로고침한다) -->
-    <meta name="app-version" content="2026.10.24.2">
-    <link rel="stylesheet" href="style.css?v=2026.10.24.2">
+    <meta name="app-version" content="2026.10.24.3">
+    <link rel="stylesheet" href="style.css?v=2026.10.24.3">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
     <script>
         // 페이지 로드 전 다크모드 적용 (깜빡임 방지)
@@ -253,6 +253,7 @@
                 <button id="spell-close" class="spell-x" type="button" aria-label="닫기"><i class="ph ph-x"></i></button>
             </div>
             <div id="spell-kinds" class="spell-kinds hidden"></div>
+            <div id="spell-lm" class="spell-lm hidden" aria-live="polite"></div>
             <div id="spell-list" class="spell-list"></div>
         </div>
         <div id="color-palette-popup" class="color-palette-popup hidden">
@@ -461,27 +462,29 @@
     <script type="importmap">
     {
         "imports": {
-            "./state.js": "./state.js?v=2026.10.24.2",
-            "./data.js": "./data.js?v=2026.10.24.2",
-            "./ui.js": "./ui.js?v=2026.10.24.2",
-            "./editor.js": "./editor.js?v=2026.10.24.2",
-            "./auth.js": "./auth.js?v=2026.10.24.2",
-            "./drive.js": "./drive.js?v=2026.10.24.2",
-            "./tts.js": "./tts.js?v=2026.10.24.2",
-            "./neural-tts.js": "./neural-tts.js?v=2026.10.24.2",
-            "./speech-text.js": "./speech-text.js?v=2026.10.24.2",
-            "./spell-text.js": "./spell-text.js?v=2026.10.24.2",
-            "./spell-words.js": "./spell-words.js?v=2026.10.24.2",
-            "./spell-engine.js": "./spell-engine.js?v=2026.10.24.2",
-            "./spellcheck.js": "./spellcheck.js?v=2026.10.24.2",
-            "./faiths-sso.js": "./faiths-sso.js?v=2026.10.24.2",
-            "./storage.js": "./storage.js?v=2026.10.24.2",
-            "./utils.js": "./utils.js?v=2026.10.24.2",
-            "./formula.js": "./formula.js?v=2026.10.24.2",
-            "./config.js": "./config.js?v=2026.10.24.2"
+            "./state.js": "./state.js?v=2026.10.24.3",
+            "./data.js": "./data.js?v=2026.10.24.3",
+            "./ui.js": "./ui.js?v=2026.10.24.3",
+            "./editor.js": "./editor.js?v=2026.10.24.3",
+            "./auth.js": "./auth.js?v=2026.10.24.3",
+            "./drive.js": "./drive.js?v=2026.10.24.3",
+            "./tts.js": "./tts.js?v=2026.10.24.3",
+            "./neural-tts.js": "./neural-tts.js?v=2026.10.24.3",
+            "./speech-text.js": "./speech-text.js?v=2026.10.24.3",
+            "./spell-text.js": "./spell-text.js?v=2026.10.24.3",
+            "./spell-words.js": "./spell-words.js?v=2026.10.24.3",
+            "./spell-engine.js": "./spell-engine.js?v=2026.10.24.3",
+            "./spell-hunspell.js": "./spell-hunspell.js?v=2026.10.24.3",
+            "./spell-lm.js": "./spell-lm.js?v=2026.10.24.3",
+            "./spellcheck.js": "./spellcheck.js?v=2026.10.24.3",
+            "./faiths-sso.js": "./faiths-sso.js?v=2026.10.24.3",
+            "./storage.js": "./storage.js?v=2026.10.24.3",
+            "./utils.js": "./utils.js?v=2026.10.24.3",
+            "./formula.js": "./formula.js?v=2026.10.24.3",
+            "./config.js": "./config.js?v=2026.10.24.3"
         }
     }
     </script>
-    <script type="module" src="script.js?v=2026.10.24.2"></script>
+    <script type="module" src="script.js?v=2026.10.24.3"></script>
 </body>
 </html>

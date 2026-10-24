@@ -67,6 +67,98 @@ export function checkDocument(lines, { onProgress } = {}) {
     return checkLines(lines, { lookup: (req) => lookup(req, onProgress) }, { skip: (w) => mine.has(w) });
 }
 
+// ─── 정밀 검사 (문맥 언어 모델 — spell-lm-worker.js) ───
+// 언어 모델은 메모리를 많이 써서(약 500MB) 따로 돌고, 5분 동안 쓰지 않으면 닫는다.
+const LM_IDLE_MS = 5 * 60 * 1000;
+let lmWorker = null;
+let lmSeq = 0;
+const lmCalls = new Map();
+let lmIdle = null;
+let lmBroken = '';   // 이 기기에서 모델을 열다 실패했으면 그 까닭 (다시 열기 전까지 쓰지 않는다)
+
+function stopLmWorker() {
+    clearTimeout(lmIdle);
+    lmIdle = null;
+    if (lmWorker) { lmWorker.terminate(); lmWorker = null; }
+    lmCalls.forEach(c => c.reject(new Error('정밀 검사를 멈췄습니다.')));
+    lmCalls.clear();
+}
+
+function getLmWorker() {
+    if (lmWorker) return lmWorker;
+    lmWorker = new Worker(new URL('./spell-lm-worker.js' + new URL(import.meta.url).search, import.meta.url), { type: 'module' });
+    lmWorker.onmessage = (e) => {
+        const d = e.data || {};
+        const call = lmCalls.get(d.id);
+        if (!call) return;
+        if (d.type === 'progress') { if (call.onProgress) call.onProgress(d); return; }
+        lmCalls.delete(d.id);
+        if (d.type === 'error') { const err = new Error(d.message || '정밀 검사를 하지 못했습니다.'); err.abort = d.abort; call.reject(err); }
+        else call.resolve(d);
+    };
+    lmWorker.onerror = (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        // 메모리가 모자라 작업자가 멈춘 경우가 많다 — 이번에는 정밀 검사를 쓰지 않는다
+        lmBroken = '이 기기에서는 정밀 검사를 열지 못했습니다 (메모리가 모자랄 수 있습니다).';
+        const err = new Error(lmBroken);
+        lmCalls.forEach(c => c.reject(err));
+        lmCalls.clear();
+        if (lmWorker) lmWorker.terminate();
+        lmWorker = null;
+    };
+    return lmWorker;
+}
+
+function lmCall(msg, onProgress) {
+    clearTimeout(lmIdle);
+    return new Promise((resolve, reject) => {
+        const id = ++lmSeq;
+        lmCalls.set(id, { resolve, reject, onProgress });
+        getLmWorker().postMessage({ ...msg, id });
+    }).finally(() => {
+        if (!lmCalls.size) lmIdle = setTimeout(stopLmWorker, LM_IDLE_MS);
+    });
+}
+
+/** 이 브라우저에서 정밀 검사를 쓸 수 있나 */
+export function lmSupported() {
+    return typeof WebAssembly === 'object' && typeof indexedDB !== 'undefined' && typeof DecompressionStream !== 'undefined' && typeof Worker !== 'undefined';
+}
+
+/** 정밀 검사 모델 상태 → { ready, broken } */
+export async function lmStatus() {
+    if (!lmSupported()) return { ready: false, broken: '' };
+    try { return { ready: !!(await lmCall({ type: 'status' })).ready, broken: lmBroken }; } catch (e) { return { ready: false, broken: lmBroken }; }
+}
+
+/** 정밀 검사 모델 받기 — onProgress({ got, total }) */
+export function lmDownload(onProgress) {
+    lmBroken = '';
+    return lmCall({ type: 'download' }, onProgress);
+}
+
+export function lmCancel() {
+    if (lmWorker) lmWorker.postMessage({ type: 'cancel' });
+}
+
+export async function lmDelete() {
+    await lmCall({ type: 'delete' });
+    lmBroken = '';
+    stopLmWorker();   // 열어 둔 모델의 메모리를 돌려준다
+}
+
+/**
+ * 정밀 검사 → [{ id, a, b, from, to, type, why, src: 'lm', replaces? }]
+ * base: 기본 검사가 찾은 것 (그 자리는 다시 보지 않고, 사전으로 고친 낱말은 다시 견준다 — replaces로 알려 준다)
+ * onProgress({ stage: 'open'|'check', got, total })
+ */
+export async function checkDocumentLM(lines, base, { onProgress } = {}) {
+    if (lmBroken) throw new Error(lmBroken);
+    const plain = base.map(({ id, a, b, from, to, type, why, src }) => ({ id, a, b, from, to, type, why, src }));
+    const res = await lmCall({ type: 'check', lines, base: plain, words: getPersonalWords() }, onProgress);
+    return res.fixes || [];
+}
+
 /** 사용자가 사전에 넣은 말 */
 export function getPersonalWords() {
     try {
@@ -88,4 +180,5 @@ export function addPersonalWord(word) {
 export function forgetSpellData() {
     try { localStorage.removeItem(WORDS_ITEM); } catch (e) { /* 저장소 접근 불가 */ }
     stopWorker();
+    stopLmWorker();
 }
