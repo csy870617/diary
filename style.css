@@ -79,6 +79,7 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .nav-item { background: none; border: 1px solid transparent; border-radius: 6px; padding: 5px 10px; font-size: 13px; font-family: var(--text-sans); color: var(--gray-700); cursor: pointer; display: flex; align-items: center; gap: 5px; white-space: nowrap; flex-shrink: 0; transition: background 0.15s, color 0.15s, border-color 0.15s; user-select: none; }
 .nav-item:hover { background: var(--gray-100); color: var(--gray-900); }
 .nav-item .nav-caret { font-size: 10px; opacity: 0.55; margin-left: 2px; }
+.nav-item.folder-nav.popup-open .nav-caret { transform: rotate(180deg); }   /* 펼친 폴더는 ▾를 위로 */
 .nav-item.folder-nav { color: var(--gray-800); }
 .nav-item.folder-nav.popup-open { background: var(--gray-100); color: var(--gray-900); }
 .nav-item.topic-nav.active { color: var(--gray-900); font-weight: 700; background: var(--active-bg); }

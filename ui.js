@@ -137,7 +137,7 @@ export function renderLocationBar() {
         seg.className = 'loc-seg loc-folder';
         seg.dataset.folderId = f.id;
         seg.innerHTML = `<i class="ph ph-folder-simple"></i><span>${escapeHtml(f.name)}</span>`;
-        seg.onclick = (e) => { e.stopPropagation(); showFolderPopup(f.id, seg); };
+        seg.onclick = (e) => { e.stopPropagation(); onFolderTap(f.id, seg); };
         attachFolderContextMenu(seg, f.id);
         bar.appendChild(seg);
         const sep = document.createElement('span');
@@ -437,14 +437,35 @@ function buildFolderNavItem(folder) {
     btn.innerHTML = `<i class="ph ph-folder-simple"></i> <span>${escapeHtml(folder.name)}</span>${caret}`;
     btn.onclick = (e) => {
         e.stopPropagation();
-        if (popupFolderId && (popupFolderId === folder.id || popupHistory[0] === folder.id)) {
-            closeFolderPopup();
-        } else {
-            showFolderPopup(folder.id, btn);
-        }
+        onFolderTap(folder.id, btn);
     };
     attachFolderContextMenu(btn, folder.id);
     return btn;
+}
+
+/**
+ * 폴더(칩·위치 표시줄)를 눌렀을 때.
+ * 처음 누르면 닫힌 채로 그 폴더를 고르고(맨 위 주제의 글을 보여 준다), 이미 고른 폴더를 한 번 더 누르면 펼친다.
+ * 펼쳐 있을 때 누르면 접는다. 안에 주제가 하나도 없는 폴더는 고를 것이 없으니 바로 펼친다.
+ */
+function onFolderTap(folderId, anchor) {
+    if (popupFolderId && (popupFolderId === folderId || popupHistory[0] === folderId)) {
+        closeFolderPopup();
+        return;
+    }
+    if (!topicInFolderTree(state.currentCategory, folderId)) {
+        const first = firstTopicInFolder(folderId);
+        if (first) {
+            closeFolderPopup();
+            state.currentCategory = first;
+            applyCategorySort();
+            if (state.isSelectMode) exitSelectMode();
+            renderFolders();
+            renderEntries();
+            return;
+        }
+    }
+    showFolderPopup(folderId, anchor);
 }
 
 function buildTopicNavItem(cat) {
