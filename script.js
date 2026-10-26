@@ -390,10 +390,12 @@ function setupListeners() {
         const tableModalEl = document.getElementById('table-modal');
         if (tableModalEl && !tableModalEl.contains(e.target) && !e.target.closest('#toolbar-table-btn') && !e.target.closest('#toolbar-table-edit-btn')) tableModalEl.classList.add('hidden');
 
+        // 폴더 칩과 위치 표시줄의 폴더 이름은 누를 때마다 스스로 펼치고 접으므로 바깥으로 보지 않는다
+        // (여기서 먼저 접으면 그 손잡이가 곧바로 다시 펼쳐, 다시 눌러도 접히지 않았다)
         const folderPopup = document.getElementById('folder-popup');
         if (folderPopup && !folderPopup.classList.contains('hidden')
             && !folderPopup.contains(e.target)
-            && !e.target.closest('.folder-nav')) {
+            && !e.target.closest('.folder-nav, .loc-folder')) {
             closeFolderPopup();
         }
         const addMenu = document.getElementById('add-menu-popup');
