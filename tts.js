@@ -74,7 +74,7 @@ const TEXT_BLOCKS = new Set([
 /**
  * 본문을 읽을 글자로 펼치면서, 각 글자 마디(text node)가 어디서 시작하는지도 기록한다.
  * 블록 요소·<br> 경계에는 \n을 넣는다.
- * 기록한 위치로 '지금 읽는 문장'을 화면에서 찾아 강조하고, 탭한 곳이 몇 번째 글자인지 계산한다.
+ * 기록한 위치로 '지금 읽는 문장'을 화면에서 찾아 강조하고, 두 번 누른 곳이 몇 번째 글자인지 계산한다.
  * → { text, segs: [{ node, start }] }
  */
 function buildTextIndex(root) {
@@ -156,7 +156,7 @@ function rangeFromOffsets(index, start, end) {
 }
 
 
-// ─── 지금 읽는 문장 강조 · 문장을 눌러 거기서부터 읽기 ───
+// ─── 지금 읽는 문장 강조 · 문장을 두 번 눌러 거기서부터 읽기 ───
 // 강조는 CSS Highlight API로 그린다. 본문 HTML을 건드리지 않으므로 표시가 글에 저장될 일이 없다.
 // (지원하지 않는 브라우저에서는 강조만 생략되고 나머지는 그대로 동작)
 const HIGHLIGHT_NAME = 'tts-current';
@@ -231,20 +231,82 @@ function ttsPanelOpen() {
     return !!panel && !panel.classList.contains('hidden');
 }
 
-/** 음성 바가 열려 있으면 문장을 누른 곳부터 읽는다 (보기·편집 모두 — 편집 중에는 커서도 그대로 놓인다) */
-function onEditorTapForTTS(e) {
-    if (!ttsPanelOpen()) return;
-    if (e.button !== 0 || e.detail > 1) return;                 // 두 번 눌러 단어 고르기는 그대로
-    if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return; // 늘려 고르기 등 키를 함께 누른 경우는 그대로
-    if (e.target.closest('a, img, button, input, select, textarea, .tts-panel')) return;
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed && sel.toString().trim()) return;  // 끌어서 고른 경우는 그대로
-    const pt = caretFromPoint(e.clientX, e.clientY);
+/* 음성 바가 열려 있으면 문장을 두 번 누른(두 번 클릭한) 곳부터 읽는다 (보기·편집 모두).
+   예전에는 한 번만 눌러도 읽는 자리가 옮겨 가, 글을 고치려고 커서를 놓을 때마다 거기서부터 다시 읽었다.
+   이제 한 번 누르기는 커서 놓기·쪽 넘기기에 그대로 두고, 두 번 누를 때만 읽을 자리를 정한다. */
+const DOUBLE_TAP_MS = 400;   // 앞 손가락을 뗀 뒤 이 안에 다시 눌러야 두 번 누르기
+const DOUBLE_TAP_PX = 30;    // 두 번 누른 자리가 이만큼 안에 있어야 한다
+const TAP_MOVE_PX = 10;      // 누른 채 이보다 많이 움직이면 누르기가 아니라 밀기
+let lastTap = null;          // 바로 앞 누르기 { x, y, t }
+let tapStart = null;         // 지금 누르고 있는 손가락 { x, y, t, second }
+let lastTouchMs = 0;
+let seekGuardUntil = 0;
+
+function canSeekFrom(target) {
+    // 예전 아이폰은 손가락이 닿은 글자 마디(text node)를 대상으로 주기도 한다
+    const el = target && target.nodeType === Node.TEXT_NODE ? target.parentElement : target;
+    if (!ttsPanelOpen() || !el || el.nodeType !== Node.ELEMENT_NODE) return false;
+    return !el.closest('a, img, button, input, select, textarea, .tts-panel');
+}
+
+function seekToPoint(x, y) {
+    const pt = caretFromPoint(x, y);
     if (!pt) return;
-    const index = getTextIndex();
-    const pos = offsetAtPosition(index, pt.node, pt.offset);
+    const pos = offsetAtPosition(getTextIndex(), pt.node, pt.offset);
     if (pos == null) return;
+    seekGuardUntil = Date.now() + 500;
     playFromOffset(pos);
+}
+
+/** 마우스: 두 번째로 누르는 순간에 읽을 자리를 정한다 (그 자리의 단어를 고르지 않는다) */
+function onEditorMouseDownForTTS(e) {
+    if (e.button !== 0 || e.detail !== 2) return;
+    if (Date.now() - lastTouchMs < 1000) return;                  // 손가락 뒤에 따라오는 흉내 마우스는 아래에서 이미 처리했다
+    if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return; // 늘려 고르기 등 키를 함께 누른 경우는 그대로
+    if (!canSeekFrom(e.target)) return;
+    e.preventDefault();
+    seekToPoint(e.clientX, e.clientY);
+}
+
+/* 손가락: 브라우저마다 두 번 누르기를 다르게 다루므로(아이폰은 dblclick을 보내지 않기도 한다) 직접 센다 */
+function onEditorTouchStartForTTS(e) {
+    lastTouchMs = Date.now();
+    if (e.touches.length !== 1) { tapStart = null; lastTap = null; return; }
+    const t = e.touches[0];
+    const now = Date.now();
+    const second = !!lastTap && now - lastTap.t < DOUBLE_TAP_MS
+        && Math.hypot(t.clientX - lastTap.x, t.clientY - lastTap.y) < DOUBLE_TAP_PX
+        && canSeekFrom(e.target);
+    // 두 번째 누르기에는 브라우저가 단어를 고르거나 확대하지 않게 한다
+    if (second && e.cancelable) e.preventDefault();
+    tapStart = { x: t.clientX, y: t.clientY, t: now, second };
+}
+
+function onEditorTouchEndForTTS(e) {
+    lastTouchMs = Date.now();
+    const s = tapStart;
+    tapStart = null;
+    const t = e.changedTouches[0];
+    if (!s || !t || e.touches.length > 0) { lastTap = null; return; }
+    if (Math.hypot(t.clientX - s.x, t.clientY - s.y) > TAP_MOVE_PX || Date.now() - s.t > 500) {
+        lastTap = null;   // 밀기·길게 누르기
+        return;
+    }
+    if (s.second) {
+        lastTap = null;
+        if (e.cancelable) e.preventDefault();
+        seekToPoint(t.clientX, t.clientY);
+        return;
+    }
+    lastTap = { x: t.clientX, y: t.clientY, t: Date.now() };
+}
+
+/** 그래도 그 자리의 단어가 골라지면(아이폰의 단어 고르기, 표 칸의 두 번 클릭 고르기) 곧바로 풀어 준다 */
+function onSelectionChangeForTTS() {
+    if (Date.now() > seekGuardUntil) return;
+    const sel = window.getSelection();
+    const body = document.getElementById('editor-body');
+    if (sel && !sel.isCollapsed && body && body.contains(sel.anchorNode)) sel.collapseToStart();
 }
 
 function playFromOffset(pos) {
@@ -316,10 +378,10 @@ export function toggleTTSPanel() {
         document.getElementById('write-modal')?.classList.add('tts-open');
         // 새 기능 안내: 처음 몇 번만 알려 준다
         try {
-            const seen = Number(localStorage.getItem('faith_tts_tap_hint') || '0');
+            const seen = Number(localStorage.getItem('faith_tts_dbltap_hint') || '0');
             if (seen < 3) {
-                localStorage.setItem('faith_tts_tap_hint', String(seen + 1));
-                setTimeout(() => showToast('문장을 누르면 그 문장부터 읽습니다.'), 300);
+                localStorage.setItem('faith_tts_dbltap_hint', String(seen + 1));
+                setTimeout(() => showToast('문장을 두 번 누르면 그 문장부터 읽습니다.'), 300);
             }
         } catch (_) {}
         loadVoices();
@@ -1607,13 +1669,21 @@ export function initTTS() {
     const gs = document.getElementById('tts-gap-slider');
     if (speed && ss) { ss.value = String(Math.max(0.7, parseFloat(speed) || 1)); updateSpeedDisplay(); }
     localStorage.removeItem('faith_tts_pitch');   // 예전에 저장한 음높이는 더 쓰지 않는다
+    localStorage.removeItem('faith_tts_tap_hint'); // 한 번 누르기 안내는 두 번 누르기 안내로 바뀌었다
     if (gap && gs) { gs.value = gap; updateGapDisplay(); }
     document.getElementById('tts-neural-btn')?.addEventListener('click', onNeuralButton);
     // 화면 아래의 다른 창(맞춤법 검사)이 열리면 음성 바를 닫는다
     window.addEventListener('bottom-panel-open', (e) => {
         if (e.detail !== 'tts' && !document.getElementById('tts-panel')?.classList.contains('hidden')) toggleTTSPanel();
     });
-    document.getElementById('editor-body')?.addEventListener('click', onEditorTapForTTS);
+    const body = document.getElementById('editor-body');
+    if (body) {
+        body.addEventListener('mousedown', onEditorMouseDownForTTS);
+        body.addEventListener('touchstart', onEditorTouchStartForTTS, { passive: false });
+        body.addEventListener('touchend', onEditorTouchEndForTTS, { passive: false });
+        body.addEventListener('touchcancel', () => { tapStart = null; lastTap = null; }, { passive: true });
+    }
+    document.addEventListener('selectionchange', onSelectionChangeForTTS);
     // 사용자가 직접 스크롤하는 동안에는 읽는 문장을 따라가지 않는다
     const markUserScroll = () => { lastUserScrollMs = Date.now(); };
     ['wheel', 'touchmove'].forEach(evt => document.addEventListener(evt, markUserScroll, { passive: true }));
