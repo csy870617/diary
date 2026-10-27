@@ -9,10 +9,13 @@
  *
  * DOM을 쓰지 않는다 (spell-worker.js가 쓰고, Node 시험에서도 같은 함수를 쓴다).
  */
-import {
-    wordsOf, koreanCandidates, knownKorean, partsOf, compose, hasJong,
+// 이 파일은 작업자 안에서 열리는데, 작업자에는 import map이 없어 './spell-text.js'를 그냥 부르면
+// 캐시에 남은 옛 판이 섞인다 (새로 넣은 함수가 없어 정밀 검사가 아예 열리지 않을 수 있다).
+// 이 파일에 붙은 판(?v=)을 그대로 붙여 부른다.
+const {
+    wordsOf, koreanCandidates, knownKorean, partsOf, compose, hasJong, objectBeforeIn,
     CHO, JUNG, JONG, VOWEL_SETS, ARCHAIC, CONFUSABLES, ONE_NOUNS
-} from './spell-text.js';
+} = await import(new URL('./spell-text.js' + new URL(import.meta.url).search, import.meta.url).href);
 
 const CHOS = [...CHO], JUNGS = [...JUNG];
 
@@ -154,6 +157,7 @@ export function lmFixes(lines, dict, kiwi, {
         const sid = [];
         let n = 0;
         words.forEach((w, i) => { sid[i] = n; if (/[.!?。…]["'”’)]*$/.test(text.slice(w.a, w.b))) n++; });
+        const cores = words.map(w => w.core);
         // 이 낱말 둘레(같은 문장 안 앞뒤 몇 낱말)를 바꿔 넣은 글과, 그 글에서 이 낱말이 놓인 자리
         const around = (i, rep) => {
             let lo = i, hi = i;
@@ -238,7 +242,7 @@ export function lmFixes(lines, dict, kiwi, {
                 nextPredicate = nx.length > 0 && /^(VV|VA)$/.test(tagOf(nx[0])) && /^(EC|EF)$/.test(tagOf(nx[nx.length - 1]))
                     && !/^(대해|대한|대하여|대해서|관해|관한|관하여|관해서|의해|의한|위해|위한|따라|따른|비해|비하면|맞서|못지)/.test(words[i + 1].core);
             }
-            const options = confusionOptions(w.core, nextPredicate);
+            const options = confusionOptions(w.core, nextPredicate, objectBeforeIn(cores, i, k => sid[k] === sid[i]));
             let best = null;
             for (const o of options) {
                 if (!/^[가-힣]+$/.test(o.to) || !dict.spell(o.to)) continue;
@@ -256,11 +260,12 @@ function subjOf(word) { return `'${word}'${hasJong(word[word.length - 1]) ? '이
 function objOf(word) { return `'${word}'${hasJong(word[word.length - 1]) ? '을' : '를'}`; }
 
 /** 사전에 있는 말을 헷갈려 쓴 것인지 견주어 볼 후보들 → [{ to, kind, why? }] */
-export function confusionOptions(word, nextPredicate) {
+export function confusionOptions(word, nextPredicate, objectBefore = false) {
     const out = [];
     const add = (to, kind, why) => { if (to !== word && !out.some(o => o.to === to)) out.push({ to, kind, why }); };
     for (const c of CONFUSABLES) {
         if (!c.re.test(word)) continue;
+        if (c.subj && objectBefore) continue;   // '-을/-를'을 받으면 본디 말이 맞다 (달이 호수를 비춘다)
         for (const [a, b] of c.swap) if (word.startsWith(a)) { add(b + word.slice(a.length), 'pair', c.why); break; }
     }
     for (const [a, b, why] of PAIRS) {

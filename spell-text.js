@@ -884,6 +884,9 @@ export function contextFix(core, ctx) {
     const scripture = others.some(x => ARCHAIC.test(x));   // 성경 구절은 본문 그대로 둔다
     for (const c of scripture ? [] : CONFUSABLES) {
         if (!c.re.test(core)) continue;
+        // 주어를 보고 고르는 짝(햇빛이 비치다 · 문이 닫히다 · 눈이 부시다 …)은 '-을/-를'을 받으면 본디 말이 맞다
+        // (달이 호수를 비춘다 · 빛이 어둠을 부순다 · 햇살이 방 안을 비춘다)
+        if (c.subj && objectBefore) continue;
         if (!before.some(x => x && c.near.test(x))) continue;
         const to = swapStem(core, c.swap);
         if (to && to !== core) return out(to, c.why);
@@ -1208,6 +1211,20 @@ function checkEnglish(w, text) {
 
 // 마디를 끝내는 이음 꼴 (듣고·와서·하며·하니·했는데·하지만·하다가·하려고)
 const CLAUSE_END = /(고|서|며|면|니|는데|은데|지만|다가|려고|도록|니까|자|든지)$/;
+// '-을/-를'로 끝나도 목적어가 아닌 말 (가을 햇살 · 마을 사람 · 다를 바 없다)
+const NOT_OBJECT = /(가을|마을|노을|고을|다를|모를)$/;
+
+/**
+ * i번째 낱말이 속한 마디(앞의 '-고·-서·-며' 뒤)에서 그 앞에 목적어('-을/-를')가 있는가.
+ * ('소식을 듣고 놀랬다'의 '소식을'은 '듣고'의 것이라 '놀랬다'의 목적어가 아니다)
+ * cores: 줄의 낱말들, same(k): k번째 낱말이 i번째와 같은 문장인가
+ */
+export function objectBeforeIn(cores, i, same) {
+    let from = i;
+    while (from > 0 && same(from - 1) && !CLAUSE_END.test(cores[from - 1])) from--;
+    for (let k = from; k < i; k++) if (/[가-힣][을를]$/.test(cores[k]) && !NOT_OBJECT.test(cores[k])) return true;
+    return false;
+}
 
 /** 고친 곳의 종류 — 띄어쓰기만 바뀌었으면 '띄어쓰기', 그 밖에는 규칙이 정한 종류(표준어·문맥)나 '맞춤법' */
 function kindOf(from, to, kind) {
@@ -1281,10 +1298,7 @@ export async function checkLines(lines, dict, { skip = () => false } = {}) {
                 }
                 if (r) { rule(r.to, r.whys.join(' · '), r.kind); return; }
                 const others = words.filter((o, k) => k !== i && sentenceOf[k] === sentenceOf[i]).map(o => o.core);
-                // 이 말이 속한 마디(앞의 '-고·-서·-며' 뒤)에 '-을/-를'이 있는가 ('소식을 듣고 놀랬다'의 '소식을'은 '듣고'의 것)
-                let from = i;
-                while (from > 0 && sentenceOf[from - 1] === sentenceOf[i] && !CLAUSE_END.test(words[from - 1].core)) from--;
-                const objectBefore = words.some((o, k) => k >= from && k < i && /[가-힣][을를]$/.test(o.core));
+                const objectBefore = objectBeforeIn(words.map(o => o.core), i, k => sentenceOf[k] === sentenceOf[i]);
                 const c = contextFix(w.core, { prev: near(i - 1), prev2: near(i - 2), prev3: near(i - 3), next: near(i + 1), others, objectBefore });
                 if (c) { rule(c.to, c.why, c.kind); return; }
                 if (w.core.length < 2 || ARCHAIC.test(w.core)) return;   // 한 글자 낱말·옛말 꼴은 사전에 묻지 않는다
