@@ -9,10 +9,13 @@
  *
  * DOM을 쓰지 않는다 (spell-worker.js가 쓰고, Node 시험에서도 같은 함수를 쓴다).
  */
-import {
+// 이 파일은 작업자 안에서 열리는데, 작업자에는 import map이 없어 './spell-text.js'를 그냥 부르면
+// 캐시에 남은 옛 판이 섞인다 (새로 넣은 함수가 없어 정밀 검사가 아예 열리지 않을 수 있다).
+// 이 파일에 붙은 판(?v=)을 그대로 붙여 부른다.
+const {
     wordsOf, koreanCandidates, knownKorean, partsOf, compose, hasJong, objectBeforeIn,
     CHO, JUNG, JONG, VOWEL_SETS, ARCHAIC, CONFUSABLES, ONE_NOUNS
-} from './spell-text.js';
+} = await import(new URL('./spell-text.js' + new URL(import.meta.url).search, import.meta.url).href);
 
 const CHOS = [...CHO], JUNGS = [...JUNG];
 
