@@ -280,10 +280,13 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 .img-resize-btn { background: none; border: none; padding: 6px 10px; font-size: 12px; color: var(--gray-900); cursor: pointer; border-radius: 6px; font-family: var(--text-sans); font-weight: 500; display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 .img-resize-btn:hover { background: var(--gray-100); color: var(--accent); }
 .img-resize-btn i { font-size: 16px; }
-/* 이미지 전체화면 보기 (읽기/책 모드) */
-.img-fullscreen-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.92); z-index: 6000; display: none; align-items: center; justify-content: center; cursor: zoom-out; }
+/* 이미지 전체화면 보기 (읽기/책 모드) — 그림을 화면에 꽉 맞게 키운다.
+   예전에는 max-width/max-height만 주어 원래 크기보다 커지지 않았다. 올린 그림은 가로 800px로 줄여 두므로
+   컴퓨터·태블릿이나 작게 자른 그림은 화면 가운데에 작게만 보였다. 뒤의 글이 비치지 않게 바탕은 검정으로 채운다.
+   (inset 대신 top·left·width·height — 옛 iOS) */
+.img-fullscreen-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 6000; display: none; align-items: center; justify-content: center; cursor: zoom-out; }
 .img-fullscreen-overlay.show { display: flex; }
-.img-fullscreen-img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.img-fullscreen-img { width: 100%; height: 100%; object-fit: contain; }
 /* 읽기/책 모드에서 이미지에 확대 커서 표시 */
 .mode-read-only #editor-body img, .mode-book #editor-body img { cursor: zoom-in; }
 
