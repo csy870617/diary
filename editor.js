@@ -770,13 +770,32 @@ function getBookViewportHeight() {
     return (window.visualViewport && window.visualViewport.height) ? window.visualViewport.height : window.innerHeight;
 }
 
+/** 책 편집에서 펼친 도구 막대가 더 차지하는 높이 (접혀 있거나 책 읽기면 0) — 쪽 높이에서 뺀다 */
+function bookToolbarExtra() {
+    const tb = document.getElementById('editor-toolbar');
+    const sc = tb && tb.querySelector('.toolbar-content-scroll');
+    if (!sc || state.currentViewMode !== 'book-edit' || tb.classList.contains('collapsed')) return 0;
+    const cs = getComputedStyle(sc);
+    const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    return Math.min(sc.scrollHeight - pad, parseFloat(cs.maxHeight) || 60) + pad + 1;
+}
+
+/** 도구 막대를 펴거나 접은 뒤: 책 편집이면 쪽 높이를 다시 맞추고 보던 쪽에 머문다 */
+export function relayoutBookForToolbar() {
+    if (state.currentViewMode !== 'book-edit') return;
+    updateBookLayout();
+    const container = document.getElementById('editor-container');
+    if (container) { container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth); container.scrollTop = 0; }
+    updateBookNav();
+}
+
 function getBookPageContentSize(container) {
     const colWidth = Math.floor(container.clientWidth);
     const isMobile = window.innerWidth <= 650;
     const horizontalPad = isMobile ? 56 : 96; // editor-body padding-left + padding-right
     const verticalPad = isMobile ? 40 : 48; // editor-container 상/하 패딩 합 (페이지 세로 여백)
     const pageWidth = Math.max(50, colWidth - horizontalPad);
-    const pageHeight = Math.max(50, getBookViewportHeight() - 120 - verticalPad - 20);
+    const pageHeight = Math.max(50, getBookViewportHeight() - 120 - bookToolbarExtra() - verticalPad - 20);
     return { pageWidth, pageHeight };
 }
 
@@ -867,7 +886,7 @@ function updateBookLayout() {
     // style.css의 책 모드 규칙이 height를 !important로 고정하므로, 인라인도 important로 지정해야
     // 실제로 적용된다. (그냥 style.height = ... 로 두면 캐스케이드에서 밀려 무시되어
     // 키보드가 떴을 때 페이지 높이가 줄지 않는다 — iOS 사파리에서 하단 줄이 가려지던 원인)
-    container.style.setProperty('height', `${getBookViewportHeight() - 120}px`, 'important');
+    container.style.setProperty('height', `${getBookViewportHeight() - 120 - bookToolbarExtra()}px`, 'important');
     container.style.overflow = 'hidden';
     const body = document.getElementById('editor-body');
     if (body) {
@@ -2134,8 +2153,10 @@ export function toggleViewMode(mode) {
     else if (mode === 'book-edit') {
         editTitle.readOnly = false; editSubtitle.readOnly = false; editBody.contentEditable = "true";
         writeModal.classList.add('mode-book', 'mode-book-edit');
-        if (!isBookToBook) updateBookLayout();
-        editorToolbar?.classList.add('collapsed');
+        // 스크롤 편집처럼 도구 막대를 펼친다 (쪽 높이는 펼친 막대만큼 줄여서 잡는다)
+        editorToolbar?.classList.remove('collapsed');
+        updateBookLayout();
+        if (isBookToBook && container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
         updateBookNav();
     }
     else if (mode === 'readOnly') {
