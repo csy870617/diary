@@ -2488,7 +2488,7 @@ function updateSelectionBox() {
 function deleteSelectedElement() { if (currentSelectedElement) { currentSelectedElement.remove(); hideSelection(); triggerAutoSave(); } }
 
 // 이미지 전체화면 보기 (읽기/책 모드에서 이미지 탭 시) — 다시 탭하면 닫힘
-function fullscreenEscHandler(e) { if (e.key === 'Escape') closeImageFullscreen(); }
+function fullscreenEscHandler(e) { if (e.key === 'Escape') leaveImageFullscreen(); }
 function openImageFullscreen(src) {
     if (!src) return;
     if (!imgFullscreenOverlay) {
@@ -2498,14 +2498,24 @@ function openImageFullscreen(src) {
         im.className = 'img-fullscreen-img';
         im.alt = '';
         imgFullscreenOverlay.appendChild(im);
-        imgFullscreenOverlay.addEventListener('click', closeImageFullscreen);
+        imgFullscreenOverlay.addEventListener('click', leaveImageFullscreen);
         document.body.appendChild(imgFullscreenOverlay);
     }
     imgFullscreenOverlay.querySelector('img').src = src;
     imgFullscreenOverlay.classList.add('show');
     document.addEventListener('keydown', fullscreenEscHandler);
+    // 뒤로가기로 그림만 닫히게 기록을 하나 쌓는다 (안 그러면 뒤로가기가 글을 통째로 닫는다)
+    history.pushState({ modal: 'open', image: true }, null, '');
 }
-function closeImageFullscreen() {
+export function isImageFullscreenOpen() {
+    return !!(imgFullscreenOverlay && imgFullscreenOverlay.classList.contains('show'));
+}
+/** 눌러서·Esc로 닫을 때: 쌓아 둔 기록을 되돌리면 popstate에서 closeImageFullscreen이 불린다 */
+function leaveImageFullscreen() {
+    if (history.state && history.state.image) history.back();
+    else closeImageFullscreen();
+}
+export function closeImageFullscreen() {
     if (imgFullscreenOverlay) {
         imgFullscreenOverlay.classList.remove('show');
         // 대용량 base64 이미지가 닫힌 뒤에도 DOM에 남아 메모리를 점유하지 않도록 해제
