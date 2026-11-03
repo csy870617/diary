@@ -48,8 +48,10 @@ const CANCEL_SETTLE_MS = IS_WEBKIT_SPEECH ? 250 : 0;
 /** 멈춘 뒤 다음 문장을 읽기 시작한다 (기본 음성은 엔진이 멈춤을 다 처리할 틈을 준다) */
 // 일시정지·정지·다른 탐색이 이 기다림을 거둘 수 있게 문장 사이 쉼과 같은 타이머(ttsGapTimer)에 둔다
 // (따로 두면 진행바를 끄는 동안 같은 문장이 여러 번 줄 서 읽히고, 그 사이 누른 일시정지가 무시됐다)
+let ttsGapEndsAt = 0;   // 기본 음성이 문장 사이 쉼을 기다리는 중이면 그 쉼이 끝나는 시각
 function speakSoon(extraMs = 0) {
     clearTimeout(ttsGapTimer);
+    ttsGapEndsAt = 0;
     const g = ttsGen;
     ttsGapTimer = setTimeout(() => {
         ttsGapTimer = null;
@@ -362,7 +364,7 @@ function startPlaybackAt(chunks, index, waitMs = 0) {
     setProgress(ttsTotalSec > 0 ? Math.min(100, Math.round(startSec / ttsTotalSec * 100)) : 0);
     isTTSSpeaking = true;
     isTTSPaused = false;
-    ttsPlayStartMs = Date.now();
+    ttsPlayStartMs = Date.now() + waitMs;   // 남은 쉼이 끝난 뒤부터 센다
     updateTimeDisplay();
     startTimeTicker();
     syncUI();
@@ -885,7 +887,7 @@ function estimateTotalTime() {
 function getElapsedSec() {
     let ms = ttsElapsedBeforePause;
     if (isTTSSpeaking && !isTTSPaused && ttsPlayStartMs) {
-        ms += Date.now() - ttsPlayStartMs;
+        ms += Math.max(0, Date.now() - ttsPlayStartMs);
     }
     return ms / 1000;
 }
@@ -1083,7 +1085,10 @@ function cleanForSpeech(text) {
         // 영어 줄임말은 풀어 쓴다 (따옴표를 지우면 He'll→Hell, we're→were처럼 다른 말이 된다)
         .replace(/\b(can)['’]t\b/gi, '$1not').replace(/\b(won)['’]t\b/gi, 'will not').replace(/\b(sha)n['’]t\b/gi, '$1ll not')
         .replace(/\b(do|does|did|is|are|was|were|has|have|had|could|would|should|must|need|might|dare)n['’]t\b/gi, '$1 not')
-        .replace(/([A-Za-z])['’](ll|re|ve|m|d)\b/gi, (m, a, x) => a + ' ' + ({ ll: 'will', re: 'are', ve: 'have', m: 'am', d: 'would' })[x.toLowerCase()])
+        .replace(/([A-Za-z])['’](ll|re|ve|m)\b/gi, (m, a, x) => a + ' ' + ({ ll: 'will', re: 'are', ve: 'have', m: 'am' })[x.toLowerCase()])
+        // 'd는 대명사·의문사 뒤에서만: 과거분사 앞이면 had, 아니면 would (Bless’d 같은 옛 표기는 그대로 둔다)
+        .replace(/\b(I|you|he|she|it|we|they|who|what|where|there|that|how)['’]d\s+(\w+)/gi, (m, a, w) =>
+            a + (/^(been|gone|done|seen|said|had|got|known|made|taken|given|left|heard|felt|found|told|thought|ever|never|already|just|ed)$|ed$/i.test(w) ? ' had ' : ' would ') + w)
         .replace(/[‘’‛′`´']/g, '')
         .replace(/\s[—–―]+\s|\s-{1,2}\s/g, ', ')
         .replace(/[\-‐‑‒–—―]+/g, ' ');
@@ -1193,8 +1198,8 @@ export async function playTTS() {
         const g = ttsGen;
         playWaitingGen = g;
         try { await waitForVoices(); } finally { if (playWaitingGen === g) playWaitingGen = null; }
-        // 기다리는 사이 정지·창 닫기·문장 두 번 누르기가 있었다 (진행바만 옮긴 것은 그 자리부터 읽는다)
-        if (g !== ttsGen && (isTTSSpeaking || isTTSPaused || !ttsPanelOpen())) return;
+        // 기다리는 사이 정지·창 닫기·문장 두 번 누르기가 있었다 (진행바만 옮긴 것은 세대를 바꾸지 않아 그 자리부터 읽는다)
+        if (g !== ttsGen) return;
     }
     const neural = usingNeural();
     if (!neural && !('speechSynthesis' in window)) {
@@ -1211,7 +1216,7 @@ export async function playTTS() {
         if (!neural && !ttsGapInterrupted && !speechSynthesis.speaking && !speechSynthesis.pending) restartFromCurrentChunk();
         isTTSPaused = false;
         isTTSSpeaking = true;
-        ttsPlayStartMs = Date.now();
+        ttsPlayStartMs = neural && !ttsGapInterrupted && neuralNotStarted() ? 0 : Date.now();
         startTimeTicker();
         syncUI();
         if (ttsGapInterrupted) {
@@ -1283,6 +1288,8 @@ export function seekTTSByPercent(percent) {
     ttsChunkIndex = seekState.chunkIndex;
     ttsTimingParams = currentTimingParams();
 
+    // 읽고 있지 않을 때는 진행바 자리만 기억한다 (세대를 올리면 음성 목록을 기다리던 재생이 취소된다)
+    if (!wasPlaying && !wasPaused) return;
     clearTimeout(ttsGapTimer);
     ttsGapTimer = null;
     ttsGen++; // 이전 발화의 stale 이벤트 무효화
@@ -1354,8 +1361,11 @@ function splitChunks(text, max, map) {
         if (k === text.length) { if (s < k) sentences.push([s, k]); break; }
         if (isEnd(k)) {
             while (k + 1 < text.length && isEnd(k + 1)) k++;
-            // 문장 끝 부호 뒤의 닫는 따옴표·괄호까지 그 문장에 넣는다 ('“두려워 말라.”'가 따옴표만 따로 떨어지지 않게)
-            while (k + 1 < text.length && '"\'”’」』)'.includes(text[k + 1])) k++;
+            // 문장 끝 부호 뒤의 닫는 따옴표·괄호까지 그 문장에 넣는다 ('“두려워 말라.”'가 따옴표만 따로 떨어지지 않게).
+            // 곧은 따옴표(" ')는 여는 것일 수도 있어 뒤가 빈칸·끝·다른 닫는 부호일 때만
+            const closer = (j) => '”’」』)'.includes(text[j])
+                || (`"'`.includes(text[j]) && (j + 1 >= text.length || /\s/.test(text[j + 1]) || '"\'”’」』)'.includes(text[j + 1])));
+            while (k + 1 < text.length && closer(k + 1)) k++;
             sentences.push([s, k + 1]); s = k + 1;
         } else if (text[k] === '\n') {
             while (k + 1 < text.length && text[k + 1] === '\n') k++;
@@ -1367,8 +1377,8 @@ function splitChunks(text, max, map) {
         while (b > a && isWs(text[b - 1])) b--;
         if (a >= b) continue;
         // 말미 마침표 개수 추출 (쉼 길이 계산용)
-        const dotMatch = text.slice(a, b).match(/\.+$/);
-        const dots = dotMatch ? dotMatch[0].length : 0;
+        const dotMatch = text.slice(a, b).match(/(\.+)["'”’」』)]*$/);   // 닫는 따옴표 앞의 말줄임표도 센다
+        const dots = dotMatch ? dotMatch[1].length : 0;
 
         if (b - a > max) {
             // 문장이 max를 넘으면 쉼표/중간 구두점에서 한번 더 나눔
@@ -1561,7 +1571,8 @@ function advanceAfterChunk(currentChunk) {
     setProgress(progressFor(ttsChunkIndex));
     const totalGap = gapAfterSec(currentChunk, currentSpeed(), false) * 1000;
     if (totalGap > 0 && ttsChunkIndex < ttsChunks.length) {
-        ttsGapTimer = setTimeout(() => { ttsGapTimer = null; speakNext(); }, totalGap);
+        ttsGapEndsAt = Date.now() + totalGap;
+        ttsGapTimer = setTimeout(() => { ttsGapTimer = null; ttsGapEndsAt = 0; speakNext(); }, totalGap);
     } else {
         speakNext();
     }
@@ -1913,7 +1924,7 @@ export function saveTTSVoice() {
     const sel = document.getElementById('tts-voice-select');
     if (sel && sel.value) localStorage.setItem('faith_tts_voice', sel.value);
     // 음성마다 문장을 나누는 길이·읽는 속도가 달라 읽는 중이면 지금 문장부터 새 음성으로 다시 읽는다
-    if (isTTSSpeaking) { clearTimeout(liveApplyTimer); liveApplyTimer = null; restartFromCurrentChunk(); }
+    if (isTTSSpeaking) { clearTimeout(liveApplyTimer); liveApplyTimer = null; liveApplyKinds.clear(); restartFromCurrentChunk(); }
     else refreshTTSTotalTime();
 }
 
@@ -1944,6 +1955,11 @@ function currentTimingParams() {
 }
 
 /** 바뀐 속도·쉼으로 전체 시간과 지금까지 읽은 시간을 다시 계산한다 (지금 문장 안에서 읽은 비율은 그대로) */
+/** 자연스러운 음성이 이번 읽기에서 아직 첫 소리를 내지 않았다 (만드는 중) — 그동안은 시간을 세지 않는다 */
+function neuralNotStarted() {
+    return usingNeural() && !neuralTimeline.some(t => t.gen === ttsGen && t.startAt <= neuralClock());
+}
+
 function retimeFromCurrent() {
     const next = currentTimingParams();
     const prev = ttsTimingParams || next;
@@ -1955,7 +1971,7 @@ function retimeFromCurrent() {
     const into = Math.max(0, Math.min(o.speakSec, getElapsedSec() - o.startSec));
     const frac = o.speakSec > 0 ? into / o.speakSec : 0;
     ttsElapsedBeforePause = Math.round((n.startSec + frac * n.speakSec) * 1000);
-    ttsPlayStartMs = isTTSSpeaking && !isTTSPaused ? Date.now() : 0;
+    ttsPlayStartMs = isTTSSpeaking && !isTTSPaused && !neuralNotStarted() ? Date.now() : 0;
     ttsTotalSec = estimateTotalTime();
     updateTimeDisplay();
 }
@@ -2029,11 +2045,12 @@ function restartFromCurrentChunk() {
     if (!src.text) {
         // 읽을 글이 없어졌다 — 일시정지 중이면 그래도 엔진은 멈춘다 (안드로이드 일시정지)
         if (isTTSPaused) { ttsGen++; cancelSystemSpeech(); stopNeuralAudio(); ttsGapInterrupted = true; }
+        else stopTTS();
         return;
     }
     const { chunks, index: idx } = buildReadingChunks(src, pos);
-    // 기본 음성이 문장 사이 쉼을 기다리던 중이었다면 그 쉼을 지킨다
-    const waitMs = ttsGapTimer && !usingNeural() && ttsChunks[ttsChunkIndex - 1] ? gapAfterSec(ttsChunks[ttsChunkIndex - 1], currentSpeed(), false) * 1000 : 0;
+    // 기본 음성이 문장 사이 쉼을 기다리던 중이었다면 그 쉼의 남은 만큼을 지킨다
+    const waitMs = ttsGapTimer && ttsGapEndsAt && !usingNeural() ? Math.max(0, ttsGapEndsAt - Date.now()) : 0;
     if (!isTTSPaused) { startPlaybackAt(chunks, idx, waitMs); return; }
     ttsGen++;
     cancelSystemSpeech();
