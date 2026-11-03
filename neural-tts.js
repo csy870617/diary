@@ -685,6 +685,10 @@ export function unlockNeuralAudio() {
     if (!audioCtx) {
         // 'playback': 음성 작업자가 CPU를 많이 쓰는 동안에도 소리가 튀지 않게 넉넉한 버퍼로 (말소리라 지연은 상관없다)
         try { audioCtx = new Ctx({ latencyHint: 'playback' }); } catch (e) { audioCtx = new Ctx(); }
+        // 깨우는 중에 일시정지를 누르면(깨우기가 끝나기 전) 깨운 뒤 다시 멈춘다
+        audioCtx.addEventListener?.('statechange', () => {
+            if (userPaused && audioCtx && audioCtx.state === 'running') audioCtx.suspend().catch(() => {});
+        });
     }
     // 아이폰은 전화·알림 뒤에 'interrupted'로 남는다 — 그때도 다시 깨운다 (사용자가 멈춘 때는 그대로)
     if (!userPaused && audioCtx.state !== 'running' && audioCtx.state !== 'closed') audioCtx.resume().catch(() => {});
