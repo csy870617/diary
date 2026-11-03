@@ -674,6 +674,9 @@ export function cancelNeuralBefore(gen) {
 
 let audioCtx = null;
 let currentSource = null;
+// 사용자가 일시정지했다 — 그동안 새 소리를 걸어 두더라도 오디오 시계를 깨우지 않는다
+// (예전 코드는 다음 문장을 걸면서 시계를 다시 깨워, 일시정지했는데도 계속 읽었다)
+let userPaused = false;
 
 /** 재생 버튼을 누른 순간(사용자 동작 안)에 불러야 아이폰에서 소리가 난다 */
 export function unlockNeuralAudio() {
@@ -683,8 +686,8 @@ export function unlockNeuralAudio() {
         // 'playback': 음성 작업자가 CPU를 많이 쓰는 동안에도 소리가 튀지 않게 넉넉한 버퍼로 (말소리라 지연은 상관없다)
         try { audioCtx = new Ctx({ latencyHint: 'playback' }); } catch (e) { audioCtx = new Ctx(); }
     }
-    // 아이폰은 전화·알림 뒤에 'interrupted'로 남는다 — 그때도 다시 깨운다
-    if (audioCtx.state !== 'running' && audioCtx.state !== 'closed') audioCtx.resume().catch(() => {});
+    // 아이폰은 전화·알림 뒤에 'interrupted'로 남는다 — 그때도 다시 깨운다 (사용자가 멈춘 때는 그대로)
+    if (!userPaused && audioCtx.state !== 'running' && audioCtx.state !== 'closed') audioCtx.resume().catch(() => {});
     return audioCtx;
 }
 
@@ -735,6 +738,7 @@ export function unscheduleNeuralAfter(t) {
 
 /** 만든 음성을 재생하고, 끝나면 resolve(true). 중간에 멈추면 resolve(false) */
 export function playNeuralAudio(wav, sampleRate) {
+    userPaused = false;
     const ctx = unlockNeuralAudio();
     stopNeuralAudio();
     const buf = ctx.createBuffer(1, wav.length, sampleRate);
@@ -762,14 +766,17 @@ export function stopNeuralAudio() {
     scheduled.forEach(e => { try { e.src.onended = null; e.src.stop(); } catch (err) {} });
     scheduled.clear();
     playhead = 0;
+    userPaused = false;
     // 일시정지 상태에서 멈췄다면 다음 재생을 위해 다시 깨워 둔다
     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
 }
 
 export function pauseNeuralAudio() {
+    userPaused = true;
     if (audioCtx && audioCtx.state === 'running') audioCtx.suspend().catch(() => {});
 }
 
 export function resumeNeuralAudio() {
+    userPaused = false;
     if (audioCtx && audioCtx.state !== 'running' && audioCtx.state !== 'closed') audioCtx.resume().catch(() => {});
 }

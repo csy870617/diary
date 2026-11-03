@@ -186,8 +186,22 @@ function fixedGaussian(seed, c, t) {
 // 정지·탐색·빠르기 바꾸기로 버려진 세대의 일은 단계 사이에서 그만둔다 (돌던 일이 끝나기를 기다리느라
 // 새 문장이 늦어져, 읽는 중에 빠르기를 바꾸면 9초 가까이 소리가 끊겼다)
 const SKIPPED = { skipped: true };
+/**
+ * 받은 메시지를 처리할 틈을 준다. CPU(wasm)로 계산할 때 모델 실행은 마이크로태스크로만 이어져,
+ * 계산하는 동안 '그만둬'(cancelBefore) 메시지가 처리되지 못해 버려진 일을 끝까지 계산했다
+ * (탐색·정지 뒤 20초 넘게 소리가 안 났다). 단계마다 한 번씩 메시지 차례를 준다 (setTimeout의 4ms 지연 없는 방식).
+ */
+const yieldTask = (() => {
+    if (typeof self.MessageChannel !== 'function') return () => new Promise((r) => setTimeout(r, 0));
+    const ch = new self.MessageChannel();
+    const waiting = [];
+    ch.port1.onmessage = () => { const r = waiting.shift(); if (r) r(); };
+    return () => new Promise((r) => { waiting.push(r); ch.port2.postMessage(0); });
+})();
 async function synth({ text, lang, style, speed, steps, gen }) {
     const stale = () => (gen || 0) < minGen;
+    await yieldTask();
+    if (stale()) return SKIPPED;
     const st = await getStyle(style);
     const processed = preprocessText(text, lang);
     const L = processed.length;
@@ -223,6 +237,7 @@ async function synth({ text, lang, style, speed, steps, gen }) {
     const totalStep = new O.Tensor('float32', new Float32Array([steps]), [1]);
 
     for (let step = 0; step < steps; step++) {
+        await yieldTask();
         if (stale()) return SKIPPED;
         const out = await sessions.ve.run({
             noisy_latent: new O.Tensor('float32', xt, [1, latentDim, latentLen]),
@@ -237,6 +252,7 @@ async function synth({ text, lang, style, speed, steps, gen }) {
     }
 
     tm.ve = performance.now();
+    await yieldTask();
     if (stale()) return SKIPPED;
     if (role === 'acoustic') {
         // 소리 만들기(보코더)는 다른 작업자가 맡는다 — 그동안 이 작업자는 다음 문장을 만든다
@@ -423,6 +439,11 @@ function finishWav(raw, sampleRate, stretch) {
     const base = levelLoudness(new Float32Array(trimSilence(raw, sampleRate)), sampleRate);
     return { wav: stretchAndFade(base, sampleRate, stretch), base };
 }
+/** 쉼 자리는 빠르게 하기 전 소리에서 찾아 배율로 나눈다 (빠르게 한 소리에서는 140ms 미만으로 줄어 놓쳤다) */
+function pausesOf(base, sampleRate, stretch) {
+    const k = stretch > 1.001 ? stretch : 1;
+    return findPauses(base, sampleRate).map(([a, b]) => [a / k, b / k]);
+}
 function stretchAndFade(base, sampleRate, stretch) {
     const y = (stretch > 1.001) ? new Float32Array(timeStretch(base, stretch)) : new Float32Array(base);
     return fadeEdges(y, sampleRate);
@@ -443,7 +464,13 @@ let minGen = 0;
 self.onmessage = (e) => {
     const msg = e.data || {};
     if (msg.type === 'cancelBefore') { minGen = Math.max(minGen, msg.gen || 0); return; }
-    queue = queue.then(async () => {
+    if (msg.type === 'restretch') {
+        // 읽는 중에 빠르기를 바꿨다: 이미 만든 소리를 새 배율로 빠르게만 한다 (모델을 쓰지 않으므로 줄 서지 않고 바로)
+        const wav = stretchAndFade(msg.base, msg.sampleRate, msg.stretch);
+        self.postMessage({ type: 'audio', id: msg.id, wav, sampleRate: msg.sampleRate, pauses: pausesOf(msg.base, msg.sampleRate, msg.stretch) }, [wav.buffer]);
+        return;
+    }
+    queue = queue.then(yieldTask).then(async () => {
         if (msg.type === 'synth' && (msg.gen || 0) < minGen) {
             self.postMessage({ type: 'skipped', id: msg.id });
             return;
@@ -454,14 +481,11 @@ self.onmessage = (e) => {
                 self.postMessage({ type: 'ready', backend, model: modelName, sampleRate: cfgs.ae.sample_rate });
             } else if (msg.type === 'vocode' && (msg.gen || 0) < minGen) {
                 self.postMessage({ type: 'skipped', id: msg.id });
-            } else if (msg.type === 'restretch') {
-                // 읽는 중에 빠르기를 바꿨다: 이미 만든 소리를 새 배율로 빠르게만 한다 (모델을 다시 돌리지 않는다)
-                const wav = stretchAndFade(msg.base, msg.sampleRate, msg.stretch);
-                self.postMessage({ type: 'audio', id: msg.id, wav, sampleRate: msg.sampleRate, pauses: findPauses(wav, msg.sampleRate) }, [wav.buffer]);
             } else if (msg.type === 'vocode') {
                 const { wav: raw, sampleRate, vocMs } = await vocode(msg);
                 const { wav, base } = finishWav(raw, sampleRate, msg.stretch);
-                self.postMessage({ type: 'audio', id: msg.id, wav, base, sampleRate, vocMs, pauses: findPauses(wav, sampleRate) }, [wav.buffer, base.buffer]);
+                const pauses = pausesOf(base, sampleRate, msg.stretch);
+                self.postMessage({ type: 'audio', id: msg.id, wav, base, sampleRate, vocMs, pauses }, [wav.buffer, base.buffer]);
             } else if (msg.type === 'synth' && role === 'acoustic') {
                 const t0 = performance.now();
                 const r = await synth(msg);
@@ -475,8 +499,9 @@ self.onmessage = (e) => {
                 if (r.skipped) { self.postMessage({ type: 'skipped', id: msg.id }); return; }
                 const { wav: raw, sampleRate, parts } = r;
                 const { wav, base } = finishWav(raw, sampleRate, msg.stretch);
-                self.postMessage({ type: 'audio', id: msg.id, wav, base, sampleRate, ms: performance.now() - t0, steps: msg.steps, parts,
-                                   pauses: findPauses(wav, sampleRate) }, [wav.buffer, base.buffer]);
+                const pauses = pausesOf(base, sampleRate, msg.stretch);
+                self.postMessage({ type: 'audio', id: msg.id, wav, base, sampleRate, ms: performance.now() - t0, steps: msg.steps, parts, pauses },
+                                 [wav.buffer, base.buffer]);
             }
         } catch (err) {
             self.postMessage({ type: 'error', id: msg.id, message: String(err && err.message || err), webgpuFailed: !!(err && err.webgpuFailed) });

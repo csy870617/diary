@@ -46,8 +46,12 @@ const IS_WEBKIT_SPEECH = typeof navigator !== 'undefined' && (
     || (/Safari/.test(navigator.userAgent || '') && !/Chrome|Chromium|CriOS|Edg|OPR|Android/.test(navigator.userAgent || '')));
 const CANCEL_SETTLE_MS = IS_WEBKIT_SPEECH ? 250 : 0;
 /** 멈춘 뒤 다음 문장을 읽기 시작한다 (기본 음성은 엔진이 멈춤을 다 처리할 틈을 준다) */
+// 일시정지·정지·다른 탐색이 이 기다림을 거둘 수 있게 문장 사이 쉼과 같은 타이머(ttsGapTimer)에 둔다
+// (따로 두면 진행바를 끄는 동안 같은 문장이 여러 번 줄 서 읽히고, 그 사이 누른 일시정지가 무시됐다)
 function speakSoon() {
-    setTimeout(speakNext, usingNeural() ? 0 : CANCEL_SETTLE_MS);
+    clearTimeout(ttsGapTimer);
+    const g = ttsGen;
+    ttsGapTimer = setTimeout(() => { ttsGapTimer = null; if (g === ttsGen) speakNext(); }, usingNeural() ? 0 : CANCEL_SETTLE_MS);
 }
 
 function currentSpeed() {
@@ -526,7 +530,8 @@ export function loadVoices() {
             const names = speechSynthesis.getVoices().map(v => v.voiceURI || v.name).join('|');
             if (names === ttsVoicesListener.names) return;
             ttsVoicesListener.names = names;
-            if (isTTSSpeaking && !usingNeural()) { ttsVoices = speechSynthesis.getVoices(); return; }   // 읽는 중에는 목록만 새로
+            // 읽는 중에는 목록을 다시 그리지 않는다 (고른 음성이 잠깐 다른 음성으로 바뀐다) — 다음 재생 때 다시 그린다
+            if (isTTSSpeaking || isTTSPaused) { ttsVoices = speechSynthesis.getVoices(); ttsVoicesListener.stale = true; return; }
             populate();
         };
         ttsVoicesListener.names = ttsVoices.map(v => v.voiceURI || v.name).join('|');
@@ -539,7 +544,11 @@ export function loadVoices() {
  * 다음 문장부터는 고른 음성으로 읽혀 목소리가 바뀌었다. 끝날 때까지(최대 1.2초) 기다린다.
  */
 function voicesSettled() {
-    if (neuralGroupPending) return false;
+    if (neuralGroupPending) {
+        let saved = '';
+        try { saved = localStorage.getItem('faith_tts_voice') || ''; } catch (e) {}
+        if (isNeuralVoice(saved)) return false;
+    }
     if (usingNeural() || !('speechSynthesis' in window)) return true;
     return ttsVoices.length > 0;
 }
@@ -907,6 +916,25 @@ function gapAfterSec(chunk, speed, neural = usingNeural(), setGap = null) {
     return Math.max(own, set);
 }
 
+/** 읽고 있는 묶음 목록의 시간표 (같은 목록·속도·쉼이면 다시 계산하지 않는다) */
+let timingsCache = { chunks: null, speed: 0, gap: 0, list: [] };
+function currentTimings() {
+    const { speed, gap } = currentTimingParams();
+    if (timingsCache.chunks !== ttsChunks || timingsCache.speed !== speed || timingsCache.gap !== gap) {
+        timingsCache = { chunks: ttsChunks, speed, gap, list: buildChunkTimings(ttsChunks, speed, gap) };
+    }
+    return timingsCache.list;
+}
+/** index번째 묶음을 읽기 시작할 때의 진행률(%) — 묶음 수가 아니라 시간으로 (묶음마다 길이가 다르다) */
+function progressFor(index) {
+    if (!ttsChunks.length || index >= ttsChunks.length) return index > 0 ? 100 : 0;
+    const list = currentTimings();
+    const last = list[list.length - 1];
+    const total = last ? last.startSec + last.speakSec : 0;
+    const t = list[Math.max(0, index)];
+    return total > 0 && t ? Math.min(100, Math.round(t.startSec / total * 100)) : Math.round(index / ttsChunks.length * 100);
+}
+
 function getSeekState(src, percent) {
     const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
     const chunks = buildReadingChunks(src).chunks;
@@ -927,13 +955,27 @@ function getSeekState(src, percent) {
             break;
         }
     }
-    // 그 묶음의 첫 문장부터 읽는다 (자연스러운 음성은 첫 문장만 따로 만들어 소리가 빨리 나게)
-    const at = chunks[chunkIndex];
-    if (at && at.fullStart != null && timingNeural()) {
-        const again = buildReadingChunks(src, at.fullStart);
-        return { percent: clamped, chunks: again.chunks, chunkIndex: again.index, targetMs };
+    // 여러 문장 묶음이면 그 안에서 고른 자리가 든 문장부터 읽는다 (자연스러운 음성은 그 문장만 따로 만들어 소리가 빨리 나게).
+    // 시간·진행률은 실제로 읽기 시작하는 그 문장의 시작으로 맞춘다 (예전에는 고른 자리를 그대로 두어 읽는 곳과 어긋났다)
+    const g = chunks[chunkIndex];
+    let startPos = g ? g.fullStart : null;
+    if (g && g.parts && startPos != null) {
+        const cps = charsPerSec();
+        let at = timings[chunkIndex].startSec;
+        for (const part of g.parts) {
+            startPos = part.fullStart;
+            const sec = spokenText(part).length / cps / speed;
+            if (targetSec < at + sec) break;
+            at += sec + IN_GROUP_PAUSE_SEC / speed;
+        }
     }
-    return { percent: clamped, chunks, chunkIndex, targetMs };
+    if (startPos == null || clamped <= 0) return { percent: clamped, chunks: startPos == null ? chunks : buildReadingChunks(src, startPos).chunks,
+        chunkIndex: startPos == null ? chunkIndex : buildReadingChunks(src, startPos).index, targetMs: clamped <= 0 ? 0 : targetMs };
+    const again = buildReadingChunks(src, startPos);
+    const t = buildChunkTimings(again.chunks, speed, gap)[again.index];
+    const startSec = t ? t.startSec : targetSec;
+    return { percent: totalSec > 0 ? Math.min(100, Math.round(startSec / totalSec * 100)) : clamped,
+             chunks: again.chunks, chunkIndex: again.index, targetMs: Math.round(startSec * 1000) };
 }
 
 function startTimeTicker() {
@@ -1025,6 +1067,9 @@ function cleanForSpeech(text) {
     // 앞뒤를 띄운 줄표(오늘 — 감사)는 쉼표처럼 쉬게 한다.
     const normalized = normalizeForSpeech(text)
         .replace(/[“”„‟«»]/g, '"')
+        // 영어 줄임말은 풀어 쓴다 (따옴표를 지우면 He'll→Hell, we're→were처럼 다른 말이 된다)
+        .replace(/\b(can)['’]t\b/gi, '$1not').replace(/\b(won)['’]t\b/gi, 'will not').replace(/([A-Za-z])n['’]t\b/g, '$1 not')
+        .replace(/([A-Za-z])['’](ll|re|ve|m)\b/gi, (m, a, x) => a + ' ' + ({ ll: 'will', re: 'are', ve: 'have', m: 'am' })[x.toLowerCase()])
         .replace(/[‘’‛′`´']/g, '')
         .replace(/\s[—–―]+\s|\s-{1,2}\s/g, ', ')
         .replace(/[\-‐‑‒–—―]+/g, ' ');
@@ -1057,7 +1102,8 @@ function spokenText(chunk) {
         return chunk._spoken;
     }
     const s = cleanForSpeech(chunk.text);
-    if (!s || /[.!?,;:…~"'。、，．！？：；‥」』]$/.test(s)) return s;
+    // 닫는 따옴표 앞에 문장 부호가 있어야 끝난 것으로 본다 ('“두려워 말라”' 뒤에도 마침표를 붙인다)
+    if (!s || /[.!?,;:…~。、，．！？：；‥]["'」』]*$/.test(s)) return s;
     return s + (chunk.cont ? ',' : '.');
 }
 
@@ -1116,15 +1162,24 @@ function cancelSystemSpeech() {
     }
 }
 
+let playWaiting = false;
 export async function playTTS() {
     stopVoicePreview();
     // 음성 목록·받아 둔 자연스러운 음성 확인이 덜 끝났으면 기다린다 (첫 문장만 다른 목소리로 읽히지 않게).
     // 아이폰은 누른 순간에 소리 장치를 깨워야 하므로, 저장해 둔 음성이 자연스러운 음성이면 먼저 깨운다.
+    if (!isTTSPaused && !isTTSSpeaking && ttsVoicesListener && ttsVoicesListener.stale) {
+        ttsVoicesListener.stale = false;
+        loadVoices();   // 읽는 동안 늦게 온 음성들을 이제 목록에 넣는다
+    }
     if (!isTTSPaused && !voicesSettled()) {
+        if (playWaiting) return;            // 기다리는 동안 다시 누른 것은 한 번으로
         let saved = '';
         try { saved = localStorage.getItem('faith_tts_voice') || ''; } catch (e) {}
         if (isNeuralVoice(saved)) unlockNeuralAudio();
-        await waitForVoices();
+        const g = ttsGen;
+        playWaiting = true;
+        try { await waitForVoices(); } finally { playWaiting = false; }
+        if (g !== ttsGen) return;           // 기다리는 사이 정지·창 닫기·문장 두 번 누르기가 있었다
     }
     const neural = usingNeural();
     if (!neural && !('speechSynthesis' in window)) {
@@ -1136,6 +1191,9 @@ export async function playTTS() {
 
     // 일시정지 → 재개
     if (isTTSPaused) {
+        // 일시정지한 사이에 엔진이 발화를 놓아 버렸다 → 이어 읽을 것이 없으니 읽던 문장부터 다시 읽는다
+        // (여러 문장 묶음이면 묶음 처음이 아니라 강조된 문장부터)
+        if (!neural && !ttsGapInterrupted && !speechSynthesis.speaking && !speechSynthesis.pending) restartFromCurrentChunk();
         isTTSPaused = false;
         isTTSSpeaking = true;
         ttsPlayStartMs = Date.now();
@@ -1146,15 +1204,9 @@ export async function playTTS() {
             ttsGapInterrupted = false;
             // 엔진이 paused로 남아 있으면 새 발화가 무음 대기하므로 먼저 해제 (발화 없을 땐 무해)
             if (!neural && 'speechSynthesis' in window) speechSynthesis.resume();
-            speakNext();
+            speakSoon();
         } else if (neural) {
             resumeNeuralAudio();
-        } else if (!speechSynthesis.speaking && !speechSynthesis.pending) {
-            // 일시정지한 사이에 엔진이 발화를 놓아 버렸다 → 이어 읽을 것이 없으니 그 문장을 처음부터 다시 읽는다
-            ttsGen++;
-            cancelSystemSpeech();
-            rewindClockToChunk();
-            speakSoon();
         } else {
             speechSynthesis.resume();
         }
@@ -1360,7 +1412,7 @@ function speakNext() {
     if (!spoken) {
         // 읽을 내용이 없으면 다음 청크로 스킵
         ttsChunkIndex++;
-        setProgress(Math.round((ttsChunkIndex / ttsChunks.length) * 100));
+        setProgress(progressFor(ttsChunkIndex));
         speakNext();
         return;
     }
@@ -1394,11 +1446,11 @@ function speakNext() {
         // 사파리: 멈춘 직후 건넨 발화를 시작도 않고 곧바로 끝내 버리는 일이 있다 → 한 번만 다시 읽힌다
         if (IS_WEBKIT_SPEECH && !gotStart && Date.now() - spokeAt < 150 && !currentChunk._retried) {
             currentChunk._retried = true;
-            setTimeout(() => { if (myGen === ttsGen && !isTTSPaused) speakNext(); }, 250);
+            speakSoon();
             return;
         }
         // 일시정지한 사이에 엔진이 발화를 끝냈다(일시정지를 '그만 읽기'로 다루는 엔진) → 재개하면 이 문장부터 다시 읽는다
-        if (isTTSPaused) { ttsGapInterrupted = true; rewindClockToChunk(); updateTimeDisplay(); return; }
+        if (isTTSPaused) { restartFromCurrentChunk(); return; }
         advanceAfterChunk(currentChunk);
     };
     const fail = (why) => {
@@ -1416,9 +1468,11 @@ function speakNext() {
     // 여러 문장 묶음: 엔진이 알려 주는 낱말 위치(boundary)로 지금 읽는 문장을 강조한다.
     // 알려 주지 않는 엔진에서는 지난 시간으로 짐작한다.
     let shownPart = 0, sawBoundary = false;
+    const myIndex = ttsChunkIndex;
     const showPart = (p) => {
         if (!currentChunk.parts || p === shownPart || myGen !== ttsGen) return;
         shownPart = p;
+        readingAt = { gen: myGen, index: myIndex, part: p };
         highlightChunk(currentChunk.parts[p]);
     };
     if (currentChunk.parts) {
@@ -1436,6 +1490,7 @@ function speakNext() {
         gotStart = true;
         if (myGen !== ttsGen) return;
         isTTSSpeaking = true; isTTSPaused = false; syncUI();
+        readingAt = { gen: myGen, index: myIndex, part: 0 };
         highlightChunk(currentChunk.parts ? currentChunk.parts[0] : currentChunk);
         if (currentChunk.parts) {
             const offs = currentChunk._offsets || [];
@@ -1460,7 +1515,7 @@ function speakNext() {
         fail(e.error);
     };
 
-    setProgress(Math.round((ttsChunkIndex / ttsChunks.length) * 100));
+    setProgress(progressFor(ttsChunkIndex));
     currentUtterance = utt;
     speechSynthesis.speak(utt);
     // 브라우저는 speak 직후부터 '읽는 중(또는 기다리는 중)'으로 표시한다. 짧은 문장은 살피기 전에 끝날 수 있어 바로 확인해 둔다
@@ -1482,7 +1537,7 @@ function systemGapAfter(chunk, speed) {
 /** 한 문장을 다 읽은 뒤: 진행률을 올리고, 설정한 쉼만큼 기다렸다가 다음 문장으로 */
 function advanceAfterChunk(currentChunk) {
     ttsChunkIndex++;
-    setProgress(Math.round((ttsChunkIndex / ttsChunks.length) * 100));
+    setProgress(progressFor(ttsChunkIndex));
     const totalGap = gapAfterSec(currentChunk, currentSpeed(), false) * 1000;
     if (totalGap > 0 && ttsChunkIndex < ttsChunks.length) {
         ttsGapTimer = setTimeout(() => { ttsGapTimer = null; speakNext(); }, totalGap);
@@ -1573,6 +1628,8 @@ let neuralLoopId = 0;
 let neuralTimeline = [];   // [{ index, startAt, endAt, partStarts }] — 걸어 둔 묶음들 (오디오 시계, 초)
 let neuralTicker = null;
 let neuralShown = { index: -1, part: -1 };
+// 지금 읽고 있는 묶음과 그 안의 문장 (두 음성 모두) — 읽는 중에 설정을 바꿔 다시 읽을 때 그 문장부터
+let readingAt = { gen: -1, index: -1, part: 0 };
 
 function startNeuralLoop(fromIndex, gen, keepTimeline = false) {
     const loop = ++neuralLoopId;
@@ -1651,20 +1708,24 @@ function partStartsFor(chunk, audio, startAt) {
     const lens = chunk.parts.map(p => Math.max(1, spokenText(p).length));
     const total = lens.reduce((a, b) => a + b, 0);
     const mids = (audio.pauses || []).map(([a, b]) => (a + b) / 2);
+    const guesses = [];
+    let acc = 0;
+    for (let p = 1; p < lens.length; p++) { acc += lens[p - 1]; guesses.push(dur * acc / total); }
     const starts = [0];
-    let acc = 0, used = -1;
-    for (let p = 1; p < lens.length; p++) {
-        acc += lens[p - 1];
-        const guess = dur * acc / total;
+    let used = -1;
+    guesses.forEach((guess, i) => {
+        const next = guesses[i + 1];
         let best = -1, bestD = Infinity;
         for (let q = used + 1; q < mids.length; q++) {
             const d = Math.abs(mids[q] - guess);
+            // 다음 문장 경계에 더 가까운 쉼은 그쪽 몫이다 (짧은 문장 '아멘.'이 강조되지 않고 지나가던 문제)
+            if (next != null && Math.abs(mids[q] - next) < d) continue;
             if (d < bestD) { bestD = d; best = q; }
         }
         let t = guess;
-        if (best >= 0 && bestD < dur * 0.25) { t = mids[best]; used = best; }
+        if (best >= 0 && bestD < Math.min(dur * 0.25, 0.8)) { t = mids[best]; used = best; }
         starts.push(Math.max(starts[starts.length - 1], t));
-    }
+    });
     return starts.map(t => startAt + t);
 }
 
@@ -1690,10 +1751,11 @@ function tickNeural(gen) {
     if (!chunk) return;
     const newChunk = cur.index !== neuralShown.index;
     neuralShown = { index: cur.index, part };
+    readingAt = { gen, index: cur.index, part };
     highlightChunk(chunk.parts ? chunk.parts[part] : chunk);
     if (!newChunk) return;
     ttsChunkIndex = cur.index;
-    setProgress(Math.round((cur.index / ttsChunks.length) * 100));
+    setProgress(progressFor(cur.index));
     // 시간 표시를 이 묶음의 시작에 맞춘다 (만드느라 기다린 시간은 세지 않게)
     const { speed, gap } = currentTimingParams();
     const t = buildChunkTimings(ttsChunks, speed, gap)[cur.index];
@@ -1708,6 +1770,8 @@ function neuralFailed(err) {
     console.error('자연스러운 음성 생성 실패:', err);
     neuralCache = null;
     stopNeuralTicker();
+    stopNeuralAudio();
+    neuralTimeline = [];
     isTTSSpeaking = false;
     isTTSPaused = false;
     stopTimeTicker();
@@ -1736,10 +1800,9 @@ export function pauseTTS() {
             pauseNeuralAudio();   // 오디오 시계를 멈춘다 — 걸어 둔 소리·쉼이 그대로 멈췄다가 이어진다
         } else if (IS_ANDROID) {
             // 안드로이드는 pause()가 발화를 끝내 버려 이어 읽을 수 없다 (끝 알림이 와서 다음 문장으로 넘어가기도 했다)
-            // → 지금 문장을 멈추고, 다시 누르면 그 문장을 처음부터 읽는다
-            ttsGen++;
-            cancelSystemSpeech();
-            ttsGapInterrupted = true;
+            // → 지금 문장을 멈추고, 다시 누르면 그 문장을 처음부터 읽는다 (여러 문장 묶음이면 강조된 문장부터)
+            isTTSPaused = true;
+            restartFromCurrentChunk();
         } else {
             speechSynthesis.pause();
         }
@@ -1748,7 +1811,6 @@ export function pauseTTS() {
             ttsElapsedBeforePause += Date.now() - ttsPlayStartMs;
             ttsPlayStartMs = 0;
         }
-        if (IS_ANDROID && !usingNeural()) rewindClockToChunk();
         stopTimeTicker();
         updateTimeDisplay();
         syncUI();
@@ -1840,9 +1902,13 @@ export function updateGapDisplay() {
         d.textContent = v === 0 ? '없음' : v.toFixed(1) + '초';
         localStorage.setItem('faith_tts_gap', String(v));
     }
-    // 문장 사이 쉼은 다음 쉼부터 저절로 반영되므로 남은 시간만 다시 계산한다
-    if (!isTTSSpeaking) refreshTTSTotalTime();
-    else retimeFromCurrent();
+    // 문장 사이 쉼은 다음 쉼부터 저절로 반영되므로 남은 시간만 다시 계산한다.
+    // 다만 쉼을 0에서 켜거나 0으로 끄면 문장을 묶는지가 바뀌므로 지금 문장부터 다시 나눠 읽는다
+    if (!isTTSSpeaking) { refreshTTSTotalTime(); return; }
+    const before = ttsTimingParams ? ttsTimingParams.gap : 0;
+    retimeFromCurrent();
+    const after = currentTimingParams().gap;
+    if ((before > 0) !== (after > 0)) scheduleLiveApply('restart');
 }
 
 // ─── 읽는 중에 설정 바꾸기 ───
@@ -1852,14 +1918,6 @@ function currentTimingParams() {
         speed: parseFloat(document.getElementById('tts-speed-slider')?.value || '1') || 1,
         gap: parseFloat(document.getElementById('tts-gap-slider')?.value || '0') || 0,
     };
-}
-
-/** 지금 문장을 처음부터 다시 읽을 때, 지금까지 읽은 시간도 그 문장의 시작으로 되돌린다 */
-function rewindClockToChunk() {
-    if (!ttsChunks.length) return;
-    const { speed, gap } = currentTimingParams();
-    const t = buildChunkTimings(ttsChunks, speed, gap)[Math.min(ttsChunkIndex, ttsChunks.length - 1)];
-    if (t) ttsElapsedBeforePause = Math.round(t.startSec * 1000);
 }
 
 /** 바뀐 속도·쉼으로 전체 시간과 지금까지 읽은 시간을 다시 계산한다 (지금 문장 안에서 읽은 비율은 그대로) */
@@ -1926,10 +1984,14 @@ function refreshNeuralAhead() {
 
 /** 지금 읽는 문장의 처음부터 바뀐 설정으로 다시 읽는다 (일시정지 중이면 재개할 때 적용) */
 function restartFromCurrentChunk() {
-    const cur = ttsChunks[Math.min(ttsChunkIndex, ttsChunks.length - 1)];
+    let ci = Math.min(ttsChunkIndex, ttsChunks.length - 1);
+    let part = readingAt.gen === ttsGen && readingAt.index === ci ? readingAt.part : 0;
+    // 자연스러운 음성: 이미 다 읽은 묶음이면(다음 묶음을 기다리는 중) 다음 묶음부터 — 방금 들은 문장을 다시 읽지 않게
+    const ent = usingNeural() ? neuralTimeline.find(t => t.index === ci) : null;
+    if (ent && neuralClock() >= ent.endAt - 0.01 && ci + 1 < ttsChunks.length) { ci++; part = 0; }
+    const cur = ttsChunks[ci];
     // 묶음을 읽던 중이면 지금 강조된 문장부터
-    const shown = cur && cur.parts && neuralShown.index === ttsChunkIndex && cur.parts[neuralShown.part];
-    const at = shown || cur;
+    const at = (cur && cur.parts && cur.parts[part]) || cur;
     const pos = at && at.fullStart != null ? at.fullStart : 0;
     const src = getSpeechSource();
     if (!src.text) return;
@@ -1939,6 +2001,8 @@ function restartFromCurrentChunk() {
     cancelSystemSpeech();
     stopNeuralAudio();
     stopNeuralTicker();
+    neuralTimeline = [];
+    neuralShown = { index: -1, part: -1 };
     cancelNeuralBefore(ttsGen);
     clearTimeout(ttsGapTimer);
     ttsGapTimer = null;
