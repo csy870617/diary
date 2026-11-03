@@ -54,14 +54,25 @@ const MODEL_BASE_SPEED = 1.05;
 // 이제 모델은 제 빠르기로만 말하고, 빠르게 듣는 배율은 모두 만든 소리를 음높이 그대로 빠르게 해서 맞춘다
 // (작업자의 timeStretch). 같은 시험에서 끝이 틀린 문장 1개, 글자 오류 1.2~1.3%.
 const MODEL_MAX_SPEED = MODEL_BASE_SPEED;
-// 품질 단계(반복 횟수). 많을수록 곱지만 느리다. 기기 속도에 맞춰 4~8 사이에서 자동 조절한다.
+// 품질 단계(반복 횟수). 많을수록 곱지만 느리다. 기기 속도에 맞춰 4~8 사이에서 고른다.
 // (측정: 단계 8은 5보다 약 1.5배 느림. 느린 기기에서 8로 고정하면 문장 사이가 끊긴다)
+// 예전에는 문장마다 단계를 올리고 내려, 한 번 읽는 동안에도 문장마다 음질·음색이 달라졌다
+// (4단계는 6·8단계보다 1.6dB 크고 밝고 쉬쉬거린다 — 목소리가 오락가락한 까닭 중 하나).
+// 이제 단계는 읽기를 시작할 때 한 번 정하고(beginNeuralSession), 읽는 동안 잰 속도로는 '다음 읽기'에 쓸 값만 고친다.
+// 그래도 계속 끊기면 한 번 읽는 동안 딱 한 번만 한 단계 낮춘다.
 const MAX_STEPS = 8, MIN_STEPS = 4;
-let denoiseSteps = MAX_STEPS;
+let denoiseSteps = MAX_STEPS;     // 다음 읽기에 쓸 단계 (잰 속도로 고친다, 기기에 기억)
+let sessionSteps = 0;             // 지금 읽기에 쓰는 단계 (0: 아직 정하지 않음)
+let sessionDropped = false;       // 이번 읽기에서 이미 한 번 낮췄는가
+let sessionStalls = 0;
 let backendName = null;
-// 한 번에 만드는 최대 글자 수. 한국어는 120자 안쪽이 안정적이지만(공식 예제), 긴 조각은
-// 작업자 하나가 오래 붙잡고 있어 다음 조각이 늦어진다. 90자로 나눠 여러 작업자가 동시에 만들게 한다.
-export const NEURAL_MAX_CHUNK = 90;
+const STEPS_KEY = 'faith_voice_steps';
+// 한 번에 만드는 최대 글자 수. 공식 예제(supertone-inc/supertonic helper.js)는 한국어를 120자까지
+// 문장 단위로 묶어 한 번에 만들고, 문장 가운데서는 자르지 않는다. 예전에는 90자로 잘게 나눠
+// 문장 가운데까지 잘랐는데, 자른 자리마다 억양이 끝나고 다시 시작해 뚝뚝 끊겨 들렸다.
+export const NEURAL_MAX_CHUNK = 120;
+// 문장 하나는 이 길이까지 자르지 않는다 (받아쓰기: 100~186자 문장 10개 중 9개 오류 0, 모델은 약 350자까지 배웠다)
+export const NEURAL_SENTENCE_MAX = 180;
 // 자연스러운 음성이 1배속에서 읽는 평균 글자 수/초 — 문장 앞뒤 무음을 걷어 낸 소리 기준
 // (측정: 문장 20개 × 목소리 4개, 7.6. 문장 사이 쉼은 tts.js가 따로 더한다)
 export const NEURAL_CHARS_PER_SEC = 7.6;
@@ -410,7 +421,7 @@ function finishAudio(p, d, genSec) {
     addNeuralDiag({ type: 'synth', chars: p.chars, audioSec, genSec, steps: p.steps, stretch: p.stretch, parts: p.parts || d.parts });
     // 이 문장을 읽는 시간과 뒤의 쉼 동안 다음 문장을 만든다
     adaptSteps(audioSec + (p.pauseSec || 0), genSec, p.steps);
-    p.resolve({ wav: d.wav, sampleRate: d.sampleRate });
+    p.resolve({ wav: d.wav, sampleRate: d.sampleRate, pauses: d.pauses || [], base: d.base || null, modelSpeed: p.modelSpeed });
 }
 
 function spawnWorker(role, forceWasm) {
@@ -429,11 +440,12 @@ function spawnWorker(role, forceWasm) {
             const voc = workers.find(x => x.role === 'vocoder');
             if (!voc) { pending.delete(d.id); p.resolve(null); return; }
             voc.n++;
-            voc.w.postMessage({ type: 'vocode', id: d.id, latent: d.latent, latentDim: d.latentDim, latentLen: d.latentLen,
+            voc.w.postMessage({ type: 'vocode', id: d.id, gen: p.gen, latent: d.latent, latentDim: d.latentDim, latentLen: d.latentLen,
                                 wavLen: d.wavLen, stretch: p.stretch }, [d.latent.buffer]);
             return;
         }
         pending.delete(d.id);
+        if (d.type === 'audio' && p.restretch) { p.resolve({ wav: d.wav, sampleRate: d.sampleRate, pauses: d.pauses || [], base: p.base, modelSpeed: p.modelSpeed }); return; }
         if (d.type === 'audio') {
             // 나눠 맡길 때 실제 처리 속도는 '가장 느린 단계'가 정한다 (생성은 작업자 수만큼 동시에 돈다)
             const nAc = Math.max(1, workers.filter(x => x.role === 'acoustic').length);
@@ -445,6 +457,12 @@ function spawnWorker(role, forceWasm) {
         }
         else if (d.type === 'skipped') p.resolve(null);
         else p.reject(new Error(d.message || '음성을 만들지 못했습니다.'));
+    };
+    // 작업자가 메모리 부족 등으로 죽으면 기다리던 요청이 영영 끝나지 않아 재생이 멈췄다 → 실패로 알린다
+    w.onerror = (e) => {
+        e.preventDefault?.();
+        pending.forEach((p, id) => { pending.delete(id); p.reject(new Error('음성 작업자가 멈췄습니다')); });
+        shutdownNeural();
     };
     entry.ready = new Promise((resolve, reject) => {
         const h = (e) => {
@@ -503,18 +521,52 @@ function adaptSteps(audioSec, genSec, stepsUsed) {
     // 읽는 시간보다 30% 빨리 만들 수 있는 가장 높은 단계
     const sustainable = Math.floor((audioSec / 1.3 - fixed) / perStep);
     const target = Math.max(MIN_STEPS, Math.min(MAX_STEPS, sustainable));
+    // 다음 읽기에 쓸 값만 고친다 (지금 읽는 동안은 바꾸지 않는다)
+    const before = denoiseSteps;
     if (target < denoiseSteps) denoiseSteps = target;         // 못 따라가면 곧바로 낮춘다
     else if (target > denoiseSteps) denoiseSteps++;           // 여유가 있으면 한 단계씩만 올린다
+    if (denoiseSteps !== before) saveSteps();
 }
 
-/** 재생이 다음 문장을 기다려야 했을 때(끊김) 품질을 한 단계 바로 낮춘다 */
-export function lowerNeuralQuality() {
-    if (denoiseSteps > MIN_STEPS) denoiseSteps--;
+function saveSteps() {
+    try { localStorage.setItem(STEPS_KEY, JSON.stringify({ backend: backendName, model: modelName, steps: denoiseSteps })); } catch (e) {}
+}
+function loadSteps(fallback) {
+    try {
+        const o = JSON.parse(localStorage.getItem(STEPS_KEY) || 'null');
+        if (o && o.backend === backendName && o.model === modelName && o.steps >= MIN_STEPS && o.steps <= MAX_STEPS) return o.steps;
+    } catch (e) {}
+    return fallback;
+}
+
+/**
+ * 읽기를 시작할 때 이번 읽기의 품질 단계를 정한다 (읽는 동안 그대로).
+ * CPU 기기에서 빠르게(1.4배 이상) 처음 읽으면 가장 빠른 단계로 시작한다.
+ */
+export function beginNeuralSession(appSpeed) {
+    if (backendName && backendName !== 'webgpu' && (appSpeed || 1) >= 1.4 && denoiseSteps > MIN_STEPS
+        && !diagLog.some(e => e.type === 'synth')) denoiseSteps = MIN_STEPS;
+    sessionSteps = backendName ? denoiseSteps : 0;
+    sessionDropped = false;
+    sessionStalls = 0;
+}
+
+/**
+ * 재생이 다음 문장을 기다려야 했을 때(끊김). 다음 읽기의 단계를 낮추고,
+ * 이번 읽기에서 두 번 넘게 끊기면 딱 한 번만 한 단계 낮춘다.
+ */
+export function reportNeuralStall() {
+    if (denoiseSteps > MIN_STEPS) { denoiseSteps--; saveSteps(); }
+    sessionStalls++;
+    if (sessionStalls >= 2 && !sessionDropped && sessionSteps > MIN_STEPS) {
+        sessionSteps--;
+        sessionDropped = true;
+    }
 }
 
 /** 진단용: 계산 장치와 지금 품질 단계 */
 export function getNeuralInfo() {
-    return { backend: backendName, steps: denoiseSteps };
+    return { backend: backendName, steps: sessionSteps || denoiseSteps };
 }
 
 export function getNeuralMinSteps() { return MIN_STEPS; }
@@ -544,7 +596,8 @@ export function ensureNeuralReady() {
         // GPU 없이 계산하는 기기는 중간 단계에서 시작한다 (빠르면 자동으로 올라가고, 못 따라가면 내려간다)
         // 측정(자연스러움 점수, 원본 8단계 3.92): CPU용 모델 4단계 3.11 · 5단계 3.42 · 6단계 3.73 · 8단계 3.86.
         // 5→6단계의 차이가 가장 크고, 지금 CPU용 모델은 단계당 계산이 예전보다 약 15% 빨라 6단계도 예전 5단계만큼 걸린다.
-        denoiseSteps = backendName === 'webgpu' ? MAX_STEPS : 6;
+        // 지난번에 이 기기에서 잰 값이 있으면 그것으로
+        denoiseSteps = loadSteps(backendName === 'webgpu' ? MAX_STEPS : 6);
         return backendName;
     })();
     workerReady.catch(() => { shutdownNeural(); });
@@ -558,6 +611,7 @@ export function shutdownNeural() {
     workerReady = null;
     backendName = null;
     modelName = null;
+    sessionSteps = 0;
     pending.forEach(p => p.resolve(null));
     pending.clear();
     stopNeuralAudio();
@@ -574,15 +628,40 @@ export async function synthesizeNeural(text, voiceValue, appSpeed, gen, pauseSec
     const total = Math.max(0.5, Math.min(2.5, MODEL_BASE_SPEED * (appSpeed || 1)));
     const speed = Math.min(total, MODEL_MAX_SPEED);
     const stretch = total / speed;
-    // 빠르게 들을수록 같은 시간에 더 많이 만들어야 한다. CPU 기기에서 1.4배 이상이면 처음부터 가장 빠른 단계로.
-    if (backendName !== 'webgpu' && (appSpeed || 1) >= 1.4 && denoiseSteps > MIN_STEPS && !diagLog.some(e => e.type === 'synth')) denoiseSteps = MIN_STEPS;
-    const steps = denoiseSteps;
+    // 이번 읽기에 정한 단계 (읽는 동안 문장마다 바뀌지 않게)
+    if (!sessionSteps) beginNeuralSession(appSpeed);
+    const steps = sessionSteps || denoiseSteps;
     // 맡긴 일이 가장 적은 생성 작업자에게 (GPU 기기는 작업자 1개)
     const target = workers.filter(x => x.role !== 'vocoder').reduce((a, b) => (a.n <= b.n ? a : b));
     return new Promise((resolve, reject) => {
-        pending.set(id, { resolve, reject, chars: text.length, stretch, steps, pauseSec });
+        pending.set(id, { resolve, reject, chars: text.length, stretch, steps, pauseSec, gen, modelSpeed: speed });
         target.n++;
         target.w.postMessage({ type: 'synth', id, gen, text, lang: 'ko', style, speed, stretch, steps });
+    });
+}
+
+/** 앱 빠르기에서 모델이 말할 빠르기 — 1배속 이상은 모두 같다 (빠르게 하는 것은 작업자가 소리로 한다) */
+export function neuralModelSpeed(appSpeed) {
+    return Math.min(Math.max(0.5, Math.min(2.5, MODEL_BASE_SPEED * (appSpeed || 1))), MODEL_MAX_SPEED);
+}
+
+/**
+ * 이미 만든 소리(audio: synthesizeNeural의 결과)를 새 빠르기로 다시 빠르게만 한다.
+ * 모델이 말한 빠르기가 같을 때(1배속 이상끼리)만 쓴다 — 읽는 중에 빠르기를 바꿔도 끊기지 않게.
+ */
+export async function restretchNeural(audio, appSpeed, gen) {
+    if (!audio || !audio.base) return null;
+    await ensureNeuralReady();
+    const total = Math.max(0.5, Math.min(2.5, MODEL_BASE_SPEED * (appSpeed || 1)));
+    const stretch = total / Math.min(total, MODEL_MAX_SPEED);
+    const id = ++reqSeq;
+    // 가장 한가한 작업자에게 (가벼운 일이다)
+    const target = workers.reduce((a, b) => (a.n <= b.n ? a : b));
+    const copy = new Float32Array(audio.base);
+    return new Promise((resolve, reject) => {
+        pending.set(id, { resolve, reject, restretch: true, base: audio.base, modelSpeed: audio.modelSpeed, gen });
+        target.n++;
+        target.w.postMessage({ type: 'restretch', id, gen, base: copy, sampleRate: audio.sampleRate, stretch }, [copy.buffer]);
     });
 }
 
@@ -600,9 +679,58 @@ let currentSource = null;
 export function unlockNeuralAudio() {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return null;
-    if (!audioCtx) audioCtx = new Ctx();
-    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    if (!audioCtx) {
+        // 'playback': 음성 작업자가 CPU를 많이 쓰는 동안에도 소리가 튀지 않게 넉넉한 버퍼로 (말소리라 지연은 상관없다)
+        try { audioCtx = new Ctx({ latencyHint: 'playback' }); } catch (e) { audioCtx = new Ctx(); }
+    }
+    // 아이폰은 전화·알림 뒤에 'interrupted'로 남는다 — 그때도 다시 깨운다
+    if (audioCtx.state !== 'running' && audioCtx.state !== 'closed') audioCtx.resume().catch(() => {});
     return audioCtx;
+}
+
+// ─── 문장 소리를 오디오 시계에 줄 세워 틀기 ───
+// 예전에는 한 문장이 끝났다는 알림(onended)을 받고 → 타이머로 쉼을 기다렸다가 → 다음 문장을 틀었다.
+// 알림·타이머·화면 일이 늦어지는 만큼 쉼이 들쭉날쭉해졌다 (화면이 바쁠 때 50ms 쉼이 100~250ms로 측정됨).
+// 이제는 공식 예제·web.dev 'A tale of two clocks'처럼 오디오 시계에 '앞 문장 끝 + 쉼' 시각을 정해 미리 걸어 둔다.
+let playhead = 0;                  // 마지막으로 걸어 둔 소리가 끝나는 시각 (오디오 시계, 초)
+const scheduled = new Set();       // 걸어 두었거나 나오고 있는 소리들
+
+export function neuralClock() {
+    return audioCtx ? audioCtx.currentTime : 0;
+}
+
+/**
+ * 소리 하나를 '앞 소리 끝 + gapSec'에 틀도록 걸어 둔다. 앞 소리가 이미 끝났다면(늦게 만들어짐) 곧바로.
+ * → { startAt, endAt, late } (late: 제때 만들지 못해 쉼보다 늦게 나온다 = 끊김)
+ */
+export function scheduleNeuralAudio(wav, sampleRate, gapSec) {
+    const ctx = unlockNeuralAudio();
+    const buf = ctx.createBuffer(1, wav.length, sampleRate);
+    buf.copyToChannel(wav, 0);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    const earliest = ctx.currentTime + 0.05;
+    const wanted = playhead > 0 ? playhead + Math.max(0, gapSec || 0) : earliest;
+    const startAt = Math.max(wanted, earliest);
+    const entry = { src, startAt, endAt: startAt + buf.duration, late: playhead > 0 && startAt > wanted + 0.02 };
+    src.onended = () => scheduled.delete(entry);
+    scheduled.add(entry);
+    src.start(startAt);
+    playhead = entry.endAt;
+    return entry;
+}
+
+/** 아직 소리가 나기 시작하지 않은(시각 t 뒤에 시작할) 소리들을 거둔다 — 읽는 중에 빠르기를 바꿀 때 */
+export function unscheduleNeuralAfter(t) {
+    let end = 0;
+    for (const e of [...scheduled]) {
+        if (e.startAt > t) {
+            try { e.src.onended = null; e.src.stop(); } catch (err) {}
+            scheduled.delete(e);
+        } else if (e.endAt > end) end = e.endAt;
+    }
+    playhead = end;
 }
 
 /** 만든 음성을 재생하고, 끝나면 resolve(true). 중간에 멈추면 resolve(false) */
@@ -631,6 +759,9 @@ export function stopNeuralAudio() {
         try { currentSource.stop(); } catch (e) {}
         currentSource = null;
     }
+    scheduled.forEach(e => { try { e.src.onended = null; e.src.stop(); } catch (err) {} });
+    scheduled.clear();
+    playhead = 0;
     // 일시정지 상태에서 멈췄다면 다음 재생을 위해 다시 깨워 둔다
     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
 }
@@ -640,5 +771,5 @@ export function pauseNeuralAudio() {
 }
 
 export function resumeNeuralAudio() {
-    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    if (audioCtx && audioCtx.state !== 'running' && audioCtx.state !== 'closed') audioCtx.resume().catch(() => {});
 }

@@ -155,13 +155,39 @@ function preprocessText(text, lang) {
     return `<${lang}>${text}</${lang}>`;
 }
 
-function gaussian() {
-    const u1 = Math.max(0.0001, Math.random());
-    const u2 = Math.random();
+/**
+ * 시작 잡음 — 문장마다 Math.random으로 새로 뽑으면 문장마다 음높이·크기·음색이 조금씩 달라져
+ * 목소리가 오락가락하게 들렸다. 그래서
+ *  - 목소리마다 정해진 씨앗으로 '같은 자리(시간 칸)에는 늘 같은 값'이 나오게 만들고 (같은 글은 늘 같은 소리),
+ *  - 잡음의 크기를 0.7배로 줄인다 (Matcha-TTS·VITS가 쓰는 샘플링 온도).
+ * 측정(14문장, 목소리 F1·M2): 문장 사이 음높이 흔들림 1.46→1.27반음(M2), 크기 흔들림도 줄고
+ * 문장 안의 억양 폭은 5%쯤만 줄었다. 받아쓰기 오류율은 그대로(약 1%).
+ */
+const NOISE_TEMPERATURE = 0.7;
+function hash32(a) {
+    a = Math.imul(a ^ (a >>> 16), 0x7feb352d);
+    a = Math.imul(a ^ (a >>> 15), 0x846ca68b);
+    return (a ^ (a >>> 16)) >>> 0;
+}
+function seedOf(name) {
+    let h = 2166136261;
+    for (let i = 0; i < name.length; i++) h = Math.imul(h ^ name.charCodeAt(i), 16777619);
+    return h >>> 0;
+}
+/** (씨앗, 줄, 칸)마다 늘 같은 표준 정규 난수 */
+function fixedGaussian(seed, c, t) {
+    const a = hash32(seed ^ hash32(c * 0x9e3779b1 + t));
+    const b = hash32(a + 0x632be5ab);
+    const u1 = Math.max(1e-7, (a + 0.5) / 4294967296);
+    const u2 = (b + 0.5) / 4294967296;
     return Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
 }
 
-async function synth({ text, lang, style, speed, steps }) {
+// 정지·탐색·빠르기 바꾸기로 버려진 세대의 일은 단계 사이에서 그만둔다 (돌던 일이 끝나기를 기다리느라
+// 새 문장이 늦어져, 읽는 중에 빠르기를 바꾸면 9초 가까이 소리가 끊겼다)
+const SKIPPED = { skipped: true };
+async function synth({ text, lang, style, speed, steps, gen }) {
+    const stale = () => (gen || 0) < minGen;
     const st = await getStyle(style);
     const processed = preprocessText(text, lang);
     const L = processed.length;
@@ -189,11 +215,15 @@ async function synth({ text, lang, style, speed, steps }) {
     const latentLen = Math.max(1, Math.floor((wavLen + chunkSize - 1) / chunkSize));
 
     let xt = new Float32Array(latentDim * latentLen);
-    for (let i = 0; i < xt.length; i++) xt[i] = gaussian();
+    const seed = seedOf(style);
+    for (let c = 0; c < latentDim; c++) {
+        for (let t = 0; t < latentLen; t++) xt[c * latentLen + t] = fixedGaussian(seed, c, t) * NOISE_TEMPERATURE;
+    }
     const latentMask = new O.Tensor('float32', new Float32Array(latentLen).fill(1), [1, 1, latentLen]);
     const totalStep = new O.Tensor('float32', new Float32Array([steps]), [1]);
 
     for (let step = 0; step < steps; step++) {
+        if (stale()) return SKIPPED;
         const out = await sessions.ve.run({
             noisy_latent: new O.Tensor('float32', xt, [1, latentDim, latentLen]),
             text_emb: textEmb,
@@ -207,6 +237,7 @@ async function synth({ text, lang, style, speed, steps }) {
     }
 
     tm.ve = performance.now();
+    if (stale()) return SKIPPED;
     if (role === 'acoustic') {
         // 소리 만들기(보코더)는 다른 작업자가 맡는다 — 그동안 이 작업자는 다음 문장을 만든다
         return { latent: xt, latentDim, latentLen, wavLen, sampleRate,
@@ -214,12 +245,23 @@ async function synth({ text, lang, style, speed, steps }) {
     }
     const vocOut = await sessions.voc.run({ latent: new O.Tensor('float32', xt, [1, latentDim, latentLen]) });
     tm.voc = performance.now();
-    const full = vocOut.wav_tts.data;
-    // 예측한 길이 뒤에 붙는 여분(무음)은 잘라 다음 문장과의 간격이 들쭉날쭉하지 않게 한다
-    const wav = new Float32Array(full.subarray(0, Math.min(full.length, Math.max(wavLen, 1))));
+    const wav = keepTail(vocOut.wav_tts.data, wavLen);
     // 진단용: 단계별 걸린 시간(ms)
     const parts = { dp: tm.dp - tm.start, te: tm.te - tm.dp, ve: tm.ve - tm.te, voc: tm.voc - tm.ve };
     return { wav, sampleRate, parts };
+}
+
+/**
+ * 예측한 길이(wavLen) 뒤의 소리도 버리지 않는다. 예전에는 그 자리에서 잘랐는데, 100문장에 2~3번은
+ * 말소리가 아직 이어지는 자리여서 끝소리가 '틱' 하고 잘렸다. 보코더가 만든 여분(한 칸, 70ms 안팎)은
+ * 남기되 그 구간을 서서히 줄여 끝맺고, 뒤에 남는 무음은 trimSilence가 걷는다.
+ */
+function keepTail(full, wavLen) {
+    const n = Math.max(1, Math.min(full.length, wavLen));
+    const y = new Float32Array(full);
+    const extra = y.length - n;
+    for (let j = 0; j < extra; j++) y[n + j] *= 0.5 + 0.5 * Math.cos(Math.PI * (j + 1) / (extra + 1));
+    return y;
 }
 
 /**
@@ -230,7 +272,7 @@ async function synth({ text, lang, style, speed, steps }) {
  * 들숨·끝소리의 여운은 남기도록 가장 큰 소리보다 60dB 넘게 작은 구간만 무음으로 보고, 앞뒤에 여유를 둔다.
  */
 const TRIM_FLOOR = 0.001;          // 가장 큰 소리 대비 -60dB
-const TRIM_LEAD_SEC = 0.05, TRIM_TAIL_SEC = 0.1, TRIM_FADE_SEC = 0.005;
+const TRIM_LEAD_SEC = 0.05, TRIM_TAIL_SEC = 0.1, TRIM_FADE_SEC = 0.008;
 function trimSilence(x, sampleRate) {
     const hop = Math.max(1, Math.round(sampleRate * 0.01));   // 10ms씩 소리 크기를 잰다
     const n = Math.floor(x.length / hop);
@@ -252,15 +294,80 @@ function trimSilence(x, sampleRate) {
     const start = Math.max(0, a * hop - Math.round(sampleRate * TRIM_LEAD_SEC));
     const end = Math.min(x.length, (b + 1) * hop + Math.round(sampleRate * TRIM_TAIL_SEC));
     if (start === 0 && end === x.length) return x;
-    const y = x.slice(start, end);
-    // 자른 자리가 '틱' 하고 튀지 않게 아주 짧게 줄였다 키운다
+    return x.slice(start, end);
+}
+
+/** 앞뒤를 아주 짧게(8ms) 줄였다 키운다 — 문장 사이 이어지는 자리가 '틱' 하고 튀지 않게 (빠르게 한 뒤에, 늘 한다) */
+function fadeEdges(y, sampleRate) {
     const fade = Math.min(Math.round(sampleRate * TRIM_FADE_SEC), y.length >> 1);
     for (let j = 0; j < fade; j++) {
-        const g = j / fade;
-        if (start > 0) y[j] *= g;
-        if (end < x.length) y[y.length - 1 - j] *= g;
+        const g = 0.5 - 0.5 * Math.cos(Math.PI * (j + 0.5) / fade);
+        y[j] *= g;
+        y[y.length - 1 - j] *= g;
     }
     return y;
+}
+
+/**
+ * 문장마다 소리 크기를 고르게 맞춘다. 모델은 문장마다 크기가 2~5dB씩 다르게 나오고(짧은 문장이 더 크다)
+ * 이것도 목소리가 오락가락하게 들리는 까닭이었다. 소리가 나는 구간(가장 큰 곳보다 30dB 안쪽)의 크기를
+ * 재어 기준(-24dBFS, 목소리 10개의 평균)과의 차이를 70%만, ±4dB 안에서 고친다 — 문장마다의 강약은 조금 남긴다.
+ * 측정: 문장 사이 크기 흔들림(표준편차) 1.5dB → 0.3dB. 가장 큰 소리는 -1dBFS를 넘지 않게 한다.
+ */
+const LOUD_TARGET_DB = -24, LOUD_STRENGTH = 0.7, LOUD_CAP_DB = 4, PEAK_MAX = 0.89;
+function levelLoudness(y, sampleRate) {
+    const hop = Math.max(1, Math.round(sampleRate * 0.02));
+    const n = Math.floor(y.length / hop);
+    if (n < 5) return y;
+    const e = new Float64Array(n);
+    let top = 0, peak = 0;
+    for (let f = 0; f < n; f++) {
+        let acc = 0;
+        for (let j = f * hop, end = j + hop; j < end; j++) acc += y[j] * y[j];
+        e[f] = acc / hop;
+        if (e[f] > top) top = e[f];
+    }
+    for (let j = 0; j < y.length; j++) { const a = Math.abs(y[j]); if (a > peak) peak = a; }
+    if (!(top > 0)) return y;
+    const gate = top * 0.001;   // -30dB
+    let sum = 0, cnt = 0;
+    for (let f = 0; f < n; f++) if (e[f] > gate) { sum += e[f]; cnt++; }
+    const db = 10 * Math.log10(sum / cnt);
+    let gainDb = Math.max(-LOUD_CAP_DB, Math.min(LOUD_CAP_DB, (LOUD_TARGET_DB - db) * LOUD_STRENGTH));
+    let g = Math.pow(10, gainDb / 20);
+    if (peak * g > PEAK_MAX) g = PEAK_MAX / peak;
+    if (Math.abs(g - 1) < 1e-3) return y;
+    for (let j = 0; j < y.length; j++) y[j] *= g;
+    return y;
+}
+
+/**
+ * 소리 안의 쉼(140ms 넘게 조용한 구간)을 찾는다 — 여러 문장을 한 번에 만들었을 때 문장마다 강조를 옮길 자리.
+ * 돌려주는 값: [[시작초, 끝초], …]
+ */
+function findPauses(y, sampleRate) {
+    const hop = Math.max(1, Math.round(sampleRate * 0.01));
+    const n = Math.floor(y.length / hop);
+    const rms = new Float32Array(n);
+    let top = 0;
+    for (let f = 0; f < n; f++) {
+        let acc = 0;
+        for (let j = f * hop, end = j + hop; j < end; j++) acc += y[j] * y[j];
+        rms[f] = Math.sqrt(acc / hop);
+        if (rms[f] > top) top = rms[f];
+    }
+    const floor = top * 0.01;   // -40dB
+    const out = [];
+    let a = -1;
+    for (let f = 0; f <= n; f++) {
+        const quiet = f < n && rms[f] < floor;
+        if (quiet && a < 0) a = f;
+        else if (!quiet && a >= 0) {
+            if (f - a >= 14 && a > 0 && f < n) out.push([a * hop / sampleRate, f * hop / sampleRate]);
+            a = -1;
+        }
+    }
+    return out;
 }
 
 /**
@@ -308,18 +415,24 @@ function timeStretch(x, rate) {
     return out.subarray(0, outLen);
 }
 
-/** 만든 소리를 다듬는다: 앞뒤 무음을 걷고, 빠르게 들을 배율만큼 빠르게 한다 */
+/**
+ * 만든 소리를 다듬는다: 앞뒤 무음을 걷고, 크기를 고르게 하고, 빠르게 들을 배율만큼 빠르게 하고, 앞뒤를 부드럽게.
+ * → { wav: 들을 소리, base: 빠르게 하기 전 소리 } — 읽는 중에 빠르기를 바꾸면 base를 다시 빠르게만 하면 된다
+ */
 function finishWav(raw, sampleRate, stretch) {
-    const trimmed = trimSilence(raw, sampleRate);
-    return (stretch > 1.001) ? new Float32Array(timeStretch(trimmed, stretch)) : new Float32Array(trimmed);
+    const base = levelLoudness(new Float32Array(trimSilence(raw, sampleRate)), sampleRate);
+    return { wav: stretchAndFade(base, sampleRate, stretch), base };
+}
+function stretchAndFade(base, sampleRate, stretch) {
+    const y = (stretch > 1.001) ? new Float32Array(timeStretch(base, stretch)) : new Float32Array(base);
+    return fadeEdges(y, sampleRate);
 }
 
 /** 잠재값을 소리로 (보코더 전담 작업자) */
 async function vocode({ latent, latentDim, latentLen, wavLen }) {
     const t0 = performance.now();
     const vocOut = await sessions.voc.run({ latent: new O.Tensor('float32', latent, [1, latentDim, latentLen]) });
-    const full = vocOut.wav_tts.data;
-    const wav = new Float32Array(full.subarray(0, Math.min(full.length, Math.max(wavLen, 1))));
+    const wav = keepTail(vocOut.wav_tts.data, wavLen);
     return { wav, sampleRate: cfgs.ae.sample_rate, vocMs: performance.now() - t0 };
 }
 
@@ -339,21 +452,31 @@ self.onmessage = (e) => {
             if (msg.type === 'init') {
                 const backend = await init(msg);
                 self.postMessage({ type: 'ready', backend, model: modelName, sampleRate: cfgs.ae.sample_rate });
+            } else if (msg.type === 'vocode' && (msg.gen || 0) < minGen) {
+                self.postMessage({ type: 'skipped', id: msg.id });
+            } else if (msg.type === 'restretch') {
+                // 읽는 중에 빠르기를 바꿨다: 이미 만든 소리를 새 배율로 빠르게만 한다 (모델을 다시 돌리지 않는다)
+                const wav = stretchAndFade(msg.base, msg.sampleRate, msg.stretch);
+                self.postMessage({ type: 'audio', id: msg.id, wav, sampleRate: msg.sampleRate, pauses: findPauses(wav, msg.sampleRate) }, [wav.buffer]);
             } else if (msg.type === 'vocode') {
                 const { wav: raw, sampleRate, vocMs } = await vocode(msg);
-                const wav = finishWav(raw, sampleRate, msg.stretch);
-                self.postMessage({ type: 'audio', id: msg.id, wav, sampleRate, vocMs }, [wav.buffer]);
+                const { wav, base } = finishWav(raw, sampleRate, msg.stretch);
+                self.postMessage({ type: 'audio', id: msg.id, wav, base, sampleRate, vocMs, pauses: findPauses(wav, sampleRate) }, [wav.buffer, base.buffer]);
             } else if (msg.type === 'synth' && role === 'acoustic') {
                 const t0 = performance.now();
                 const r = await synth(msg);
+                if (r.skipped) { self.postMessage({ type: 'skipped', id: msg.id }); return; }
                 self.postMessage({ type: 'latent', id: msg.id, latent: r.latent, latentDim: r.latentDim, latentLen: r.latentLen,
                                    wavLen: r.wavLen, sampleRate: r.sampleRate, ms: performance.now() - t0, steps: msg.steps, parts: r.parts },
                                  [r.latent.buffer]);
             } else if (msg.type === 'synth') {
                 const t0 = performance.now();
-                const { wav: raw, sampleRate, parts } = await synth(msg);
-                const wav = finishWav(raw, sampleRate, msg.stretch);
-                self.postMessage({ type: 'audio', id: msg.id, wav, sampleRate, ms: performance.now() - t0, steps: msg.steps, parts }, [wav.buffer]);
+                const r = await synth(msg);
+                if (r.skipped) { self.postMessage({ type: 'skipped', id: msg.id }); return; }
+                const { wav: raw, sampleRate, parts } = r;
+                const { wav, base } = finishWav(raw, sampleRate, msg.stretch);
+                self.postMessage({ type: 'audio', id: msg.id, wav, base, sampleRate, ms: performance.now() - t0, steps: msg.steps, parts,
+                                   pauses: findPauses(wav, sampleRate) }, [wav.buffer, base.buffer]);
             }
         } catch (err) {
             self.postMessage({ type: 'error', id: msg.id, message: String(err && err.message || err), webgpuFailed: !!(err && err.webgpuFailed) });
