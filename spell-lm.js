@@ -13,7 +13,7 @@
 // 캐시에 남은 옛 판이 섞인다 (새로 넣은 함수가 없어 정밀 검사가 아예 열리지 않을 수 있다).
 // 이 파일에 붙은 판(?v=)을 그대로 붙여 부른다.
 const {
-    wordsOf, koreanCandidates, knownKorean, partsOf, compose, hasJong, objectBeforeIn,
+    wordsOf, koreanCandidates, knownKorean, partsOf, compose, hasJong, objectBeforeIn, spellKind,
     CHO, JUNG, JONG, VOWEL_SETS, ARCHAIC, CONFUSABLES, ONE_NOUNS
 } = await import(new URL('./spell-text.js' + new URL(import.meta.url).search, import.meta.url).href);
 
@@ -103,6 +103,7 @@ export function spacingCuts(word, toks, start) {
         if (at <= 0 || at >= word.length || p.position === t.position) continue;
         if (cuts.length && cuts[cuts.length - 1] >= at) continue;
         if (DO_FORM.test(t.str)) continue;
+        if (pt === 'MAG' && /^(.+)\1$/.test(p.str) && /^(거리|대|이)$/.test(t.str)) continue;   // 흉내말 + '-거리다·-대다' (두근두근거리고)
         let cut = false;
         if (tt === 'NNB') cut = pt === 'ETM';                                   // '-ㄴ·-ㄹ' 뒤의 의존 명사 (할수 → 할 수)
         else if (CONTENT_TAG.test(tt) && pt !== 'XPN') {
@@ -130,6 +131,126 @@ function nameLike(word) {
 // 외래어에 흔한 글자 (히스토리·스킵·스킴) — 사전에 없는 외래어는 오타로 보지 않는다
 const LOAN_SYL = /[스트크프즈츠쉬쥬퓨큐튜뷰퀴퀘펜텐센렌덴켄젠웨휴팁탭랩킵킴핑링킹톡앱폰캡챗봇핏룩샵숍몰칩컷펙텍렉섹벨셀델젤]/;
 
+// ─── 사전 단계가 고친 것을 다시 보기 ───
+// 사전(Hunspell)은 모르는 말을 비슷한 사전 말로 고치거나 띄운다. Kiwi로 원래 말을 분석해 보면 틀린 고침이 드러나는 일이 많다.
+//  - 띄어쓰기: 띄운 자리가 형태소 한가운데(산업은 행이 — '은행')이거나, 조사·어미·뒷가지 앞(혼자 서도·외부인 들이)이거나,
+//    앞가지 뒤(난 개발이)이면 틀린 것이다.
+//  - 철자: 원래 말이 짜임이 바르게 분석되고, 고친 말로 바꿔도 문장 점수가 vetoGain만큼도 오르지 않으면(학교내 → 학교네) 틀린 것이다.
+//    사이시옷(머리속 → 머릿속)은 언어 모델이 틀린 꼴에 익숙해 점수로 가릴 수 없어 그대로 둔다.
+/** 사이시옷만 다른가 (받침 'ㅅ'을 더하거나 뺀 것 하나) */
+function onlySaisiot(from, to) {
+    if (from.length !== to.length) return false;
+    let diff = null;
+    for (let k = 0; k < from.length; k++) {
+        if (from[k] === to[k]) continue;
+        if (diff) return false;
+        const a = partsOf(from[k]), b = partsOf(to[k]);
+        if (a[0] !== b[0] || a[1] !== b[1]) return false;
+        diff = [a[2], b[2]];
+    }
+    return !!diff && ((diff[0] === '' && diff[1] === 'ㅅ') || (diff[0] === 'ㅅ' && diff[1] === ''));
+}
+/** 사전 단계의 고침이 틀렸나 → 까닭('inside'|'bound'|'prefix'|'nogain') | null */
+export function wrongDictFix(prior, toks, start, gainOf, vetoGain = 2) {
+    if (prior.to.replace(/ /g, '') === prior.from) {
+        let k = 0;
+        for (const ch of prior.to) {
+            if (ch !== ' ') { k++; continue; }
+            const at = start + k;
+            if (toks.some(t => t.length > 1 && t.position < at && at < t.position + t.length)) return 'inside';
+            const after = toks.find(t => t.position === at);
+            if (after && /^(J|E|XS|VCP)/.test(tagOf(after))) return 'bound';
+            const before = toks.filter(t => t.length > 0 && t.position + t.length === at).pop();
+            if (before && tagOf(before) === 'XPN') return 'prefix';
+        }
+        return null;
+    }
+    if (prior.basis === 'doubled' || prior.basis === 'spell-4' || onlySaisiot(prior.from, prior.to) || illFormed(toks)) return null;
+    return gainOf(prior.to) < vetoGain ? 'nogain' : null;
+}
+
+// ─── 오타 교정 분석 ───
+// Kiwi는 analyze()에 '오타 생성 규칙'을 주면 글자를 바꾼 꼴들까지 함께 분석해 문맥에 더 자연스러운 쪽을 고른다
+// (몇일 → 며칠, 핑게 → 핑계, 이써요 → 있어요, 어떻게던 → 어떻게든). 고친 형태소에는 typoCost가 붙는다.
+// 고친 형태소 덩어리를 joinSent로 다시 붙여 고친 글자를 얻고, 고친 말이 사전에 있을 때만 낸다.
+const MATCH_ALL = 8454207;   // Match.allWithNormalizing (analyze 기본값) — 숫자로 넘겨야 한다 (없으면 wasm이 멈춘다)
+const TYPO_SET = 'basicWithContinual';
+const TYPO_COST = 2.5;       // 어절 하나에서 받아 주는 오타 값의 합 (Kiwi 기본값)
+
+/** 글자 자리가 겹치는 형태소끼리 묶는다 (되/VV + 었/EP → '됬' 한 덩어리) */
+function clusters(tokens) {
+    const out = [];
+    let cur = null, end = -1;
+    for (const t of tokens) {
+        const s = t.position, e = t.position + t.length;
+        if (cur && t.wordPosition === cur[0].wordPosition && (s < end || t.length === 0 || cur[cur.length - 1].length === 0)) {
+            cur.push(t); end = Math.max(end, e);
+        } else { cur = [t]; out.push(cur); end = e; }
+    }
+    return out;
+}
+
+/** 오타 교정 분석으로 고친 자리들 → { spans: [{ a, b, to, cost }], score } (a, b: 글 안의 글자 위치) */
+export function typoSpans(kiwi, text) {
+    const r = kiwi.analyze(text, MATCH_ALL, [], [], TYPO_SET, TYPO_COST);
+    if (!r.tokens.some(t => t.typoCost > 0)) return { spans: [], score: r.score };
+    const join = (ts) => ts.length ? kiwi.joinSent(ts.map((t, k) => ({ form: t.str, tag: t.tag, ...(k ? { space: 1 } : {}) })), true).str : '';
+    const spans = [];
+    for (const K of clusters(r.tokens)) {
+        if (!K.some(t => t.typoCost > 0)) continue;
+        const a = Math.min(...K.map(t => t.position)), b = Math.max(...K.map(t => t.position + t.length));
+        // 같은 어절의 앞 형태소를 함께 붙여 보고(조사·어미 꼴이 앞말에 따라 바뀐다) 앞부분을 떼어 낸다
+        const left = r.tokens.filter(t => t.wordPosition === K[0].wordPosition && t.position + t.length <= a && !K.includes(t));
+        const j0 = join(left), j1 = join([...left, ...K]);
+        if (!j1.startsWith(j0)) continue;   // 앞말과 섞여 떼어 낼 수 없으면 둔다 (드묾)
+        const to = j1.slice(j0.length);
+        if (to && to !== text.slice(a, b)) spans.push({ a, b, to, cost: K.reduce((n, t) => n + t.typoCost, 0) });
+    }
+    return { spans, score: r.score };
+}
+
+/** 첫 글자의 모음만 'ㅐ·ㅔ'(ㅒ·ㅖ, ㅙ·ㅚ·ㅞ) 사이에서 바꾸었나 */
+function firstVowelSwap(from, to) {
+    if (!from || !to || from[0] === to[0] || from.slice(1) !== to.slice(1)) return false;
+    const a = partsOf(from[0]), b = partsOf(to[0]);
+    return a[0] === b[0] && a[2] === b[2] && VOWEL_SETS.some(g => g.includes(a[1]) && g.includes(b[1]));
+}
+
+/**
+ * 한 줄의 오타 교정 → [{ a, b, from, to, cost, gap }] (어절 단위 — 앞뒤 문장 부호는 뺀다)
+ * 고친 말이 사전에 있어야 하고, 사전에 있는 말을 고치려면 문장 점수가 strictGap 이상 좋아져야 한다 (바른 글을 고치지 않게).
+ * (기준값은 일부러 틀린 글과 바른 글 3천 줄로 맞췄다 — 3이면 바른 글을 거의 건드리지 않고 사전에 있는 말의 오타를 절반쯤 잡는다)
+ */
+export function typoFixesIn(kiwi, text, dict, { skip = () => false, strictGap = 3 } = {}) {
+    if (!/[가-힣]/.test(text)) return [];
+    const { spans, score } = typoSpans(kiwi, text);
+    if (!spans.length) return [];
+    const gap = score - kiwi.analyze(text, MATCH_ALL).score;   // 오타를 고쳐 읽은 문장이 얼마나 더 자연스러운가
+    const byWord = new Map();
+    for (const sp of spans) {
+        let ws = sp.a, we = sp.b;
+        while (ws > 0 && !/\s/.test(text[ws - 1])) ws--;
+        while (we < text.length && !/\s/.test(text[we])) we++;
+        const k = ws + ':' + we;
+        if (!byWord.has(k)) byWord.set(k, { ws, we, spans: [] });
+        byWord.get(k).spans.push(sp);
+    }
+    const out = [];
+    for (const { ws, we, spans: ss } of byWord.values()) {
+        const word = text.slice(ws, we);
+        let fixed = word;
+        for (const sp of [...ss].sort((x, y) => y.a - x.a)) fixed = fixed.slice(0, sp.a - ws) + sp.to + fixed.slice(sp.b - ws);
+        const lead = word.match(/^[^가-힣A-Za-z0-9]*/)[0].length, trail = word.match(/[^가-힣A-Za-z0-9]*$/)[0].length;
+        const from = word.slice(lead, word.length - trail), to = fixed.slice(lead, fixed.length - trail);
+        if (!from || from === to || !/^[가-힣]+$/.test(from) || skip(from) || ARCHAIC.test(from)) continue;
+        if (!to.split(' ').every(x => /^[가-힣]+$/.test(x) && knownKorean(dict, x))) continue;   // 고친 말이 사전에 있어야 한다
+        if (knownKorean(dict, from) && gap < strictGap) continue;                           // 사전에 있는 말은 문맥 근거가 뚜렷할 때만
+        if (firstVowelSwap(from, to)) continue;   // 첫 글자의 'ㅐ·ㅔ'를 바꾼 것(재시도 → 제시도)은 사전에 없는 새 낱말일 때가 많다
+        out.push({ a: ws + lead, b: we - trail, from, to, cost: +ss.reduce((n, x) => n + x.cost, 0).toFixed(2), gap: +gap.toFixed(2) });
+    }
+    return out;
+}
+
 /**
  * 정밀 검사 → [{ id, a, b, from, to, type, why, src: 'lm' }]
  * lines: [{ id, text }]
@@ -141,6 +262,7 @@ const LOAN_SYL = /[스트크프즈츠쉬쥬퓨큐튜뷰퀴퀘펜텐센렌덴켄�
 export function lmFixes(lines, dict, kiwi, {
     base = [], skip = () => false, window = 4, onLine = null,
     typoGain = 8, typoMargin = 1.4, pairGain = 5, vowelGain = 9, particleGain = 4, overrideMargin = 3, properGain = 8, properMargin = 2,
+    vetoGain = 2, veto = true, typos = true, typoStrictGap = 3,
 } = {}) {
     // 다른 검사가 이미 고친 자리 — 규칙(rule)으로 고친 것은 그대로 두고, 사전(dict)으로 고친 낱말은 언어 모델로 다시 견준다
     const covering = (id, a, b) => base.find(f => f.id === id && f.a < b && a < f.b);
@@ -186,6 +308,11 @@ export function lmFixes(lines, dict, kiwi, {
             const ctx = around(i, w.core);
             const res = analyze(ctx.text);
             const toks = tokensIn(res.tokens, ctx.start, ctx.end);
+            if (prior && veto) {
+                // 사전 단계의 고침이 틀렸으면 거둬들인다 (산업은 행이·혼자 서도·학교네)
+                const why = wrongDictFix(prior, toks, ctx.start, (to) => scoreOf(i, to) - res.score, vetoGain);
+                if (why) { fixes.push({ id: line.id, a: w.ca, b: w.cb, from: w.core, withdraw: true, replaces: prior, src: 'lm', why }); return; }
+            }
             if (prior) {
                 // 사전 단계가 고친 낱말: 다른 후보가 문맥에 훨씬 자연스러우면 그것으로 바꾼다
                 // (주레 → 주례? 주에? · 세편 → 세 편? 시편?) — 띄어 쓴 후보는 점수가 원래 글과 거의 같다
@@ -252,6 +379,17 @@ export function lmFixes(lines, dict, kiwi, {
             }
             if (best) push(w, best.to, best.why || `문맥상 ${subjOf(best.to)} 맞습니다`, '문맥', best.gain, null);
         });
+        // 오타 교정 분석 — 아직 아무 고침도 없는 자리만 (거둬들인 사전 고침 자리는 다시 본다)
+        if (typos) {
+            const mine = fixes.filter(f => f.id === line.id);
+            const withdrawn = new Set(mine.filter(f => f.withdraw).map(f => f.replaces));
+            const busy = [...base.filter(f => f.id === line.id && !withdrawn.has(f)), ...mine.filter(f => !f.withdraw)];
+            for (const t of typoFixesIn(kiwi, text, dict, { skip, strictGap: typoStrictGap })) {
+                if (busy.some(f => f.a < t.b && t.a < f.b)) continue;
+                fixes.push({ id: line.id, a: t.a, b: t.b, from: t.from, to: t.to, type: spellKind(t.from, t.to),
+                    why: `${objOf(t.to)} 잘못 친 것으로 보입니다 (문맥으로 판단)`, src: 'lm', word: t.from, gain: t.gap, margin: null, typo: t.cost });
+            }
+        }
     }
     return fixes;
 }

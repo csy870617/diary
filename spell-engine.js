@@ -148,13 +148,14 @@ export async function lmDelete() {
 }
 
 /**
- * 정밀 검사 → [{ id, a, b, from, to, type, why, src: 'lm', replaces? }]
- * base: 기본 검사가 찾은 것 (그 자리는 다시 보지 않고, 사전으로 고친 낱말은 다시 견준다 — replaces로 알려 준다)
+ * 정밀 검사 → [{ id, a, b, from, to, type, why, src: 'lm', replaces?, withdraw? }]
+ * base: 기본 검사가 찾은 것 (그 자리는 다시 보지 않고, 사전으로 고친 낱말은 다시 견준다 — replaces로 알려 준다.
+ *       withdraw가 붙은 것은 사전으로 고친 것이 틀렸다는 뜻이라 목록에서 뺀다)
  * onProgress({ stage: 'open'|'check', got, total })
  */
 export async function checkDocumentLM(lines, base, { onProgress } = {}) {
     if (lmBroken) throw new Error(lmBroken);
-    const plain = base.map(({ id, a, b, from, to, type, why, src }) => ({ id, a, b, from, to, type, why, src }));
+    const plain = base.map(({ id, a, b, from, to, type, why, src, basis }) => ({ id, a, b, from, to, type, why, src, basis }));
     const res = await lmCall({ type: 'check', lines, base: plain, words: getPersonalWords() }, onProgress);
     return res.fixes || [];
 }

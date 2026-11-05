@@ -189,22 +189,32 @@ async function runPrecision(run) {
             }
         });
         if (run.seq !== runSeq) return;
-        const added = mergePrecision(run, extra);
-        setLmRow(added ? `정밀 검사 ✓ ${added}곳 더 찾았습니다` : '정밀 검사 ✓ 더 찾은 곳이 없습니다', [['삭제', 'ghost', deletePrecision]]);
+        const { added, removed } = mergePrecision(run, extra);
+        const note = [added ? `${added}곳 더 찾았습니다` : '더 찾은 곳이 없습니다', removed ? `${removed}곳은 맞는 말이라 뺐습니다` : ''].filter(Boolean).join(' · ');
+        setLmRow(`정밀 검사 ✓ ${note}`, [['삭제', 'ghost', deletePrecision]]);
     } catch (err) {
         if (run.seq !== runSeq) return;
         showLmBroken((err && err.message) || String(err));
     }
 }
 
-/** 정밀 검사 결과를 목록에 넣는다 → 새로 찾았거나 고쳐 고른 곳의 수 */
+/** 정밀 검사 결과를 목록에 넣는다 → { added: 새로 찾았거나 고쳐 고른 곳의 수, removed: 맞는 말이라 뺀 곳의 수 } */
 function mergePrecision(run, extra) {
     const body = $('editor-body');
     const index = indexText(body);
     const starts = new Map();
-    let count = 0;
+    let count = 0, removed = 0;
     for (const f of extra) {
         const key = `${f.id}:${f.a}:${f.b}`;
+        if (f.withdraw) {
+            // 기본 검사가 사전으로 고친 말을 문맥으로 보니 맞는 말이었다 — 목록에서 뺀다 (아직 남아 있을 때만)
+            const it = items.find(o => o.id === f.replaces.id && o.a === f.replaces.a && o.b === f.replaces.b && o.src === 'dict' && !o.stale);
+            if (!it) continue;
+            items = items.filter(o => o !== it);
+            it.row?.remove();
+            removed++;
+            continue;
+        }
         if (dismissed.has(key)) continue;
         if (f.replaces) {
             // 기본 검사가 사전으로 고른 말을 문맥에 맞는 말로 바꾼다 (아직 목록에 남아 있을 때만)
@@ -232,11 +242,11 @@ function mergePrecision(run, extra) {
         items.push({ ...f, where: 'body', range, ctx });
         count++;
     }
-    if (count) {
+    if (count || removed) {
         items.sort((x, y) => x.id - y.id || x.a - y.a);
         render();
     }
-    return count;
+    return { added: count, removed };
 }
 
 function lmRow() { return $('spell-lm'); }
