@@ -54,7 +54,7 @@ export function qwenDecide(pending, lm, base, scores, { addMargin = 3, spellMarg
         if ([...taken, ...added].some(f => f.id === p.id && !f.withdraw && f.a < p.b && p.a < f.b)) return;
         const to = p.options[best].to;
         const why = p.why || (p.type === '띄어쓰기' ? '한 낱말이라 붙여 씁니다' : p.type === '문맥' ? `문맥상 ${subjOf(to)} 맞습니다` : `${objOf(to)} 잘못 친 것으로 보입니다`);
-        const fix = { id: p.id, a: p.a, b: p.b, from: p.from, to, type: p.type, why: why + ' (AI 판단)', src: 'ai', word: p.word || undefined,
+        const fix = { id: p.id, a: p.a, b: p.b, from: p.from, to, type: p.type, why: why + ' (문맥으로 판단)', src: 'ai', word: p.word || undefined,
             gain: +(s[best + 1] - s[0]).toFixed(2) };
         added.push(fix);
         out.push(fix);
