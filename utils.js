@@ -284,6 +284,77 @@ export function sanitizeExternalHtml(html, extraStyleProps = []) {
     return result || null;
 }
 
+/**
+ * 붙여넣은(정화된) HTML에서 표는 표대로, 나머지 글은 서식 없는 줄로 꺼내 원래 차례대로 잇는다.
+ * 반환: { html: 편집기에 넣을 HTML, tables: 표 개수, hasOutsideText: 표 밖에 글이 있는가 }
+ * 예전에는 표가 하나라도 있으면 첫 표만 넣고, 앞뒤 글과 두 번째 표부터는 말없이 버렸다.
+ */
+function pastedHtmlWithTables(sanitizedHtml) {
+    if (!sanitizedHtml) return { html: '', tables: 0, hasOutsideText: false };
+    const doc = new DOMParser().parseFromString(sanitizedHtml, 'text/html');
+    const BREAK = '\u0001';   // 문단·줄바꿈 자리 표시 (HTML 안의 줄바꿈 글자는 화면에서 빈칸일 뿐이라 따로 표시한다)
+    const BLOCK = /^(P|DIV|LI|UL|OL|H[1-6]|BLOCKQUOTE|PRE|SECTION|ARTICLE|HEADER|FOOTER|HR|DL|DT|DD)$/;
+    const parts = [];
+    const walk = (node) => {
+        if (node.nodeType === Node.TEXT_NODE) { parts.push({ text: node.data }); return; }
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+        if (node.tagName === 'TABLE') { parts.push({ table: node }); return; }
+        if (node.tagName === 'BR') { parts.push({ text: BREAK }); return; }
+        const block = BLOCK.test(node.tagName);
+        if (block) parts.push({ text: BREAK });
+        node.childNodes.forEach(walk);
+        if (block) parts.push({ text: BREAK });
+    };
+    doc.body.childNodes.forEach(walk);
+
+    const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    let html = '', buf = '', tables = 0, hasOutsideText = false, lastWasTable = false;
+    const flush = () => {
+        const lines = buf.replace(/\s+/g, ' ').split(BREAK).map(l => l.trim());
+        buf = '';
+        while (lines.length && !lines[0]) lines.shift();
+        while (lines.length && !lines[lines.length - 1]) lines.pop();
+        if (!lines.length) return;
+        hasOutsideText = true;
+        lastWasTable = false;
+        // 빈 줄이 여러 개 이어지면 하나만 남긴다
+        const kept = lines.filter((l, i) => l || lines[i - 1]);
+        html += kept.map(l => l ? `<div>${esc(l)}</div>` : '<div><br></div>').join('');
+    };
+    parts.forEach(p => {
+        if (p.table) {
+            flush();
+            html += `<div class="table-wrapper"><table>${p.table.innerHTML}</table></div>`;
+            tables++;
+            lastWasTable = true;
+        } else buf += p.text;
+    });
+    flush();
+    // 표로 끝나면 그 아래에 이어 쓸 줄을 하나 둔다 (예전과 같다)
+    if (lastWasTable) html += '<p><br></p>';
+    return { html, tables, hasOutsideText };
+}
+
+/**
+ * 표가 rows×cols보다 작으면 빈 줄·칸을 덧붙인다 (붙여넣는 칸이 넘칠 때).
+ * 합친 칸(colspan·rowspan)이 있는 표는 자리 계산이 어긋나므로 늘리지 않는다.
+ */
+function ensureTableSize(table, rows, cols) {
+    if (!table || table.querySelector('td[colspan]:not([colspan="1"]), td[rowspan]:not([rowspan="1"]), th[colspan]:not([colspan="1"]), th[rowspan]:not([rowspan="1"])')) return;
+    const body = table.tBodies[0] || table;
+    while (table.rows.length < rows) {
+        const tr = document.createElement('tr');
+        body.appendChild(tr);
+    }
+    Array.from(table.rows).forEach(tr => {
+        while (tr.cells.length < cols) {
+            const td = document.createElement('td');
+            td.innerHTML = '<br>';
+            tr.appendChild(td);
+        }
+    });
+}
+
 export function setupLinkPreservation(editorElement, callbacks = {}) {
     if (!editorElement) return;
     
@@ -332,6 +403,14 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
         return { cellData, rows: maxRow - minRow + 1, cols: maxCol - minCol + 1 };
     }
     
+    /** 고른 칸들의 글자만 탭(칸)·줄바꿈(줄)으로 이어 쓴다 — 다른 앱에 붙여도 표처럼 보이게. 비었으면 표시용 글자 */
+    function cellsToPlainText(data) {
+        const text = (data.cellData || []).map(row => row.map(html =>
+            (new DOMParser().parseFromString(html || '', 'text/html').body.textContent || '').replace(/[\t\r\n]+/g, ' ').trim()
+        ).join('\t')).join('\n');
+        return text.trim() ? text : `__cells_${Date.now()}`;
+    }
+
     /**
      * 셀 데이터를 대상 셀에 붙여넣기
      */
@@ -343,6 +422,8 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
 
         const startRow = targetCell.parentElement.rowIndex;
         const startCol = targetCell.cellIndex;
+        const maxCols = Math.max(0, ...data.cellData.map(r => r.length));
+        ensureTableSize(table, startRow + data.cellData.length, startCol + maxCols);
 
         data.cellData.forEach((rowData, rIdx) => {
             rowData.forEach((cellContent, cIdx) => {
@@ -558,9 +639,9 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
 
                 const data = getSelectedCellsData();
                 if (data) {
-                    // 마커를 시스템 클립보드(text/plain)에 기록하여, 붙여넣기 시
-                    // 마커가 일치할 때만 셀 클립보드를 사용 (이미지 copyId 패턴과 동일)
-                    const copyId = `__cells_${Date.now()}`;
+                    // 시스템 클립보드(text/plain)에는 칸 글자를 탭·줄로 이어 쓴 것을 넣고, 붙여넣을 때 그 글이
+                    // 같으면 이 표에서 복사한 것으로 본다. (예전에는 '__cells_숫자'를 넣어, 다른 앱에 붙이면 그 글자가 나왔다)
+                    const copyId = cellsToPlainText(data);
                     data.copyId = copyId;
                     globalCellClipboard = data;
 
@@ -630,8 +711,8 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
                 
                 const data = getSelectedCellsData();
                 if (data) {
-                    // 마커를 시스템 클립보드에 기록 (복사 경로와 동일한 패턴)
-                    const copyId = `__cells_${Date.now()}`;
+                    // 칸 글자를 시스템 클립보드에 기록 (복사 경로와 같은 방식)
+                    const copyId = cellsToPlainText(data);
                     data.copyId = copyId;
                     globalCellClipboard = data;
 
@@ -777,8 +858,11 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
         e.clipboardData.setData('text/plain', text);
         internalClipboard = { html, text };
 
-        const range = selection.getRangeAt(0);
-        range.deleteContents();
+        // 되돌리기 시작점을 먼저 남기고(예전에는 없어서 잘라내기 전으로 되돌릴 수 없었다),
+        // 지우기는 브라우저 편집 명령으로 한다. range.deleteContents()는 표 안에서 표 밖까지 고르면
+        // 칸과 줄을 통째로 뜯어내 표가 깨졌다.
+        if (callbacks.onBeforePaste) callbacks.onBeforePaste();
+        if (!document.execCommand('delete')) selection.getRangeAt(0).deleteContents();
 
         if (callbacks.onAfterPaste) callbacks.onAfterPaste();
         e.preventDefault();
@@ -796,6 +880,11 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
 
     async function compressImageDataUrl(dataUrl, maxWidth = 800, quality = 0.7) {
         if (!dataUrl) return null;
+        // 투명한 부분이 있는 그림은 PNG로 둔다 (script.js의 공용 함수). 붙여넣기만 늘 JPEG로 바꿔서
+        // 투명한 배경의 그림(로고·스티커 등)을 붙여 넣으면 배경이 까맣게 됐다.
+        if (typeof window.compressImageDataUrl === 'function') {
+            try { return await window.compressImageDataUrl(dataUrl, maxWidth, quality); } catch (e) { return dataUrl; }
+        }
         return new Promise((resolve) => {
             const img = new Image();
             img.onload = () => {
@@ -873,7 +962,8 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
         // 시스템 클립보드의 마커가 일치하지 않으면 스테일 셀 클립보드 무시
         // (다른 앱에서 새로 복사한 경우)
         if (globalCellClipboard.cellData) {
-            const clipText = e.clipboardData?.getData('text/plain') || '';
+            // 윈도우는 클립보드의 줄 끝을 \r\n으로 바꿔 줄 수 있어 맞춰서 견준다
+            const clipText = (e.clipboardData?.getData('text/plain') || '').replace(/\r\n?/g, '\n');
             if (clipText && clipText !== globalCellClipboard.copyId) {
                 globalCellClipboard = { cellData: null, rows: 0, cols: 0 };
             }
@@ -937,8 +1027,13 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
             let html = e.clipboardData.getData('text/html');
             let text = e.clipboardData.getData('text/plain');
 
-            // 외부에서 복사한 테이블이 있고 현재 셀 안에 있는 경우 → 셀 내용 교체
-            if (html && html.includes('<table') && currentCell) {
+            // 붙여넣은 글에 표가 있으면, 표는 표대로·나머지 글은 서식 없는 줄로 차례대로 꺼낸다.
+            // (예전에는 표가 하나라도 있으면 첫 표만 넣고, 앞뒤 글과 두 번째 표부터는 말없이 버렸다)
+            const withTables = (html && html.includes('<table')) ? pastedHtmlWithTables(sanitizeExternalHtml(html)) : null;
+
+            // 외부에서 복사한 표 '하나만' 있고 현재 셀 안에 있는 경우 → 셀 내용 교체
+            // (표 밖 글이나 표가 더 있으면 셀에 다 담을 수 없으니 아래의 글 붙여넣기로 넘긴다 — 글은 남는다)
+            if (withTables && withTables.tables === 1 && !withTables.hasOutsideText && currentCell) {
                 const table = currentCell.closest('table');
                 if (table) {
                     const parser = new DOMParser();
@@ -948,6 +1043,9 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
                     if (pastedTable) {
                         const startRow = currentCell.parentElement.rowIndex;
                         const startCol = currentCell.cellIndex;
+                        // 붙여넣는 표가 더 크면 줄·칸을 늘린다 (예전에는 넘치는 칸의 값이 말없이 버려졌다)
+                        const pastedCols = Math.max(0, ...Array.from(pastedTable.rows).map(r => r.cells.length));
+                        ensureTableSize(table, startRow + pastedTable.rows.length, startCol + pastedCols);
 
                         Array.from(pastedTable.rows).forEach((pastedRow, rIdx) => {
                             const targetRow = table.rows[startRow + rIdx];
@@ -967,18 +1065,11 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
                 }
             }
 
-            // 외부에서 복사한 테이블이 있고 표 밖인 경우 → 새 표로 삽입
-            if (html && html.includes('<table') && !currentCell) {
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(sanitizeExternalHtml(html), 'text/html');
-                const pastedTable = doc.querySelector('table');
-
-                if (pastedTable) {
-                    const tableHtml = `<div class="table-wrapper"><table>${pastedTable.innerHTML}</table></div><p><br></p>`;
-                    document.execCommand('insertHTML', false, tableHtml);
-                    if (callbacks.onAfterPaste) callbacks.onAfterPaste();
-                    return;
-                }
+            // 외부에서 복사한 표가 있고 표 밖인 경우 → 표와 그 앞뒤 글을 모두 넣는다
+            if (withTables && withTables.tables > 0 && !currentCell) {
+                document.execCommand('insertHTML', false, withTables.html);
+                if (callbacks.onAfterPaste) callbacks.onAfterPaste();
+                return;
             }
 
             // 내부에서 복사한 것인지 확인 (텍스트 내용이 같으면 내부 복사)
@@ -997,7 +1088,7 @@ export function setupLinkPreservation(editorElement, callbacks = {}) {
                     .replace(/&/g, '&amp;')
                     .replace(/</g, '&lt;')
                     .replace(/>/g, '&gt;')
-                    .replace(/\n/g, '<br>');
+                    .replace(/\r\n?|\n/g, '<br>');   // 윈도우의 줄 끝(\r\n)도 한 줄로 (남은 \r 때문에 줄 간격이 두 배로 보였다)
 
                 cleanText = cleanText.replace(/(https?:\/\/[^\s<]+)/g, (match) => {
                     const { url, trail } = splitTrailingPunctuation(match);

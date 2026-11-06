@@ -7,8 +7,8 @@
     <title>신앙일지 | Faith Log</title>
     <!-- 앱 버전: 배포할 때마다 이 값, 아래 import map, version.json을 함께 올린다.
          (화면을 다시 열 때 version.json과 비교해 새 버전이면 자동으로 새로고침한다) -->
-    <meta name="app-version" content="2026.11.6.3">
-    <link rel="stylesheet" href="style.css?v=2026.11.6.3">
+    <meta name="app-version" content="2026.11.6.4">
+    <link rel="stylesheet" href="style.css?v=2026.11.6.4">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
     <script>
         // 페이지 로드 전 다크모드 적용 (깜빡임 방지)
@@ -22,8 +22,9 @@
         })();
     </script>
     <!-- 아이콘은 저장소에 함께 둔다. 예전에는 unpkg의 스크립트가 6가지 굵기의 CSS를 심는 방식이라,
-         그 스크립트 하나만 막히거나 늦어도 화면의 아이콘이 통째로 사라졌다. -->
-    <link rel="preload" href="vendor/phosphor/Phosphor.woff2?v=1" as="font" type="font/woff2" crossorigin>
+         그 스크립트 하나만 막히거나 늦어도 화면의 아이콘이 통째로 사라졌다.
+         미리 받기 주소는 regular.css가 부르는 주소와 똑같아야 한다 (?v=를 붙이면 같은 글꼴을 두 번 받는다). -->
+    <link rel="preload" href="vendor/phosphor/Phosphor.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="vendor/phosphor/regular.css?v=1">
     <link rel="stylesheet" href="vendor/phosphor/fill.css?v=1">
     <!-- 아이콘과 같은 이유로 이 세 가지도 저장소에 함께 둔다. CDN이 막히면
@@ -461,30 +462,30 @@
     <script type="importmap">
     {
         "imports": {
-            "./state.js": "./state.js?v=2026.11.6.3",
-            "./data.js": "./data.js?v=2026.11.6.3",
-            "./ui.js": "./ui.js?v=2026.11.6.3",
-            "./editor.js": "./editor.js?v=2026.11.6.3",
-            "./auth.js": "./auth.js?v=2026.11.6.3",
-            "./drive.js": "./drive.js?v=2026.11.6.3",
-            "./tts.js": "./tts.js?v=2026.11.6.3",
-            "./neural-tts.js": "./neural-tts.js?v=2026.11.6.3",
-            "./speech-text.js": "./speech-text.js?v=2026.11.6.3",
-            "./spell-text.js": "./spell-text.js?v=2026.11.6.3",
-            "./spell-words.js": "./spell-words.js?v=2026.11.6.3",
-            "./spell-engine.js": "./spell-engine.js?v=2026.11.6.3",
-            "./spell-hunspell.js": "./spell-hunspell.js?v=2026.11.6.3",
-            "./spell-lm.js": "./spell-lm.js?v=2026.11.6.3",
-            "./spell-qwen.js": "./spell-qwen.js?v=2026.11.6.3",
-            "./spellcheck.js": "./spellcheck.js?v=2026.11.6.3",
-            "./faiths-sso.js": "./faiths-sso.js?v=2026.11.6.3",
-            "./storage.js": "./storage.js?v=2026.11.6.3",
-            "./utils.js": "./utils.js?v=2026.11.6.3",
-            "./formula.js": "./formula.js?v=2026.11.6.3",
-            "./config.js": "./config.js?v=2026.11.6.3"
+            "./state.js": "./state.js?v=2026.11.6.4",
+            "./data.js": "./data.js?v=2026.11.6.4",
+            "./ui.js": "./ui.js?v=2026.11.6.4",
+            "./editor.js": "./editor.js?v=2026.11.6.4",
+            "./auth.js": "./auth.js?v=2026.11.6.4",
+            "./drive.js": "./drive.js?v=2026.11.6.4",
+            "./tts.js": "./tts.js?v=2026.11.6.4",
+            "./neural-tts.js": "./neural-tts.js?v=2026.11.6.4",
+            "./speech-text.js": "./speech-text.js?v=2026.11.6.4",
+            "./spell-text.js": "./spell-text.js?v=2026.11.6.4",
+            "./spell-words.js": "./spell-words.js?v=2026.11.6.4",
+            "./spell-engine.js": "./spell-engine.js?v=2026.11.6.4",
+            "./spell-hunspell.js": "./spell-hunspell.js?v=2026.11.6.4",
+            "./spell-lm.js": "./spell-lm.js?v=2026.11.6.4",
+            "./spell-qwen.js": "./spell-qwen.js?v=2026.11.6.4",
+            "./spellcheck.js": "./spellcheck.js?v=2026.11.6.4",
+            "./faiths-sso.js": "./faiths-sso.js?v=2026.11.6.4",
+            "./storage.js": "./storage.js?v=2026.11.6.4",
+            "./utils.js": "./utils.js?v=2026.11.6.4",
+            "./formula.js": "./formula.js?v=2026.11.6.4",
+            "./config.js": "./config.js?v=2026.11.6.4"
         }
     }
     </script>
-    <script type="module" src="script.js?v=2026.11.6.3"></script>
+    <script type="module" src="script.js?v=2026.11.6.4"></script>
 </body>
 </html>

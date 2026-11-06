@@ -39,6 +39,7 @@ export const state = {
     wheelDebounceTimer: null,
     autoSaveTimer: null,
     isSelectMode: false,
+    ignorePopUntil: 0,     // 앱이 스스로 걷어 낸 뒤로가기 기록(선택 모드)의 popstate를 무시할 때까지의 시각
     selectedEntries: []
 };
 

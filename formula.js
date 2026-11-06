@@ -193,6 +193,50 @@ export function recalcTable(table) {
     });
 }
 
+/**
+ * 줄·칸을 넣거나 지운 뒤 표 안 계산식의 칸 주소를 엑셀처럼 맞춘다.
+ *   atRow / atCol: 새로 넣은 줄·칸의 번호, 또는 지운 줄·칸의 번호 (0부터). 바뀌지 않는 쪽은 null
+ *   delta: +1 (넣음) / -1 (지움)
+ * 예전에는 주소를 그대로 둬서, 합계 위에 줄을 넣으면 합계가 엉뚱한 칸을 더했다.
+ * 지운 칸 하나만 가리키던 주소는 계산이 '#수식'이 되게 둔다 (엉뚱한 칸을 조용히 더하지 않게).
+ */
+export function shiftFormulaRefs(table, { atRow = null, atCol = null, delta }) {
+    if (!table || !delta) return;
+    const BROKEN = 'A0';   // parseRef가 받지 않는 주소
+    const label = (col, row) => columnLabel(col) + (row + 1);
+    const moveOne = (idx, at) => {
+        if (at === null) return idx;
+        if (delta > 0) return idx >= at ? idx + 1 : idx;
+        if (idx === at) return null;              // 지운 자리
+        return idx > at ? idx - 1 : idx;
+    };
+    const moveSpan = (s, e, at) => {
+        if (at === null) return [s, e];
+        if (delta > 0) return [s >= at ? s + 1 : s, e >= at ? e + 1 : e];   // 사이에 넣으면 구간이 늘어난다
+        return [s > at ? s - 1 : s, e >= at ? e - 1 : e];                    // 지우면 구간이 줄어든다
+    };
+    const fixOne = (ref) => {
+        const p = parseRef(ref);
+        if (!p) return ref;
+        const r = moveOne(p.row, atRow), c = moveOne(p.col, atCol);
+        return (r === null || c === null) ? BROKEN : label(c, r);
+    };
+    const fixRange = (a, b) => {
+        const p = parseRef(a), q = parseRef(b);
+        if (!p || !q) return `${a}:${b}`;
+        const [r1, r2] = moveSpan(Math.min(p.row, q.row), Math.max(p.row, q.row), atRow);
+        const [c1, c2] = moveSpan(Math.min(p.col, q.col), Math.max(p.col, q.col), atCol);
+        if (r2 < r1 || c2 < c1) return BROKEN;   // 구간이 통째로 지워졌다
+        return `${label(c1, r1)}:${label(c2, r2)}`;
+    };
+    table.querySelectorAll('td[data-formula], th[data-formula]').forEach(cell => {
+        const f = cell.getAttribute('data-formula') || '';
+        const nf = f.replace(/([A-Za-z]+[0-9]+)\s*:\s*([A-Za-z]+[0-9]+)|([A-Za-z]+[0-9]+)/g,
+            (m, a, b, single) => single ? fixOne(single) : fixRange(a, b));
+        if (nf !== f) cell.setAttribute('data-formula', nf);
+    });
+}
+
 /** 본문 전체의 표를 다시 계산한다 (글을 열 때) */
 export function recalcAll(root) {
     if (!root) return;
