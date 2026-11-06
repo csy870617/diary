@@ -277,7 +277,14 @@ let downloadAbort = null;
  */
 export async function downloadNeuralVoice(onProgress) {
     if (!isNeuralSupported()) throw new Error('이 브라우저에서는 자연스러운 음성을 쓸 수 없습니다.');
+    // '취소'가 처음부터 듣도록 맨 앞에서 만든다. 예전에는 목록 받기·저장 공간 확인을 마친 뒤에 만들어,
+    // 그사이(데이터 요금 안내 직후) 누른 취소는 듣지 않고 수백 MB를 그대로 받았다.
+    const controller = new AbortController();
+    downloadAbort = controller;
+    const stopIfCancelled = () => { if (controller.signal.aborted) throw new DOMException('내려받기를 취소했습니다.', 'AbortError'); };
+    try {
     const remote = await fetchManifest();
+    stopIfCancelled();
     const manifest = { ...remote, files: await applicableFiles(remote) };
     // 이미 받아 둔 파일은 다시 받지 않으므로, 실제로 받을 양만 센다 (업데이트 때 용량 확인용)
     let total = 0;
@@ -296,9 +303,8 @@ export async function downloadNeuralVoice(onProgress) {
     } catch (e) {
         if (/저장 공간/.test(e.message)) throw e;
     }
+    stopIfCancelled();
 
-    const controller = new AbortController();
-    downloadAbort = controller;
     const base = voiceBase();
     await openDb();   // 저장소를 열 수 없으면 받기 전에 알린다
     let done = 0;
@@ -352,6 +358,9 @@ export async function downloadNeuralVoice(onProgress) {
         return manifest;
     } finally {
         downloadAbort = null;
+    }
+    } finally {
+        if (downloadAbort === controller) downloadAbort = null;
     }
 }
 
@@ -459,12 +468,16 @@ function spawnWorker(role, forceWasm) {
         else p.reject(new Error(d.message || '음성을 만들지 못했습니다.'));
     };
     // 작업자가 메모리 부족 등으로 죽으면 기다리던 요청이 영영 끝나지 않아 재생이 멈췄다 → 실패로 알린다
+    // 작업자 파일 자체를 받지 못한 경우(오프라인 등)에도 여기로 온다. 그때는 '준비'를 기다리던 쪽도 끝내야 한다
+    // (예전에는 준비가 영영 끝나지 않아 '자연스러운 음성을 준비하고 있습니다…'에서 멈췄다).
     w.onerror = (e) => {
         e.preventDefault?.();
         pending.forEach((p, id) => { pending.delete(id); p.reject(new Error('음성 작업자가 멈췄습니다')); });
+        entry.rejectReady?.(new Error('자연스러운 음성을 열지 못했습니다. 인터넷 연결을 확인해 주세요.'));
         shutdownNeural();
     };
     entry.ready = new Promise((resolve, reject) => {
+        entry.rejectReady = reject;
         const h = (e) => {
             const d = e.data || {};
             if (d.type === 'ready') { w.removeEventListener('message', h); if (d.model) modelName = d.model; resolve(d.backend); }
@@ -605,7 +618,8 @@ export function ensureNeuralReady() {
 }
 
 export function shutdownNeural() {
-    workers.forEach(x => x.w.terminate());
+    // 아직 준비 중이던 작업자의 '준비'도 실패로 끝낸다 (닫은 작업자는 더는 아무 소식도 보내지 않는다)
+    workers.forEach(x => { x.rejectReady?.(new Error('음성 작업자를 닫았습니다')); x.w.terminate(); });
     workers = [];
     poolMode = false;
     workerReady = null;

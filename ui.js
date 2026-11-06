@@ -1,7 +1,7 @@
-import { state, saveCategoriesToLocal, getCategorySort, migrateRootOrder, isReadOnlyView } from './state.js';
+import { state, saveCategoriesToLocal, getCategorySort, migrateRootOrder } from './state.js';
 import { updateEntryField, bulkUpdateEntryField, emptyTrash, saveEntry, restoreEntry, permanentDelete } from './data.js';
 import { openEditor, toggleViewMode, applyFontStyle, turnPage, formatDoc, changeGlobalFontSize, insertSticker, insertImage, sanitizeEntryHtml } from './editor.js';
-import { syncNow, syncSoon } from './drive.js';
+import { syncSoon } from './drive.js';
 import { saveEntries } from './storage.js'; 
 
 const getEl = (id) => document.getElementById(id);
@@ -36,12 +36,38 @@ export function applyCategorySort() {
  * 글이 검색어에 맞는가 — 제목·소제목·본문에서 찾는다.
  * 대소문자는 가리지 않고, 띄어 쓴 여러 낱말은 모두 들어 있어야 한다 ('감사 기도' → 둘 다 있는 글).
  */
+// 검색할 때마다 모든 글의 HTML을 다시 읽으면, 글이 많을 때(사진 든 글 수백 개) 휴대폰에서 한 글자 칠 때마다
+// 1초 가까이 멈췄다. 본문이 그대로면 전에 뽑아 둔 글자를 다시 쓴다. 사진(<img>)은 글자가 없으니 읽기 전에 뺀다.
+const searchTextCache = new Map();   // 글 id → { body, text }
+function bodySearchText(entry) {
+    const body = entry.body || '';
+    const hit = searchTextCache.get(entry.id);
+    if (hit && hit.body === body) return hit.text;
+    const text = stripHtml(body.replace(/<img\b[^>]*>/gi, ' ')).toLowerCase();
+    searchTextCache.set(entry.id, { body, text });
+    return text;
+}
+
 function matchesSearch(entry, keyword) {
     const terms = (keyword || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
     if (!terms.length) return true;
-    const text = [entry.title || '', entry.subtitle || '', stripHtml(entry.body)].join('\n').toLowerCase();
-    return terms.every(t => text.includes(t));
+    const head = ((entry.title || '') + '\n' + (entry.subtitle || '')).toLowerCase();
+    const body = bodySearchText(entry);
+    return terms.every(t => head.includes(t) || body.includes(t));
 }
+
+// 글이 가리키는 주제가 아예 없으면(다른 기기에서 영구 삭제한 주제에 이 기기가 그사이 쓴 글, 로그인 전에 기본 주제에 쓴 글이
+// 동기화로 그 주제가 빠진 경우 등) 어느 탭에도 안 보이고 검색·휴지통에도 없어 사라진 것처럼 됐다.
+// 그런 글은 첫 주제에 보여 준다. 글 자체는 바꾸지 않으므로 주제가 돌아오면 원래 자리에 다시 보인다.
+// (휴지통에 있는 주제의 글은 '없는 주제'가 아니다 — 주제를 복구하면 함께 돌아오도록 그대로 둔다)
+function entryTopicId(entry, catIds) {
+    if (catIds.has(entry.category)) return entry.category;
+    const first = state.categoryOrder.map(id => state.allCategories.find(c => c.id === id)).find(c => c && !c.isDeleted)
+        || state.allCategories.find(c => !c.isDeleted);
+    return first ? first.id : entry.category;
+}
+function categoryIdSet() { return new Set(state.allCategories.map(c => c && c.id)); }
+export function isInTopic(entry, topicId, catIds = categoryIdSet()) { return entryTopicId(entry, catIds) === topicId; }
 
 export function renderEntries(keyword) {
     // 호출부가 키워드를 넘기지 않아도 현재 검색어를 유지해,
@@ -59,10 +85,11 @@ export function renderEntries(keyword) {
         return;
     }
 
+    const catIds = categoryIdSet();
     const filtered = state.entries.filter(entry => 
         !entry.isPurged && 
         !entry.isDeleted && 
-        entry.category === state.currentCategory && 
+        isInTopic(entry, state.currentCategory, catIds) && 
         matchesSearch(entry, keyword)
     );
     
@@ -102,13 +129,9 @@ export function renderEntries(keyword) {
         } else {
             div.onclick = () => {
                 openEditor(true, entry);
+                // 편집 화면 → 읽기 화면으로 바꾸면서 toggleViewMode가 동기화를 한 번 부른다.
+                // (예전에는 여기서 한 번 더 불러, 글을 열 때마다 클라우드 파일을 두 번 받고 두 번 올렸다)
                 toggleViewMode('readOnly');
-                // 작성 모달이 편집 가능한 모드로 열려 있으면 동기화 금지 (작성 중 내용 유실 방지)
-                const writeModal = getEl('write-modal');
-                const isEditingOpen = writeModal && !writeModal.classList.contains('hidden') && !isReadOnlyView();
-                if (!isEditingOpen && window.gapi && gapi.client && gapi.client.getToken()) {
-                    syncNow();
-                }
             };
         }
 
@@ -1081,7 +1104,8 @@ function descendantFolderIds(folderId) {
 
 /** 이 주제에 들어 있는 글 수 */
 function topicEntryCount(topicId) {
-    return state.entries.filter(e => !e.isDeleted && !e.isPurged && e.category === topicId).length;
+    const catIds = categoryIdSet();
+    return state.entries.filter(e => !e.isDeleted && !e.isPurged && isInTopic(e, topicId, catIds)).length;
 }
 
 /** 맨 위에서 이 폴더까지의 경로 [바깥폴더, …, 이폴더] */
@@ -1315,8 +1339,11 @@ function toggleEntrySelection(id) {
 }
 
 export function toggleSelectMode() {
-    state.isSelectMode = !state.isSelectMode;
+    if (state.isSelectMode) { exitSelectMode(); return; }
+    state.isSelectMode = true;
     state.selectedEntries = [];
+    // 휴대폰의 뒤로 단추가 앱을 떠나지 않고 선택 모드만 끝내도록 기록을 한 칸 남긴다 (script.js의 popstate)
+    if (!history.state || history.state.modal !== 'select') history.pushState({ modal: 'select' }, null, '');
     const selectBtn = getEl('select-mode-btn');
     if (selectBtn) {
         selectBtn.classList.toggle('active', state.isSelectMode);
@@ -1332,6 +1359,12 @@ export function toggleSelectMode() {
 export function exitSelectMode() {
     state.isSelectMode = false;
     state.selectedEntries = [];
+    // 선택 모드로 들어갈 때 남긴 기록을 걷어 낸다 (안 그러면 뒤로 단추를 한 번 더 눌러야 했다).
+    // 이때 생기는 popstate는 script.js가 1초 안에 한 번 무시한다.
+    if (history.state && history.state.modal === 'select') {
+        state.ignorePopUntil = Date.now() + 1000;
+        history.back();
+    }
     const selectBtn = getEl('select-mode-btn');
     if (selectBtn) selectBtn.classList.remove('active');
     const bulkBar = getEl('bulk-action-bar');
@@ -1345,8 +1378,9 @@ export function selectAllEntries() {
     // 검색으로 목록을 좁힌 상태에서는 화면에 보이는 글만 선택 대상으로 삼는다
     // (안 보이는 글까지 선택돼 일괄 이동/PDF가 의도치 않은 글에 적용되는 것 방지)
     const keyword = getEl('search-input')?.value || '';
+    const catIds = categoryIdSet();
     const filtered = state.entries.filter(entry =>
-        !entry.isPurged && !entry.isDeleted && entry.category === state.currentCategory &&
+        !entry.isPurged && !entry.isDeleted && isInTopic(entry, state.currentCategory, catIds) &&
         matchesSearch(entry, keyword)
     );
     const filteredIds = filtered.map(e => e.id);

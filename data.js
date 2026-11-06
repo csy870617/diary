@@ -1,14 +1,23 @@
 import { state, saveCategoriesToLocal } from './state.js';
-import { saveEntries, loadEntries } from './storage.js';
+import { saveEntries, loadEntries, setEntriesMergedHandler, mergeByModifiedAt } from './storage.js';
 import { renderEntries, renderTrash, renderFolders, renderTabs } from './ui.js';
 import { syncSoon } from './drive.js';
-import { getCleanBodyHtml } from './editor.js';
+import { getCleanBodyHtml, isUnchangedSinceOpen } from './editor.js';
 
 // 같은 밀리초에 여러 번 호출돼도 충돌하지 않도록 임의 접미사를 붙인 ID 생성
 // (drive.js의 동기화 충돌 사본 생성에서도 같은 규칙을 쓰도록 export)
 export function genEntryId() {
     return Date.now().toString() + '_' + Math.random().toString(36).slice(2, 7);
 }
+
+// 다른 탭(창)이 그사이 저장한 글을 저장소가 합쳐 썼을 때, 이 탭의 목록에도 들인다.
+// 들이지 않으면 이 탭의 다음 저장이 그 글들을 다시 빼고 써 버린다. (storage.js의 설명 참고)
+setEntriesMergedHandler((storedList) => {
+    const m = mergeByModifiedAt(state.entries, storedList);
+    if (!m.changed) return;
+    state.entries = m.list;
+    renderEntries();
+});
 
 // 같은 알림이 반복해서 뜨지 않도록 한 번만 안내한다.
 let quotaAlertShown = false;
@@ -19,8 +28,12 @@ function safeLocalSave() {
         if (ok) { quotaAlertShown = false; return; }
         if (quotaAlertShown) return;
         quotaAlertShown = true;
+        // 로그인(동기화)하지 않았으면 드라이브에도 없다. 예전에는 누구에게나 '드라이브에 저장되니 괜찮다'고 안내했다.
+        const synced = localStorage.getItem('is_faith_logged_in') === 'true';
         alert("이 기기의 저장 공간이 가득 찼습니다.\n\n" +
-              "글은 구글 드라이브에 계속 저장되니 내용이 사라지지는 않습니다.\n" +
+              (synced
+                ? "글은 구글 드라이브에 계속 저장되니 내용이 사라지지는 않습니다.\n"
+                : "지금 쓴 내용이 이 기기에 저장되지 않았습니다. 창을 닫으면 사라질 수 있으니,\n위의 '동기화'로 구글 드라이브에 보관하거나 공간을 먼저 확보해 주세요.\n") +
               "사진이 많은 오래된 글을 정리하거나, 브라우저 저장 공간을 확보해 주세요.");
     }).catch(err => console.error("로컬 저장 실패:", err));
     return true;
@@ -81,6 +94,8 @@ export async function saveEntry() {
             && old.fontFamily === state.currentFontFamily && old.fontSize === state.currentFontSize) {
             return;
         }
+        // 읽기만 하고 닫은 경우: 열면서 화면에만 붙은 것(링크 표시·기본 글꼴 등) 때문에 달라 보일 뿐이다
+        if (isUnchangedSinceOpen(old, title, subtitle, body)) return;
         state.entries[index] = {
             ...old,
             title, subtitle, body,

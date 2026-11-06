@@ -11,6 +11,9 @@ let tokenClient;
 let gapiInited = false;
 let gisInited = false;
 let isSyncing = false;
+// 아직 클라우드에 올리지 못한 변경이 있는가 (업로드 실패·토큰 만료 등).
+// 주기 확인(받기만 하는 동기화)이 성공해도 점을 초록으로 바꾸지 않고, 대신 올리기까지 하게 한다.
+let unsentChanges = false;
 let pendingSync = false;
 let lastCloudModifiedTime = null;
 let dbFileId = null; // 마지막으로 확인한 클라우드 DB 파일 id (pagehide 즉시 업로드용 캐시)
@@ -108,7 +111,9 @@ async function ensureValidToken(isAutoSave = false) {
 
     // 1. 토큰이 유효한 경우 (만료 5분 전까지 유효)
     if (storedToken && storedExp && now < (parseInt(storedExp) - 300000)) {
-        if (!gapi.client.getToken()) {
+        // 구글 스크립트가 아직 없거나(오프라인으로 열었을 때) 준비 전이면 토큰을 걸 곳이 없다.
+        // 예전에는 여기서 예외가 나서 화면으로 돌아올 때마다 오류가 쌓였다. 준비되면 initGoogleDrive가 건다.
+        if (typeof gapi !== 'undefined' && gapi.client && !gapi.client.getToken()) {
             gapi.client.setToken({ access_token: storedToken });
         }
         return true;
@@ -281,7 +286,9 @@ export async function ensureTokenOnResume() {
     const storedToken = localStorage.getItem('faith_token');
     const storedExp = localStorage.getItem('faith_token_exp');
     if (storedToken && storedExp && now < (parseInt(storedExp) - 300000)) {
-        if (!gapi.client.getToken()) {
+        // 구글 스크립트가 아직 없거나(오프라인으로 열었을 때) 준비 전이면 토큰을 걸 곳이 없다.
+        // 예전에는 여기서 예외가 나서 화면으로 돌아올 때마다 오류가 쌓였다. 준비되면 initGoogleDrive가 건다.
+        if (typeof gapi !== 'undefined' && gapi.client && !gapi.client.getToken()) {
             gapi.client.setToken({ access_token: storedToken });
         }
         return true;
@@ -445,6 +452,13 @@ export function handleAuthClick() {
     if (silentRefreshAbortFn) {
         silentRefreshAbortFn();
     }
+    if (!tokenClient) {
+        // 구글 로그인 도구를 아직 받지 못했다 (인터넷이 막혔거나, 차단 앱·기능이 구글 주소를 막은 경우).
+        // 예전에는 단추를 눌러도 아무 반응이 없어 앱이 멈춘 것처럼 보였다.
+        reloadGoogleScripts();
+        alert('구글 로그인 도구를 불러오지 못했습니다.\n인터넷 연결을 확인한 뒤 잠시 후 다시 눌러 주세요.');
+        return;
+    }
     if (tokenClient) {
         // 유저 로그인 응답이 mainTokenCallback으로 처리되도록 보장
         tokenClient.callback = mainTokenCallback;
@@ -531,11 +545,29 @@ async function checkAuthAndSync(callback, onReady) {
     setSyncStatus('syncing');
     try {
         const userInfo = await gapi.client.drive.about.get({ fields: 'user' });
+        const newEmail = (userInfo.result.user && userInfo.result.user.emailAddress) || '';
+        // 이 기기에 다른 구글 계정과 동기화했던 일지가 있는데 다른 계정으로 로그인했다 (가족이 같이 쓰는 폰 등).
+        // 묻지 않고 동기화하면 앞사람의 일지가 지금 계정의 드라이브에 그대로 합쳐져 올라갔다.
+        const prevEmail = getSavedUserEmail();
+        const syncedBefore = Object.keys(loadSyncBase()).length > 0;
+        if (newEmail && prevEmail && syncedBefore && newEmail.toLowerCase() !== prevEmail.toLowerCase()) {
+            const merge = confirm(`이 기기에는 ${prevEmail} 계정과 동기화한 일지가 있습니다.\n` +
+                `지금 로그인한 ${newEmail} 계정의 구글 드라이브에 이 일지를 합쳐 올릴까요?\n\n` +
+                `[확인] 합쳐서 올리기\n[취소] 로그인 취소 (이 기기의 일지는 그대로 둡니다)`);
+            if (!merge) {
+                gapi.client.setToken('');
+                localStorage.removeItem('faith_token');
+                localStorage.removeItem('faith_token_exp');
+                localStorage.removeItem('is_faith_logged_in');
+                stopKeepAlive();
+                setSyncStatus('off');
+                if (callback) callback(false);
+                return;
+            }
+        }
         state.currentUser = userInfo.result.user;
         // 사용자 이메일 저장 → 재로그인 시 login_hint로 활용
-        if (userInfo.result.user && userInfo.result.user.emailAddress) {
-            saveUserEmail(userInfo.result.user.emailAddress);
-        }
+        if (newEmail) saveUserEmail(newEmail);
     } catch (err) {
         console.error("사용자 정보 조회 실패:", err);
         // 토큰이 유효하지 않은 경우 (401) → 토큰 갱신 시도 후 재확인
@@ -616,8 +648,14 @@ async function saveToDrive(pullOnly = false, promptOnConflict = false) {
     if (typeof gapi === 'undefined' || !gapi.client) { setSyncStatus(navigator.onLine ? 'pending' : 'error'); return false; }
     if (isSyncing) { if (!pullOnly) pendingSync = true; return false; }
 
-    const isValid = await ensureValidToken(true);
+    // 자리부터 잡고 토큰을 확인한다. 예전에는 토큰 확인을 기다리는 사이 다른 호출도 위 검사를 통과해
+    // 동기화가 두 번 겹쳐 돌았다 (목록에서 글을 열 때마다 전체 파일을 두 번 받고 두 번 올렸다).
+    isSyncing = true;
+    let isValid = false;
+    try { isValid = await ensureValidToken(true); } catch (e) { console.error('토큰 확인 실패:', e); }
     if (!isValid) {
+        isSyncing = false;
+        if (!pullOnly) unsentChanges = true;
         console.warn("saveToDrive: 토큰이 유효하지 않아 동기화를 건너뜁니다.");
         showSyncWarning("클라우드 동기화 실패: 로그인이 필요합니다.");
         setSyncStatus('error');
@@ -625,7 +663,6 @@ async function saveToDrive(pullOnly = false, promptOnConflict = false) {
     }
 
     const runId = ++syncRunId;
-    isSyncing = true;
     toggleSpinners(true);
     setSyncStatus('syncing');
 
@@ -803,22 +840,28 @@ async function saveToDrive(pullOnly = false, promptOnConflict = false) {
             //  다른 기기의 옛 내용이 그대로 남는다)
             const content = JSON.stringify(buildDbPayload());
             const sig = payloadSignature(content);
-            if (!cloudChanged && sig === lastUploadedSig) return true;
+            if (!cloudChanged && sig === lastUploadedSig) { unsentChanges = false; return true; }
+            // 올리는 바로 그 순간의 글별 수정시각. 올리는 동안 계속 타자하면 지금 목록은 이미 더 새것이라,
+            // 다 올린 뒤의 목록으로 기준을 잡으면 '클라우드에 없는 판'이 기준이 되어 버린다.
+            // 그 뒤 다음 업로드가 못 나간 채로 다른 기기가 같은 글을 고치면, 이 기기의 마지막 편집이
+            // 충돌 사본도 없이 사라졌다. 그래서 실제로 올린 내용으로 기준을 잡는다.
+            const sentTimes = new Map();
+            state.entries.forEach(e => { if (e && e.id) sentTimes.set(e.id, e.modifiedAt || e.timestamp || ''); });
 
             const uploadRes = await uploadToDrive(folderId, fileMeta ? fileMeta.id : null, content);
             lastUploadedSig = sig;
+            unsentChanges = false;
             if (uploadRes && uploadRes.result) {
                 lastCloudModifiedTime = uploadRes.result.modifiedTime;
                 if (uploadRes.result.id) dbFileId = uploadRes.result.id;
             }
             // 편집 중인 글의 충돌 기준 시각을 방금 올린 버전으로 갱신 (다음 저장에서 오탐 방지)
-            if (state.editingId != null) {
-                const cur = state.entries.find(e => e && e.id === state.editingId);
-                if (cur) state.editBaseModifiedAt = new Date(cur.modifiedAt || cur.timestamp || 0).getTime();
+            if (state.editingId != null && sentTimes.has(state.editingId)) {
+                state.editBaseModifiedAt = new Date(sentTimes.get(state.editingId) || 0).getTime();
             }
-            // 업로드 성공 → 이제 클라우드 = 로컬이므로 모든 글의 동기화 기준을 현재 수정시각으로 갱신
+            // 업로드 성공 → 올린 판이 클라우드와 일치하므로 글마다 동기화 기준을 올린 시각으로 갱신
             const bMap = loadSyncBase();
-            state.entries.forEach(e => { if (e && e.id) bMap[e.id] = e.modifiedAt || e.timestamp || ''; });
+            sentTimes.forEach((t, id) => { bMap[id] = t; });
             saveSyncBase();
         }
         // 충돌로 업로드를 미뤘으면 '동기화 완료'가 아니다 (아직 올라가지 않은 편집이 있음)
@@ -854,6 +897,7 @@ async function saveToDrive(pullOnly = false, promptOnConflict = false) {
         }
     } catch (err) {
         console.error("구글 드라이브 저장 실패:", err);
+        if (!pullOnly) unsentChanges = true;
         rollbackSyncBase();
         setSyncStatus('error');
         showSyncWarning("클라우드 동기화에 실패했습니다. 데이터는 기기에 저장되어 있습니다.");
@@ -864,7 +908,8 @@ async function saveToDrive(pullOnly = false, promptOnConflict = false) {
             syncTimeoutTimer = null;
             isSyncing = false;
             toggleSpinners(false);
-            if (syncOk) setSyncStatus('synced');
+            // 받기만 한 동기화가 끝났어도 올리지 못한 변경이 남았으면 '완료'(초록)가 아니다
+            if (syncOk) setSyncStatus(unsentChanges ? 'pending' : 'synced');
             if (pendingSync) {
                 pendingSync = false;
                 setSyncStatus('pending');   // 동기화 중에 또 바뀐 내용이 있다
@@ -879,7 +924,9 @@ async function saveToDrive(pullOnly = false, promptOnConflict = false) {
 
 // 받아오기 전용 — 다른 기기의 변경만 가져오고 올리지는 않는다 (주기 폴링용).
 // 예전 이름(syncFromDrive)은 인자에 따라 올리기도 해서 호출부마다 의미가 달랐다.
-export async function pullFromDrive() { await saveToDrive(true, false); }
+// 다만 못 올린 변경이 남아 있으면 이번에 올리기까지 한다. 예전에는 업로드가 실패한 뒤에도
+// 받기만 성공하면 점이 초록(동기화 완료)으로 바뀌어, 이 기기에만 있는 글이 있는데도 다 된 것처럼 보였다.
+export async function pullFromDrive() { await saveToDrive(!unsentChanges, false); }
 
 /* ── 클라우드로 보내는 유일한 입구 ──────────────────────────────────
  *
@@ -908,6 +955,7 @@ export function syncNow(promptOnConflict = false) {
 
 export function syncSoon(delay = CLOUD_SYNC_DELAY) {
     if (localStorage.getItem('is_faith_logged_in') !== 'true') return;
+    unsentChanges = true;
     setSyncStatus('pending');
     if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
     cloudSyncTimer = setTimeout(() => {

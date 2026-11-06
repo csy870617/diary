@@ -3,7 +3,7 @@ import { saveEntry } from './data.js';
 import { syncNow, syncSoon } from './drive.js';
 import { openModal, hideTransientPopups } from './ui.js';
 import { setupLinkPreservation, autoLink, isSafeUrl } from './utils.js';
-import { recalcTable, recalcAll, applyFormula, clearFormula, buildRangeFormula, targetCellFor, columnLabel, buildGrid, parseNumber, formatResult } from './formula.js';
+import { recalcTable, recalcAll, applyFormula, clearFormula, buildRangeFormula, targetCellFor, columnLabel, buildGrid, parseNumber, formatResult, shiftFormulaRefs } from './formula.js';
 
 let currentSelectedElement = null; 
 let lastClickedCell = null; 
@@ -109,6 +109,12 @@ function restoreSnapshot(snapshot) {
     hideSelection();
     if (editTitle) editTitle.value = snapshot.title;
     if (editSubtitle) editSubtitle.value = snapshot.subtitle;
+    // 책 보기(편집)에서 되돌리면, 책 모드에 들어오기 전에 찍어 둔 본문이 돌아올 수 있다.
+    // 그 사진들은 책 쪽 크기도, 원래 크기 기록(data-book-*)도 없어 쪽 밖으로 넘치고,
+    // 책 모드를 나갈 때 크기가 지워졌다. 책 쪽 배치를 다시 해 둔다.
+    if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') {
+        try { updateBookLayout(); updateBookNav(); } catch (e) { console.error('되돌리기 뒤 책 배치 실패:', e); }
+    }
     
     // 커서 위치 복원
     if (snapshot.cursor) {
@@ -1168,6 +1174,21 @@ function pickWholeTable(table) {
     updateTableTools();
 }
 
+/** 커서가 칸의 첫 줄('first') 또는 끝 줄('last')에 있는가 (위치를 알 수 없으면 true — 예전처럼 칸을 옮긴다) */
+function caretOnEdgeLine(cell, which) {
+    const sel = window.getSelection();
+    if (!cell || !sel || !sel.rangeCount) return true;
+    const range = sel.getRangeAt(0).cloneRange();
+    range.collapse(which === 'first');
+    const rect = range.getClientRects()[0];
+    if (!rect || !rect.height) return true;
+    const cr = cell.getBoundingClientRect();
+    const cs = getComputedStyle(cell);
+    const lh = parseFloat(cs.lineHeight) || (parseFloat(cs.fontSize) || 16) * 1.5;
+    if (which === 'first') return rect.top - (cr.top + (parseFloat(cs.paddingTop) || 0)) < lh * 0.8;
+    return (cr.bottom - (parseFloat(cs.paddingBottom) || 0)) - rect.bottom < lh * 0.8;
+}
+
 /* ── 줄 단위 들여쓰기 ───────────────────────────────────────────────
    본문은 white-space: pre-wrap 이라 줄 앞 공백이 그대로 보인다. */
 const INDENT_TEXT = '   ';          // 3칸
@@ -1187,6 +1208,71 @@ function selectedLineBlocks() {
         if (range.intersectsNode(el)) lines.push(el);
     });
     return lines;
+}
+
+/**
+ * 고른 범위에 걸친 줄 가운데 블록으로 감싸이지 않은 줄을 줄마다 <div>로 감싼다.
+ * Chrome은 처음 친 줄을 블록 없이 맨글로 두고, 붙여 넣거나 텍스트 파일로 넣은 줄은 <br>로만 나뉜다.
+ * 그런 줄은 위의 selectedLineBlocks가 줄로 세지 못해, 여러 줄을 고르고 Tab을 누르면 고른 글이 통째로
+ * 공백 3칸으로 바뀌었다. 화면 모양은 그대로이고 줄마다 블록이 될 뿐이다.
+ * 반환: 새로 만든 줄 블록 (범위에 걸친 것)
+ */
+function wrapBareLines(range) {
+    const editorBody = document.getElementById('editor-body');
+    if (!editorBody || !range) return [];
+    const isBlock = (n) => n.nodeType === 1 && (n.matches(LINE_BLOCK_SEL) || n.matches('table, ul, ol, hr') || n.classList.contains('table-wrapper'));
+    // 나눌 곳: 본문 바로 아래, 그리고 (표 밖의) 가장 안쪽 블록 중 <br>로 줄이 나뉜 것
+    const containers = [editorBody];
+    editorBody.querySelectorAll(LINE_BLOCK_SEL).forEach(el => {
+        if (el.closest('table') || el.querySelector(LINE_BLOCK_SEL) || el.querySelector('table')) return;
+        if (el.querySelector(':scope > br') && range.intersectsNode(el)) containers.push(el);
+    });
+    // 1단계: 바꾸기 전에 줄(묶음)을 나누고 범위에 걸치는지 적어 둔다 (옮기기 시작하면 범위가 따라 움직인다)
+    const plans = containers.map(container => {
+        const runs = [];
+        let cur = [];
+        Array.from(container.childNodes).forEach(n => {
+            if (isBlock(n)) { if (cur.length) runs.push({ nodes: cur, br: null }); cur = []; runs.push({ block: n }); return; }
+            if (n.nodeName === 'BR') { runs.push({ nodes: cur, br: n }); cur = []; return; }
+            cur.push(n);
+        });
+        if (cur.length) runs.push({ nodes: cur, br: null });
+        runs.forEach(r => {
+            if (r.block) return;
+            r.touches = r.nodes.some(n => range.intersectsNode(n)) || (!!r.br && range.intersectsNode(r.br));
+        });
+        return { container, runs };
+    });
+    // 2단계: 감싸기
+    const made = [];
+    plans.forEach(({ container, runs }) => {
+        const lineRuns = runs.filter(r => !r.block);
+        if (container === editorBody) {
+            lineRuns.forEach(r => {
+                if (!r.touches) return;
+                const div = document.createElement('div');
+                container.insertBefore(div, r.nodes[0] || r.br);
+                r.nodes.forEach(n => div.appendChild(n));
+                if (!div.textContent && !div.querySelector('img')) { div.textContent = ''; div.appendChild(document.createElement('br')); }
+                if (r.br) r.br.remove();
+                made.push(div);
+            });
+        } else if (lineRuns.length > 1 && container.isConnected) {
+            // <br>로 나뉜 블록: 줄마다 같은 모양(정렬 등 속성 유지)의 블록으로 나눈다
+            const parent = container.parentNode;
+            runs.forEach(r => {
+                if (r.block) { parent.insertBefore(r.block, container); return; }
+                const div = container.cloneNode(false);
+                r.nodes.forEach(n => div.appendChild(n));
+                if (!div.textContent && !div.querySelector('img')) { div.textContent = ''; div.appendChild(document.createElement('br')); }
+                parent.insertBefore(div, container);
+                if (r.br) r.br.remove();
+                if (r.touches) made.push(div);
+            });
+            container.remove();
+        }
+    });
+    return made;
 }
 
 function indentLine(el) {
@@ -1366,8 +1452,14 @@ function setupBasicHandling() {
         clearSelectedElement: () => hideSelection()
     });
 
+    // 손가락으로 누르면 브라우저가 뒤따라 마우스 동작(mousemove·mousedown)을 흉내 낸다. 그것을 칸 경계 끌기로 보면
+    // 휴대폰에서 칸의 오른쪽·아래 10px를 눌렀을 때 커서가 안 들어가고, 첫 줄 칸 폭이 px로 못박혀 저장됐다.
+    let lastTouchAt = 0;
+    editorBody.addEventListener('touchstart', () => { lastTouchAt = Date.now(); }, { passive: true, capture: true });
+    const fromTouch = (e) => !!(e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) || Date.now() - lastTouchAt < 1000;
+
     editorBody.onmousemove = (e) => {
-        if (!editorBody.isContentEditable || isColDragging || isRowDragging) return;
+        if (!editorBody.isContentEditable || isColDragging || isRowDragging || fromTouch(e)) return;
         const td = e.target.closest('td'); if (!td) return;
         const rect = td.getBoundingClientRect(); const padding = 10;
         const nearRight = (e.clientX > rect.right - padding);
@@ -1381,7 +1473,8 @@ function setupBasicHandling() {
         if (!editorBody.isContentEditable) return;
         const td = e.target.closest('td');
         if (td) {
-            if (td.style.cursor === 'col-resize') {
+            const touch = fromTouch(e);
+            if (!touch && td.style.cursor === 'col-resize') {
                 const table = td.closest('table');
                 const headCell = (table && table.rows[0]) ? table.rows[0].cells[td.cellIndex] : null;
                 if (!headCell) return;
@@ -1406,7 +1499,7 @@ function setupBasicHandling() {
                 e.preventDefault();
                 return;
             }
-            else if (td.style.cursor === 'row-resize') {
+            else if (!touch && td.style.cursor === 'row-resize') {
                 saveBeforeChange('resize');
                 isRowDragging = true;
                 resizeTargetTd = td;
@@ -1691,31 +1784,21 @@ function setupBasicHandling() {
             return;
         }
 
-        // 화살표 아래: 아래 셀로 이동
-        if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            e.stopPropagation();
+        // 화살표 위·아래: 칸의 첫 줄(위)·끝 줄(아래)에 커서가 있을 때만 위·아래 칸으로 옮긴다.
+        // 예전에는 늘 막아서, 칸 안의 여러 줄 사이를 오갈 수 없었고, 표의 맨 위·아래 줄에서 표 밖으로 나갈 수도,
+        // Shift+화살표로 글을 고를 수도 없었다. 그런 경우는 브라우저 기본 동작에 맡긴다.
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            if (e.shiftKey) return;
+            const down = e.key === 'ArrowDown';
+            if (!caretOnEdgeLine(currentCell, down ? 'last' : 'first')) return;
             // 세로로 합친 칸이면 합친 높이만큼 건너뛴다 (안 그러면 자기 자신이 다시 잡힌다)
-            const belowRow = rowIdx + Math.max(1, currentCell.rowSpan || 1);
-            if (belowRow <= maxRow) {
-                const nextCell = getCellAt(table, belowRow, logicalColIdx);
-                if (nextCell) {
-                    focusCell(nextCell);
-                }
-            }
-            return;
-        }
-
-        // 화살표 위: 위 셀로 이동
-        if (e.key === 'ArrowUp') {
+            const targetRow = down ? rowIdx + Math.max(1, currentCell.rowSpan || 1) : rowIdx - 1;
+            if (targetRow < 0 || targetRow > maxRow) return;
+            const target = getCellAt(table, targetRow, logicalColIdx);
+            if (!target) return;
             e.preventDefault();
             e.stopPropagation();
-            if (rowIdx > 0) {
-                const prevCell = getCellAt(table, rowIdx - 1, logicalColIdx);
-                if (prevCell) {
-                    focusCell(prevCell);
-                }
-            }
+            focusCell(target);
             return;
         }
 
@@ -1760,15 +1843,24 @@ function setupBasicHandling() {
         if (e.key === 'Tab') {
             e.preventDefault();
             const sel = window.getSelection();
-            const lines = selectedLineBlocks();
-            const manyLines = lines.length > 1 && sel && !sel.isCollapsed;
+            const hasSelection = !!(sel && sel.rangeCount && !sel.isCollapsed);
 
-            if (manyLines || (e.shiftKey && lines.length > 0)) {
+            // 글을 골랐거나 Shift+Tab이면 줄 단위로 들이고 내민다. 고른 글을 공백으로 덮어쓰는 일은 없다.
+            if (hasSelection || (e.shiftKey && sel && sel.rangeCount)) {
                 saveBeforeChange('indent');
-                if (e.shiftKey) lines.forEach(outdentLine);
-                else lines.forEach(indentLine);
-                if (manyLines) reselectLines(lines);   // 이어서 또 누를 수 있게 고른 상태를 유지
-                triggerAutoSave();
+                let lines = selectedLineBlocks();
+                const wrapped = wrapBareLines(sel.getRangeAt(0));
+                if (wrapped.length) {
+                    lines = [...new Set([...lines, ...wrapped])]
+                        .filter(el => el.isConnected)
+                        .sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1);
+                }
+                if (lines.length) {
+                    if (e.shiftKey) lines.forEach(outdentLine);
+                    else lines.forEach(indentLine);
+                    if (hasSelection) reselectLines(lines);   // 이어서 또 누를 수 있게 고른 상태를 유지
+                    triggerAutoSave();
+                }
                 return;
             }
 
@@ -1855,6 +1947,14 @@ function setupBasicHandling() {
     });
 
     editorBody.addEventListener('input', (e) => {
+        // 계산 결과가 보이는 칸(식을 친 뒤 Enter, 자동 합계 직후)에 바로 덮어 쓰는 중이면, 엑셀처럼 식을 걷어 내고
+        // 친 글을 값으로 둔다. 그대로 두면 바로 아래의 다시 계산이 친 글을 결과로 덮어써 한 글자씩 되돌아갔다
+        // (한글 조합 중인 글자도 지워졌다).
+        const typingCell = caretCell();
+        if (typingCell && typingCell.hasAttribute('data-formula') && typingCell.dataset.editingFormula !== '1') {
+            typingCell.removeAttribute('data-formula');
+            if (formulaEditingCell === typingCell) formulaEditingCell = null;
+        }
         // 숫자를 고치면 같은 표의 계산 결과도 따라 바뀌어야 한다
         const table = (e.target.closest ? e.target.closest('table') : null)
             || (window.getSelection().anchorNode?.parentElement?.closest?.('table'));
@@ -1909,6 +2009,16 @@ function setupBasicHandling() {
         // 읽기·책 모드에서는 식을 펼치지 않는다 (탭만 해도 결과 대신 '=SUM(…)'이 보이던 문제)
         const cell = editorBody.isContentEditable ? caretCell() : null;
         if (cell === formulaEditingCell) return;
+        // 합계 단추로 방금 계산한 칸(커서가 그 안에 있던 경우): 결과를 그대로 보여 주고 식은 펼치지 않는다
+        if (cell && cell._justComputed) {
+            delete cell._justComputed;
+            if (formulaEditingCell && formulaEditingCell.isConnected && formulaEditingCell !== cell) {
+                syncingFormulaCell = true;
+                try { commitFormulaCell(formulaEditingCell); } finally { syncingFormulaCell = false; }
+            }
+            formulaEditingCell = cell;
+            return;
+        }
         syncingFormulaCell = true;
         try {
             if (formulaEditingCell && formulaEditingCell.isConnected) {
@@ -1949,6 +2059,11 @@ function setupBasicHandling() {
         // Enter를 누른 직후에는 결과를 보여준다.
         // 이 칸을 "이미 펼쳐 본 칸"으로 기억해 두면, 커서가 그대로 있어도 식이 다시 펼쳐지지 않는다.
         formulaEditingCell = cell.hasAttribute('data-formula') ? cell : null;
+        // 결과로 글자를 바꿔 넣으면 커서가 칸 맨 앞으로 가서, 이어 친 글이 결과 앞에 붙었다 → 결과 뒤에 둔다
+        try {
+            const r = document.createRange(); r.selectNodeContents(cell); r.collapse(false);
+            const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+        } catch (err) { /* 커서를 못 옮겨도 계산은 끝났다 */ }
         updateTableTools();
         triggerAutoSave();
     });
@@ -2024,11 +2139,20 @@ function setupBasicHandling() {
  * 서식은 그대로 보존하고 script/이벤트 핸들러/javascript: URL만 차단.
  * (PDF 내보내기 등 본문을 실제 DOM에 넣는 다른 경로에서도 공용으로 사용)
  */
-export function sanitizeEntryHtml(html) {
-    if (!html) return '';
+// 본문에 남겨 두면 위험한 요소.
+// - svg/math: <animate>·<set>이 href를 javascript: 로 바꿀 수 있다 (앱은 본문에 SVG를 쓰지 않음)
+// - noscript: DOMParser(스크립트 꺼짐)는 안쪽을 보통 태그로 읽지만, 실제 화면(innerHTML, 스크립트 켜짐)은
+//   안쪽을 글자로 읽는다. 이 차이로 '정화할 때는 글자, 화면에서는 태그'가 되는 글을 만들 수 있어
+//   공유 링크 하나로 스크립트가 실행됐다. 안의 글을 그대로 내보내는 xmp·noembed 등도 함께 지운다.
+export const UNSAFE_BODY_TAGS = 'script, iframe, object, embed, applet, form, meta, link, style, base, svg, math, noscript, xmp, noembed, noframes, plaintext, template, frame, frameset';
+
+function sanitizeEntryHtmlOnce(html) {
     const doc = new DOMParser().parseFromString(html, 'text/html');
-    // svg/math: <animate>·<set>이 href를 javascript: 로 바꿀 수 있어 통째로 제거 (앱은 본문에 SVG를 쓰지 않음)
-    doc.querySelectorAll('script, iframe, object, embed, form, meta, link, style, base, svg, math').forEach(el => el.remove());
+    doc.querySelectorAll(UNSAFE_BODY_TAGS).forEach(el => el.remove());
+    // 주석도 지운다 (위 파서 차이 공격에서 주석이 글자 행세를 했다)
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_COMMENT);
+    const comments = []; let c; while ((c = walker.nextNode())) comments.push(c);
+    comments.forEach(n => n.remove());
     doc.body.querySelectorAll('*').forEach(el => {
         Array.from(el.attributes).forEach(attr => {
             const name = attr.name.toLowerCase();
@@ -2042,6 +2166,23 @@ export function sanitizeEntryHtml(html) {
     });
     return doc.body.innerHTML;
 }
+
+export function sanitizeEntryHtml(html) {
+    if (!html) return '';
+    // 정화한 결과를 다시 읽었을 때 모양이 또 바뀌면, 화면에서도 정화 때와 다르게 읽힐 수 있다는 뜻이다.
+    // 더 바뀌지 않을 때까지 되풀이하고, 끝내 굳지 않으면 글자만 남긴다.
+    let out = sanitizeEntryHtmlOnce(html);
+    for (let i = 0; i < 3; i++) {
+        const again = sanitizeEntryHtmlOnce(out);
+        if (again === out) return out;
+        out = again;
+    }
+    const text = new DOMParser().parseFromString(out, 'text/html').body.textContent || '';
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+const TRANSIENT_CLASSES = ['scrolled-end', 'selected-cell', 'selecting-cells', 'tt-row-mark', 'tt-col-mark', 'tt-cell-mark'];
+const TRANSIENT_CLASS_SELECTOR = TRANSIENT_CLASSES.map(c => '.' + c).join(', ');
 
 /**
  * 본문 요소를 복제하여 책 모드 레이아웃 흔적(축소된 이미지 크기, data-book-* 속성)을
@@ -2057,8 +2198,15 @@ export function getCleanBodyHtml(bodyEl) {
     const hasBookArtifacts = state.currentViewMode === 'book'
         || state.currentViewMode === 'book-edit'
         || !!bodyEl.querySelector('[data-book-orig-width]');
-    if (!hasBookArtifacts && !editingFormula) return bodyEl.innerHTML;
+    // 화면에서만 잠깐 붙는 표시(표 가로 스크롤 끝, 칸 고르기, 표 도구가 가리키는 줄·칸)는 저장하지 않는다.
+    // 저장하면 읽기만 해도 본문이 바뀐 것으로 보여 수정 시각이 갱신됐다.
+    const hasTransient = !!bodyEl.querySelector(TRANSIENT_CLASS_SELECTOR);
+    if (!hasBookArtifacts && !editingFormula && !hasTransient) return bodyEl.innerHTML;
     const clone = bodyEl.cloneNode(true);
+    clone.querySelectorAll(TRANSIENT_CLASS_SELECTOR).forEach(el => {
+        el.classList.remove(...TRANSIENT_CLASSES);
+        if (el.classList.length === 0) el.removeAttribute('class');
+    });
     clone.querySelectorAll('img').forEach(img => {
         if (img.dataset.bookOrigWidth !== undefined) {
             img.style.width = img.dataset.bookOrigWidth || '';
@@ -2119,9 +2267,40 @@ export function openEditor(isEdit, entryData) {
     if (fontSelect) fontSelect.value = state.currentFontFamily;
 
     toggleViewMode('default');
-    
+
     // 초기 상태 저장 (Undo 히스토리 시작점)
     saveInitialState();
+    snapshotOpenedEntry(isEdit ? entryData : null);
+}
+
+// 글을 연 직후의 모습. 열면서 화면에서만 붙는 것(주소를 링크로 바꾸기, 기본 글꼴 채우기, 표 계산 다시 하기)이
+// 있어서, 읽기만 하고 닫아도 '바뀐 글'로 저장되어 수정 시각이 갱신됐다. 그러면 수정순 목록에서 맨 위로 올라가고,
+// 두 기기에서 같은 글을 읽기만 해도 '동기화 충돌 사본'이 생길 수 있었다. 닫을 때 이 모습과 같으면 저장하지 않는다.
+let openedSnapshot = null;
+function snapshotOpenedEntry(entry) {
+    const editBody = document.getElementById('editor-body');
+    if (!entry || !editBody) { openedSnapshot = null; return; }
+    openedSnapshot = {
+        id: entry.id,
+        stored: { title: entry.title, subtitle: entry.subtitle, body: entry.body, fontFamily: entry.fontFamily, fontSize: entry.fontSize },
+        title: document.getElementById('edit-title')?.value ?? '',
+        subtitle: document.getElementById('edit-subtitle')?.value ?? '',
+        body: getCleanBodyHtml(editBody),
+        fontFamily: state.currentFontFamily,
+        fontSize: state.currentFontSize
+    };
+}
+
+/** 저장하려는 내용이 글을 연 뒤로 손대지 않은 그대로인가 (data.js의 saveEntry가 씀) */
+export function isUnchangedSinceOpen(stored, title, subtitle, body) {
+    const o = openedSnapshot;
+    if (!o || !stored || o.id !== stored.id) return false;
+    // 그사이 이 글이 다른 곳(자동 저장·동기화)에서 바뀌었으면 기준으로 쓸 수 없다 (되돌린 편집을 놓치지 않게)
+    const s = o.stored;
+    if (stored.title !== s.title || stored.subtitle !== s.subtitle || stored.body !== s.body
+        || stored.fontFamily !== s.fontFamily || stored.fontSize !== s.fontSize) return false;
+    return title === o.title && subtitle === o.subtitle && body === o.body
+        && state.currentFontFamily === o.fontFamily && state.currentFontSize === o.fontSize;
 }
 
 // 충돌 해소 시 다른 기기의 내용을 에디터에 강제로 다시 불러온다 (포커스 여부와 무관하게 교체)
@@ -2144,6 +2323,7 @@ export function reloadEntryIntoEditor(entry) {
     if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null; }
     // 본문을 통째로 교체했으므로 실행취소 히스토리를 새로 시작 (이전 로컬 편집 복원 방지)
     saveInitialState();
+    snapshotOpenedEntry(entry);
     // 책 모드였다면 레이아웃·페이지 내비를 다시 계산
     if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') {
         updateBookLayout();
@@ -2165,7 +2345,9 @@ export function refreshEditorContent() {
     if (!editTitle || !editSubtitle || !editBody) return;
     const isEditableMode = state.currentViewMode === 'default' || state.currentViewMode === 'book-edit';
     if (!isEditableMode || document.activeElement !== editBody) {
-        if (editTitle.value !== latestEntry.title) editTitle.value = latestEntry.title || '';
+        // 제목을 비워 둔 글은 '제목 없음'으로 저장된다. 그것을 제목 칸에 그대로 채우면 사용자가 쓴 것처럼 보였다.
+        const emptyTitleSaved = !editTitle.value && latestEntry.title === '제목 없음';
+        if (editTitle.value !== latestEntry.title && !emptyTitleSaved) editTitle.value = latestEntry.title || '';
         if (editSubtitle.value !== latestEntry.subtitle) editSubtitle.value = latestEntry.subtitle || '';
         // 편집 가능한 모드에서는 본문을 자동 교체하지 않음 (편집 중인 글 보호 — 충돌은 확인창으로만 해소)
         // 책 모드에서는 정리된 형태로 비교해 불필요한 재설정(커서/스크롤 흔들림) 방지
@@ -2176,6 +2358,9 @@ export function refreshEditorContent() {
             setupTableWrapperScroll(editBody);
             // 새 본문의 이미지 크기·쪽 나눔을 다시 계산해야 쪽 밖으로 넘치지 않는다 (reloadEntryIntoEditor와 동일)
             if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') { updateBookLayout(); updateBookNav(); }
+            // 읽기 화면의 본문을 받아 온 글로 통째로 바꿨으니 '연 직후 모습'도 새로 잡는다
+            // (편집 가능한 화면에서는 본문을 바꾸지 않으므로 기준도 그대로 둔다 — 쓰던 내용을 놓치지 않게)
+            snapshotOpenedEntry(latestEntry);
         }
     }
 }
@@ -2221,7 +2406,7 @@ export function toggleViewMode(mode) {
     if(btnReadOnly) btnReadOnly.classList.toggle('active', mode === 'readOnly');
     if(btnBookMode) btnBookMode.classList.toggle('active', mode === 'book' || mode === 'book-edit');
     if(!isBookToBook && container) { container.style.removeProperty('height'); container.style.overflow = ''; container.style.columnWidth = ''; container.style.columnGap = ''; container.scrollLeft = 0; }
-    if (wasBookMode && !isBookToBook) { const body = document.getElementById('editor-body'); if (body) body.querySelectorAll('img').forEach(img => { img.style.maxHeight = ''; img.style.maxWidth = ''; img.style.width = img.dataset.bookOrigWidth || ''; img.style.height = img.dataset.bookOrigHeight || ''; delete img.dataset.bookOrigWidth; delete img.dataset.bookOrigHeight; delete img.dataset.bookTargetW; delete img.dataset.bookTargetH; }); }
+    if (wasBookMode && !isBookToBook) { const body = document.getElementById('editor-body'); if (body) body.querySelectorAll('img').forEach(img => { if (img.dataset.bookOrigWidth === undefined) return; /* 책 배치를 거치지 않은 사진은 크기를 그대로 둔다 (예전에는 '' 로 지워졌다) */ img.style.maxHeight = ''; img.style.maxWidth = ''; img.style.width = img.dataset.bookOrigWidth || ''; img.style.height = img.dataset.bookOrigHeight || ''; delete img.dataset.bookOrigWidth; delete img.dataset.bookOrigHeight; delete img.dataset.bookTargetW; delete img.dataset.bookTargetH; }); }
     writeModal.classList.remove('mode-read-only', 'mode-book', 'mode-book-edit');
     if (!wasBookMode && (mode === 'book' || mode === 'book-edit')) {
         // 책 모드 진입 직전(기본 레이아웃 상태)에서 이미지 렌더링 크기를 기록해 둔다.
@@ -3033,17 +3218,31 @@ function afterTableEdit(focusTarget) {
     triggerAutoSave();
 }
 
+// 줄·칸을 넣거나 지운 뒤: 계산식 주소를 옮기고 다시 계산한다.
+// (예전에는 그대로 둬서 합계가 옛 값을 보이다가, 다른 칸을 고치는 순간 엉뚱한 칸을 더한 값으로 바뀌었다)
+function reflowFormulas(table, shift) {
+    shiftFormulaRefs(table, shift);
+    recalcTable(table);
+}
+// 합친 칸(세로·가로로 걸친 칸)에서 '아래에·오른쪽에 추가'는 그 칸의 맨 아래·맨 오른쪽 다음에 넣는다.
+// (예전에는 맨 윗줄 기준이라, 두 줄에 걸친 칸이면 그 두 줄 사이에 끼어들어 칸이 세 줄로 늘어났다)
+const lastRowOf = (t) => t.row + Math.max(1, t.cell.rowSpan || 1) - 1;
+const lastColOf = (t) => t.col + Math.max(1, t.cell.colSpan || 1) - 1;
+
 export function addRowAbove() {
     const t = activeTableCell(); if (!t) return;
     saveBeforeChange('tableEdit');
     const row = insertRowAt(t.table, t.row, 'above');
+    reflowFormulas(t.table, { atRow: t.row, delta: 1 });
     afterTableEdit(row?.cells[Math.min(t.col, row.cells.length - 1)]);
 }
 
 export function addRowBelow() {
     const t = activeTableCell(); if (!t) return;
     saveBeforeChange('tableEdit');
-    const row = insertRowAt(t.table, t.row, 'below');
+    const last = lastRowOf(t);
+    const row = insertRowAt(t.table, last, 'below');
+    reflowFormulas(t.table, { atRow: last + 1, delta: 1 });
     afterTableEdit(row?.cells[Math.min(t.col, row.cells.length - 1)]);
 }
 
@@ -3051,6 +3250,7 @@ export function addColumnLeft() {
     const t = activeTableCell(); if (!t) return;
     saveBeforeChange('tableEdit');
     insertColumnAt(t.table, t.col, 'left');
+    reflowFormulas(t.table, { atCol: t.col, delta: 1 });
     const g = buildTableGrid(t.table);
     afterTableEdit((g.grid[t.row] || [])[t.col]);
 }
@@ -3058,9 +3258,11 @@ export function addColumnLeft() {
 export function addColumnRight() {
     const t = activeTableCell(); if (!t) return;
     saveBeforeChange('tableEdit');
-    insertColumnAt(t.table, t.col, 'right');
+    const last = lastColOf(t);
+    insertColumnAt(t.table, last, 'right');
+    reflowFormulas(t.table, { atCol: last + 1, delta: 1 });
     const g = buildTableGrid(t.table);
-    afterTableEdit((g.grid[t.row] || [])[t.col + 1]);
+    afterTableEdit((g.grid[t.row] || [])[last + 1]);
 }
 
 export function deleteRow() {
@@ -3068,6 +3270,7 @@ export function deleteRow() {
     if (t.table.rows.length <= 1) { alert('줄이 하나뿐이라 지울 수 없습니다.\n표 전체를 지우려면 "표 삭제"를 눌러 주세요.'); return; }
     saveBeforeChange('tableEdit');
     removeRowAt(t.table, t.row);
+    reflowFormulas(t.table, { atRow: t.row, delta: -1 });
     const g = buildTableGrid(t.table);
     const newRow = Math.min(t.row, g.rowCount - 1);
     afterTableEdit((g.grid[newRow] || [])[Math.min(t.col, (g.grid[newRow] || []).length - 1)]);
@@ -3079,6 +3282,7 @@ export function deleteColumn() {
     if (before.colCount <= 1) { alert('칸이 하나뿐이라 지울 수 없습니다.\n표 전체를 지우려면 "표 삭제"를 눌러 주세요.'); return; }
     saveBeforeChange('tableEdit');
     removeColumnAt(t.table, t.col);
+    reflowFormulas(t.table, { atCol: t.col, delta: -1 });
     const g = buildTableGrid(t.table);
     const newCol = Math.min(t.col, g.colCount - 1);
     afterTableEdit((g.grid[t.row] || [])[newCol]);
@@ -3231,9 +3435,21 @@ export function insertTableFunction(fn) {
     const target = spot && spot.cell;
     if (!target) return;
 
+    // 커서가 이미 결과 칸 안에 있었는가 (빈 칸에서 합계를 누른 경우)
+    const sel0 = window.getSelection();
+    const caretWasInTarget = !!(sel0 && sel0.rangeCount && target.contains(sel0.getRangeAt(0).startContainer));
     applyFormula(target, formula);
     clearCellSelection();
     // 결과 칸으로 커서를 옮기지는 않는다 — 옮기면 결과 대신 식이 펼쳐져 보인다.
+    // 다만 커서가 이미 그 칸에 있었으면, 글자를 바꿔 넣으며 칸 맨 앞으로 간 커서를 결과 뒤로 돌려 둔다
+    // (안 그러면 이어 친 글이 결과 앞에 붙었다). 식은 펼치지 않도록 '방금 계산한 칸' 표시를 남긴다.
+    if (caretWasInTarget) {
+        target._justComputed = true;
+        try {
+            const r = document.createRange(); r.selectNodeContents(target); r.collapse(false);
+            sel0.removeAllRanges(); sel0.addRange(r);
+        } catch (e) { /* 커서를 못 옮겨도 계산은 끝났다 */ }
+    }
     lastClickedCell = target;
     afterTableEdit();
 }

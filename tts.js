@@ -10,7 +10,7 @@ import {
     deleteNeuralVoice, synthesizeNeural, cancelNeuralBefore, unlockNeuralAudio, playNeuralAudio,
     stopNeuralAudio, pauseNeuralAudio, resumeNeuralAudio, reportNeuralStall, beginNeuralSession, getNeuralInfo,
     scheduleNeuralAudio, unscheduleNeuralAfter, neuralClock, neuralModelSpeed, restretchNeural,
-    checkNeuralUpdate, addNeuralDiag, getNeuralMinSteps, neuralWasEvicted, inAppBrowserName
+    checkNeuralUpdate, addNeuralDiag, getNeuralMinSteps, neuralWasEvicted, inAppBrowserName, shutdownNeural
 } from './neural-tts.js';
 import { state } from './state.js';
 import { jumpToPage } from './editor.js';
@@ -89,8 +89,9 @@ const DOT_EXTRA_PAUSE_SEC = 0.5;
 
 // ─── 텍스트 추출 (Range 기반으로 일관성 유지) ───
 
+// TD·TH도 끊는다: 예전에는 표의 한 줄 '1|2|3'을 '123(백이십삼)'으로, '헌금|10,000'을 '헌금10,000'으로 붙여 읽었다.
 const TEXT_BLOCKS = new Set([
-    'DIV','P','BR','LI','TR','H1','H2','H3','H4','H5','H6',
+    'DIV','P','BR','LI','TR','TD','TH','CAPTION','FIGCAPTION','H1','H2','H3','H4','H5','H6',
     'BLOCKQUOTE','PRE','HR','UL','OL','TABLE','SECTION','ARTICLE'
 ]);
 
@@ -121,6 +122,8 @@ function buildTextIndex(root) {
                     const base = text.length;
                     inner.segs.forEach(sg => segs.push({ node: sg.node, start: base + sg.start }));
                     text += inner.text;
+                    // 블록 뒤에서도 끊는다 ('<li>첫째 기도</li></ul>다음 줄'이 '첫째 기도다음 줄'로 붙어 읽혔다)
+                    if (TEXT_BLOCKS.has(tag) && !text.endsWith('\n')) text += '\n';
                 }
             }
         }
@@ -649,6 +652,9 @@ async function onNeuralButton() {
                 setNeuralRow(`받는 중… ${pct}%`, '취소', pct, `${Math.round(got / 1e6)} / ${Math.round(total / 1e6)}MB`);
             });
             neuralUpdate = null;
+            // 받기를 마치면 새 엔진을 쓰려고 작업자를 닫는다. 그사이 다시 재생을 눌렀다면 소리가 끊긴 채
+            // '읽는 중'으로 보이다가 끝난 것처럼 됐다 → 분명히 멈춰 둔다 (다시 누르면 새 엔진으로 읽는다)
+            if (usingNeural()) stopTTS();
             showToast('음성 엔진을 업데이트했습니다.');
         } catch (err) {
             if (err && err.name === 'AbortError') showToast('업데이트를 취소했습니다.');
@@ -1062,7 +1068,7 @@ function stripParentheses(text) {
     // 중첩 괄호까지 처리하기 위해 변화가 없을 때까지 반복
     do {
         prev = cur;
-        cur = cur.replace(/\([^()]*\)/g, '').replace(/（[^（）]*）/g, '');
+        cur = cur.replace(/\([^()\n]*\)/g, '').replace(/（[^（）\n]*）/g, '');
     } while (cur !== prev);
     return cur;
 }
@@ -1152,8 +1158,10 @@ function buildSpeechText(full, s, e) {
     };
     for (let prev = -1; prev !== chars.length;) {
         prev = chars.length;
-        removeMatches(/\([^()]*\)/g);
-        removeMatches(/（[^（）]*）/g);
+        // 괄호는 한 줄 안에서만 짝을 맞춘다. 줄을 넘어 짝을 찾으면 닫지 않은 '(' 하나가 아래 줄의 '1)'·':)' 같은
+        // 글자와 짝이 되어, 그 사이의 문단들을 통째로 건너뛰고 읽었다.
+        removeMatches(/\([^()\n]*\)/g);
+        removeMatches(/（[^（）\n]*）/g);
     }
     let a = 0, b = chars.length;
     while (a < b && /\s/.test(chars[a])) a++;
@@ -1490,6 +1498,7 @@ function speakNext() {
         console.error('TTS error:', why);
         stopSystemWatch();
         stopPartTimer();
+        clearTTSHighlight();   // 실패한 뒤에도 강조가 화면에 남아 있었다
         isTTSSpeaking = false;
         isTTSPaused = false;
         stopTimeTicker();
@@ -1802,6 +1811,10 @@ function tickNeural(gen) {
 
 function neuralFailed(err) {
     console.error('자연스러운 음성 생성 실패:', err);
+    // 줄 서 있던 문장(최대 10개)을 더 만들지 않게 세대를 넘기고, 화면의 강조도 지운다
+    ttsGen++;
+    cancelNeuralBefore(ttsGen);
+    clearTTSHighlight();
     neuralCache = null;
     stopNeuralTicker();
     stopNeuralAudio();
@@ -1814,9 +1827,13 @@ function neuralFailed(err) {
         neuralErrorShown = true;
         setTimeout(() => { neuralErrorShown = false; }, 3000);
         const missing = /내려받은 음성 파일이 없습니다/.test(err.message || '');
+        // 음성 엔진 파일(작업자)을 받지 못한 경우: 앱이 새 버전이면 처음 한 번은 인터넷으로 받아야 한다
+        const offline = /인터넷 연결/.test(err.message || '') || navigator.onLine === false;
         alert(missing
             ? '내려받은 자연스러운 음성이 기기에서 지워졌습니다.\n음성 설정에서 다시 내려받거나 다른 음성을 골라 주세요.'
-            : '자연스러운 음성을 만들지 못했습니다.\n기기 메모리가 부족할 수 있습니다. 다른 앱을 닫거나 기본 음성을 골라 주세요.');
+            : offline
+                ? '자연스러운 음성을 열지 못했습니다.\n인터넷 연결을 확인한 뒤 다시 눌러 주세요. (앱이 새로 바뀐 뒤 처음 한 번은 음성 엔진을 받아야 합니다)'
+                : '자연스러운 음성을 만들지 못했습니다.\n기기 메모리가 부족할 수 있습니다. 다른 앱을 닫거나 기본 음성을 골라 주세요.');
         if (missing) refreshNeuralRow();
     }
 }
@@ -1874,6 +1891,7 @@ export function stopTTS() {
     setProgress(0);
     stopTimeTicker();
     stopSystemWatch();
+    stopPartTimer();   // 예전에는 멈춘 뒤에도 0.25초마다 도는 타이머가 남았다
     ttsElapsedBeforePause = 0;
     ttsPlayStartMs = 0;
     ttsTotalSec = estimateTotalTime();
@@ -1892,7 +1910,23 @@ function setProgress(pct) {
     if (slider) slider.value = String(Math.round(pct));
 }
 
+// 자연스러운 음성 작업자는 570MB~1GB를 차지한다. 읽지 않은 채 3분이 지나면 닫는다 (다음에 읽을 때 몇 초 걸려 다시 연다).
+// 예전에는 한 번 쓰면 앱을 닫을 때까지 남아, 휴대폰에서 브라우저가 앱을 강제로 닫을 가능성을 키웠다.
+const NEURAL_IDLE_MS = 3 * 60 * 1000;
+let neuralIdleTimer = null;
+function scheduleNeuralIdleShutdown() {
+    const busy = isTTSSpeaking || previewing || neuralDownloading;
+    if (busy) { if (neuralIdleTimer) { clearTimeout(neuralIdleTimer); neuralIdleTimer = null; } return; }
+    if (neuralIdleTimer || !isNeuralLoaded()) return;
+    neuralIdleTimer = setTimeout(() => {
+        neuralIdleTimer = null;
+        if (isTTSSpeaking || previewing || neuralDownloading) return;
+        shutdownNeural();
+    }, NEURAL_IDLE_MS);
+}
+
 function syncUI() {
+    scheduleNeuralIdleShutdown();
     const playBtn = document.getElementById('tts-play-btn');
     const pauseBtn = document.getElementById('tts-pause-btn');
     const stopBtn = document.getElementById('tts-stop-btn');
@@ -1923,6 +1957,9 @@ export function saveTTSVoice() {
     stopVoicePreview();
     const sel = document.getElementById('tts-voice-select');
     if (sel && sel.value) localStorage.setItem('faith_tts_voice', sel.value);
+    // 아이폰은 소리 장치를 손가락 동작 안에서 열어야 소리가 난다. 고르는 이 순간에 열어 둔다.
+    // (읽는 중에 자연음으로 바꾸면 타이머 안에서 열려, '읽는 중'인데 소리가 나지 않을 수 있었다)
+    if (sel && isNeuralVoice(sel.value)) { try { unlockNeuralAudio(); } catch (e) {} }
     // 음성마다 문장을 나누는 길이·읽는 속도가 달라 읽는 중이면 지금 문장부터 새 음성으로 다시 읽는다
     if (isTTSSpeaking) { clearTimeout(liveApplyTimer); liveApplyTimer = null; liveApplyKinds.clear(); restartFromCurrentChunk(); }
     else refreshTTSTotalTime();

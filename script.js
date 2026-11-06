@@ -50,8 +50,12 @@ function initTheme() {
 }
 
 function toggleTheme() {
-    const order = ['light', 'dark', 'system'];
-    const next = order[(order.indexOf(getThemePref()) + 1) % order.length];
+    // 시스템 설정을 따르는 중이면 먼저 지금과 반대 색으로 바꾼다 → 같은 색 고정 → 다시 시스템.
+    // 예전 순서(밝게→어둡게→시스템)에서는 밝은 화면의 처음 탭이 '밝게'라 아무것도 안 바뀐 것처럼 보였다.
+    const pref = getThemePref();
+    const sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    const other = sys === 'dark' ? 'light' : 'dark';
+    const next = pref === 'system' ? other : (pref === other ? sys : 'system');
     localStorage.setItem('faith_theme', next);
     applyTheme(next);
 }
@@ -78,7 +82,9 @@ function updateThemeIcon(pref) {
 function sanitizeSharedHtml(html) {
     const doc = new DOMParser().parseFromString(html || '', 'text/html');
     // svg/math: <animate>·<set>이 href를 javascript: 로 바꿀 수 있어 통째로 제거
-    doc.querySelectorAll('script, iframe, object, embed, form, input, textarea, select, button, meta, link, style, base, svg, math').forEach(el => el.remove());
+    // noscript·xmp 등: 정화할 때와 화면에 넣을 때 다르게 읽혀 스크립트가 빠져나갔다 (editor.js의 UNSAFE_BODY_TAGS 설명)
+    // 열 때 sanitizeEntryHtml을 한 번 더 거치지만, 여기서도 같은 요소를 지워 둔다.
+    doc.querySelectorAll('script, iframe, object, embed, applet, form, input, textarea, select, button, meta, link, style, base, svg, math, noscript, xmp, noembed, noframes, plaintext, template, frame, frameset').forEach(el => el.remove());
     doc.body.querySelectorAll('*').forEach(el => {
         Array.from(el.attributes).forEach(attr => {
             const name = attr.name.toLowerCase();
@@ -340,8 +346,22 @@ function setupListeners() {
     }
 
     window.addEventListener('popstate', async () => {
+        // 선택 모드를 단추로 끝내면서 걷어 낸 기록 → 할 일 없음
+        if (Date.now() < (state.ignorePopUntil || 0)) { state.ignorePopUntil = 0; return; }
         // 그림을 크게 보고 있으면 뒤로가기는 그림만 닫는다 (글은 그대로)
         if (isImageFullscreenOpen()) { closeImageFullscreen(); return; }
+        // 사진 자르기 창이 떠 있으면 그 창만 닫는다(넣기 취소). 글 창은 그대로 두고 기록을 다시 채운다.
+        // 예전에는 글 창만 닫혀 자르기 창이 목록 위에 남았고, '자르기'를 누르면 사진이 보이지 않는 글 창으로 들어갔다.
+        const cropModal = document.getElementById('crop-modal');
+        if (cropModal && !cropModal.classList.contains('hidden')) {
+            closeCropModal();
+            history.pushState({ modal: 'open' }, null, '');
+            return;
+        }
+        // 선택 모드(다른 창은 닫힌 상태)에서 뒤로 → 앱을 떠나지 않고 선택 모드만 끝낸다
+        const anyModalOpen = ['write-modal', 'trash-modal', 'move-modal', 'login-modal']
+            .some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); });
+        if (state.isSelectMode && !anyModalOpen) { exitSelectMode(); return; }
         stopTTS(); document.getElementById('tts-panel')?.classList.add('hidden'); document.getElementById('write-modal')?.classList.remove('tts-open');
         const writeModal = document.getElementById('write-modal');
         const wasEditing = writeModal && !writeModal.classList.contains('hidden') && !state.isShareView;
@@ -357,6 +377,12 @@ function setupListeners() {
             if (backBtnText) backBtnText.innerText = '목록';
         }
         state.isShareView = false;
+        // 선택 모드는 이미 끝났는데 그 기록 칸에 내려앉았으면(여러 글 옮기기를 마친 뒤 등) 한 칸 더 걷어 낸다.
+        // 그대로 두면 다음 뒤로 단추가 아무 일도 하지 않았다.
+        if (!state.isSelectMode && history.state && history.state.modal === 'select') {
+            state.ignorePopUntil = Date.now() + 1000;
+            history.back();
+        }
     });
 
     const editorBody = document.getElementById('editor-body');
@@ -374,7 +400,7 @@ function setupListeners() {
         if (Date.now() < (state.ignoreClickUntil || 0)) { state.ignoreClickUntil = 0; return; }
         const link = e.target.closest('#editor-body a');
         if (link && link.href && document.getElementById('editor-body')?.getAttribute('contenteditable') === "false") {
-            e.preventDefault(); e.stopPropagation(); window.open(link.href, '_blank')?.focus(); return;
+            e.preventDefault(); e.stopPropagation(); window.open(link.href, '_blank', 'noopener,noreferrer'); return; // noopener: 열린 쪽이 이 일지 창을 다른 주소(가짜 로그인 등)로 바꾸지 못하게
         }
         const sliderContainer = document.getElementById('book-slider-container');
         if (sliderContainer && !sliderContainer.classList.contains('hidden') && !sliderContainer.contains(e.target) && !e.target.closest('#page-indicator')) sliderContainer.classList.add('hidden');
@@ -450,7 +476,16 @@ function setupUIListeners() {
         renderEntries();
     });
     
-    document.getElementById('search-input')?.addEventListener('input', (e) => renderEntries(e.target.value));
+    // 검색: 빠르게 칠 때는 잠깐 모았다가 한 번에 그린다 (글이 많으면 글자마다 목록 전체를 다시 그리느라 버벅였다).
+    // 검색어가 남아 있으면 검색칸을 펼친 채로 둔다. 예전에는 칸이 접혀 검색어가 안 보이는데도 목록은 계속 걸러져
+    // '기록이 없습니다'만 보이는 일이 있었다.
+    let searchTimer = null;
+    document.getElementById('search-input')?.addEventListener('input', (e) => {
+        const value = e.target.value;
+        document.getElementById('search-container')?.classList.toggle('has-query', !!value.trim());
+        if (searchTimer) clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => { searchTimer = null; renderEntries(value); }, value ? 100 : 0);
+    });
 
     // --- MS Word 스타일 글자 크기 컨트롤 ---
     const FONT_SIZE_PRESETS = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72];
@@ -704,7 +739,9 @@ function setupUIListeners() {
     // 스크롤·화면 변화 시 표 옆에 계속 붙어 있도록 위치 갱신
     // 스크롤 중에는 위치만 갱신 (격자 재계산은 불필요하고 무겁다)
     document.getElementById('editor-container')?.addEventListener('scroll', () => repositionTableTools(), { passive: true });
-    window.addEventListener('resize', () => updateTableTools());
+    // 화면 크기가 바뀌면(휴대폰은 자판이 오르내릴 때마다) 떠 있는 도구 바의 자리만 맞춘다.
+    // 예전에는 도구 바를 새로 띄우는 함수를 불러, 표 밖으로 나와 닫힌 도구 바가 자판이 움직일 때마다 다시 떠서 글을 가렸다.
+    window.addEventListener('resize', () => repositionTableTools());
 
     document.getElementById('sticker-btn')?.addEventListener('click', (e) => { 
         e.stopPropagation(); const palette = document.getElementById('sticker-palette');
