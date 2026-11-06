@@ -25,6 +25,7 @@ let bookKbdResizeTimer = null; // 키보드로 높이가 크게 변할 때 재�
 let bookPinPage = -1;       // 탭한 시점에 보이던 페이지 (캐럿 좌표 대신 이 페이지를 고정)
 let bookPinActive = false;  // 탭/페이지이동 후 현재 페이지를 고정(브라우저 자동 스크롤 무시). 타이핑 시작 시 해제
 let lastBookTouchTime = 0;  // 마지막 책 모드 터치 시각 (터치로 발생하는 에뮬레이트 mousedown 무시용)
+let bookFollowRange = null; // 책 편집에서 책 읽기로 돌아올 때 보던 글자 자리 — 자판이 내려가 쪽이 다시 나뉘어도 이 글자가 든 쪽을 보여 준다
 let wheelLockTimer = null;    
 
 let selectionStartCell = null;
@@ -489,12 +490,19 @@ function handleBookResize() {
         }, 120);
         return;
     }
+    // 화면 틀을 먼저 '지금 보이는 영역'에 맞춘다. 자판이 내려갈 때 이 함수가 틀 맞추기보다 먼저 불리면
+    // 틀이 아직 자판 높이에 묶여 있어 쪽이 짧게 나뉜 채로 쪽 번호를 잡았다.
+    syncBookViewportFrame();
     updateBookLayout();
     if (state.currentViewMode === 'book-edit') {
         if (!scrollCursorIntoBookView()) {
             if (container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
         }
     } else {
+        // 책 편집에서 막 돌아왔다면(폰에서 자판이 내려가며 쪽이 다시 나뉜 경우) 보던 글자가 든 쪽으로 간다.
+        // 예전에는 쪽 번호만 지켜서, 자판 때문에 짧게 나뉜 쪽 번호로 엉뚱한 쪽이 열렸다.
+        const followPage = bookPageOfRange(bookFollowRange);
+        if (followPage >= 0) currentBookPageIndex = followPage;
         if (container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
     }
     updateBookNav();
@@ -511,6 +519,11 @@ function getCaretRect(editBody) {
     if (!sel || !sel.rangeCount) return null;
     const range = sel.getRangeAt(0);
     if (editBody && !editBody.contains(range.startContainer)) return null;
+    return getCollapsedRangeRect(range);
+}
+
+// Range의 시작 자리(접힌 커서 자리)의 사각형 — 위 getCaretRect의 보정 방식 그대로 (못 재면 null)
+function getCollapsedRangeRect(range) {
     const r = range.cloneRange(); r.collapse(true);
     const isValid = (rc) => rc && (rc.width !== 0 || rc.height !== 0 || rc.left !== 0 || rc.top !== 0);
     let rect = r.getBoundingClientRect();
@@ -615,6 +628,78 @@ function scrollCursorIntoBookView() {
     return true;
 }
 
+/** 글자 자리(Range)가 놓인 책 쪽 번호 (본문 밖이거나 못 재면 -1) */
+function bookPageOfRange(range) {
+    const container = document.getElementById('editor-container');
+    const body = document.getElementById('editor-body');
+    const stride = container ? Math.floor(container.clientWidth) : 0;
+    if (!range || !body || stride <= 0 || !body.contains(range.startContainer)) return -1;
+    let rect = range.collapsed ? null : range.getBoundingClientRect();
+    if (!rect || (!rect.width && !rect.height)) rect = getCollapsedRangeRect(range);
+    if (!rect) return -1;
+    const offsetX = rect.left - container.getBoundingClientRect().left + container.scrollLeft;
+    return Math.max(0, Math.min(getBookPageCount(container, stride) - 1, Math.floor(offsetX / stride)));
+}
+
+/**
+ * 지금 보는 쪽의 첫 글자를 감싼 Range (그 쪽에 글자가 없으면 뒤쪽의 첫 글자, 본문에 글자가 없으면 null).
+ * 쪽을 다시 나눈 뒤 이 글자가 든 쪽을 열면 보던 글을 그대로 이어 볼 수 있다.
+ */
+function bookPageTopRange() {
+    const container = document.getElementById('editor-container');
+    const body = document.getElementById('editor-body');
+    const stride = container ? Math.floor(container.clientWidth) : 0;
+    if (!body || stride <= 0) return null;
+    const originLeft = container.getBoundingClientRect().left - container.scrollLeft; // 0쪽 왼쪽 끝의 화면 좌표
+    const target = currentBookPageIndex;
+    const r = document.createRange();
+    // 글자 i가 놓인 쪽 (크기가 없는 글자면 뒤의 몇 글자로 잰다, 끝내 못 재면 -1)
+    const pageAt = (node, i) => {
+        for (let k = i; k < node.length && k < i + 8; k++) {
+            r.setStart(node, k); r.setEnd(node, k + 1);
+            const rc = r.getBoundingClientRect();
+            if (rc.width || rc.height) return Math.floor((rc.left - originLeft) / stride);
+        }
+        return -1;
+    };
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        if (!n.length) continue;
+        r.selectNodeContents(n);
+        const rects = r.getClientRects();
+        if (!rects.length) continue;
+        // 이 글 토막의 마지막 줄이 아직 앞쪽에 있으면 통째로 건너뛴다
+        if (Math.floor((rects[rects.length - 1].left - originLeft) / stride) < target) continue;
+        // 글 토막이 길 수 있으니(붙여 넣은 긴 글은 토막 하나다) 반씩 나눠 가며 그 쪽의 첫 글자를 찾는다
+        let lo = 0, hi = n.length - 1;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            const p = pageAt(n, mid);
+            if (p < 0 || p >= target) hi = mid; else lo = mid + 1;
+        }
+        const out = document.createRange();
+        out.setStart(n, lo); out.setEnd(n, lo + 1);
+        return out;
+    }
+    return null;
+}
+
+/**
+ * 책 편집에서 책 읽기로 돌아갈 때 지금 화면의 글자 자리를 잡아 둔다.
+ * 커서가 지금 쪽에 있으면 커서 자리, 아니면 지금 쪽의 첫 글자.
+ * (폰에서는 자판 때문에 쪽이 짧게 나뉘어 있다가, 자판이 내려가면 쪽이 다시 나뉜다 — 그때 이 자리로 간다)
+ */
+function captureBookFollowRange() {
+    const body = document.getElementById('editor-body');
+    const sel = window.getSelection && window.getSelection();
+    if (body && sel && sel.rangeCount && body.contains(sel.getRangeAt(0).startContainer)) {
+        const caret = sel.getRangeAt(0).cloneRange();
+        caret.collapse(true);
+        if (bookPageOfRange(caret) === currentBookPageIndex) return caret;
+    }
+    return bookPageTopRange();
+}
+
 // 책 모드에서 스크롤이 페이지 경계가 아니면(브라우저가 캐럿을 보이려 가로 스크롤한 경우 등)
 // 가장 가까운 페이지로 즉시 스냅해 화면이 한쪽으로 치우치지 않게 한다.
 function handleBookScrollSnap(e) {
@@ -709,6 +794,7 @@ export function turnPage(direction) {
     const maxPage = getBookPageCount(container, stride) - 1;
     let nextIndex = Math.max(0, Math.min(maxPage, currentBookPageIndex + direction));
     if (nextIndex === currentBookPageIndex) return;
+    bookFollowRange = null; // 쪽을 넘겼으니 이제 이 쪽을 본다
     currentBookPageIndex = nextIndex;
     container.scrollLeft = currentBookPageIndex * stride;
     container.scrollTop = 0;
@@ -723,6 +809,7 @@ export function jumpToPage(index) {
     if (stride <= 0) return;
     const maxPage = getBookPageCount(container, stride) - 1;
     let nextIndex = Math.max(0, Math.min(maxPage, index));
+    if (nextIndex !== currentBookPageIndex) bookFollowRange = null; // 다른 쪽으로 옮겨 갔다
     currentBookPageIndex = nextIndex;
     container.scrollLeft = currentBookPageIndex * stride;
     updateBookNav();
@@ -770,23 +857,16 @@ function getBookViewportHeight() {
     return (window.visualViewport && window.visualViewport.height) ? window.visualViewport.height : window.innerHeight;
 }
 
-/** 책 편집에서 펼친 도구 막대가 더 차지하는 높이 (접혀 있거나 책 읽기면 0) — 쪽 높이에서 뺀다 */
-function bookToolbarExtra() {
+/**
+ * 책 모드에서 도구 막대 자리의 높이 — 쪽 높이에서 뺀다.
+ * 책 읽기·책 편집 모두 같은 값이다. style.css가 두 모드 모두 펼친 막대 높이만큼 자리를 잡아 두기 때문이다
+ * (책 읽기는 막대를 숨기고 자리만 남기고, 책 편집에서 막대를 접어도 자리는 그대로).
+ * 예전에는 책 편집에서만 막대 높이를 빼서 쪽이 그만큼 짧았고, 뒤쪽으로 갈수록 글이 밀려
+ * 책 읽기와 책 편집의 같은 쪽에 다른 글이 보였다.
+ */
+function bookToolbarBand() {
     const tb = document.getElementById('editor-toolbar');
-    const sc = tb && tb.querySelector('.toolbar-content-scroll');
-    if (!sc || state.currentViewMode !== 'book-edit' || tb.classList.contains('collapsed')) return 0;
-    const cs = getComputedStyle(sc);
-    const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
-    return Math.min(sc.scrollHeight - pad, parseFloat(cs.maxHeight) || 60) + pad + 1;
-}
-
-/** 도구 막대를 펴거나 접은 뒤: 책 편집이면 쪽 높이를 다시 맞추고 보던 쪽에 머문다 */
-export function relayoutBookForToolbar() {
-    if (state.currentViewMode !== 'book-edit') return;
-    updateBookLayout();
-    const container = document.getElementById('editor-container');
-    if (container) { container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth); container.scrollTop = 0; }
-    updateBookNav();
+    return tb ? tb.offsetHeight : 0;
 }
 
 function getBookPageContentSize(container) {
@@ -795,7 +875,7 @@ function getBookPageContentSize(container) {
     const horizontalPad = isMobile ? 56 : 96; // editor-body padding-left + padding-right
     const verticalPad = isMobile ? 40 : 48; // editor-container 상/하 패딩 합 (페이지 세로 여백)
     const pageWidth = Math.max(50, colWidth - horizontalPad);
-    const pageHeight = Math.max(50, getBookViewportHeight() - 120 - bookToolbarExtra() - verticalPad - 20);
+    const pageHeight = Math.max(50, getBookViewportHeight() - 120 - bookToolbarBand() - verticalPad - 20);
     return { pageWidth, pageHeight };
 }
 
@@ -886,7 +966,7 @@ function updateBookLayout() {
     // style.css의 책 모드 규칙이 height를 !important로 고정하므로, 인라인도 important로 지정해야
     // 실제로 적용된다. (그냥 style.height = ... 로 두면 캐스케이드에서 밀려 무시되어
     // 키보드가 떴을 때 페이지 높이가 줄지 않는다 — iOS 사파리에서 하단 줄이 가려지던 원인)
-    container.style.setProperty('height', `${getBookViewportHeight() - 120 - bookToolbarExtra()}px`, 'important');
+    container.style.setProperty('height', `${getBookViewportHeight() - 120 - bookToolbarBand()}px`, 'important');
     container.style.overflow = 'hidden';
     const body = document.getElementById('editor-body');
     if (body) {
@@ -2001,7 +2081,7 @@ export function getCleanBodyHtml(bodyEl) {
 
 export function openEditor(isEdit, entryData) {
     hideTransientPopups(); // 홈 화면에서 열려 있던 팝업/메뉴를 닫고 에디터로 진입
-    state.isEditMode = isEdit; const writeModal = document.getElementById('write-modal'); openModal(writeModal); writeModal.scrollTop = 0; currentBookPageIndex = 0; savedRange = null; setupBasicHandling();
+    state.isEditMode = isEdit; const writeModal = document.getElementById('write-modal'); openModal(writeModal); writeModal.scrollTop = 0; currentBookPageIndex = 0; bookFollowRange = null; savedRange = null; setupBasicHandling();
     // 이전 글의 TTS 구간이 남아 새 글을 엉뚱한 위치부터 읽는 것을 방지
     import('./tts.js').then(m => m.clearTTSRangeForNewEntry && m.clearTTSRangeForNewEntry()).catch(() => {});
     // 이전 글의 맞춤법 검사 결과(밑줄·목록)도 지운다
@@ -2053,6 +2133,7 @@ export function reloadEntryIntoEditor(entry) {
     if (editSubtitle) editSubtitle.value = entry.subtitle || '';
     if (editBody) {
         editBody.innerHTML = sanitizeEntryHtml(entry.body || '');
+        bookFollowRange = null; // 잡아 둔 글자 자리는 바뀐 본문에 없다
         linkifyContents(editBody, true);
         setupTableWrapperScroll(editBody);
     }
@@ -2090,12 +2171,21 @@ export function refreshEditorContent() {
         // 책 모드에서는 정리된 형태로 비교해 불필요한 재설정(커서/스크롤 흔들림) 방지
         if (!isEditableMode && getCleanBodyHtml(editBody) !== latestEntry.body) {
             editBody.innerHTML = sanitizeEntryHtml(latestEntry.body || '');
+            bookFollowRange = null; // 잡아 둔 글자 자리는 바뀐 본문에 없다
             linkifyContents(editBody);
             setupTableWrapperScroll(editBody);
             // 새 본문의 이미지 크기·쪽 나눔을 다시 계산해야 쪽 밖으로 넘치지 않는다 (reloadEntryIntoEditor와 동일)
             if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') { updateBookLayout(); updateBookNav(); }
         }
     }
+}
+
+/** 도구 막대를 접거나 펴고, 접기 단추의 화살표도 맞춘다 (모드를 바꿀 때 화살표만 예전 상태로 남지 않게) */
+function setToolbarCollapsed(toolbar, collapsed) {
+    if (!toolbar) return;
+    toolbar.classList.toggle('collapsed', collapsed);
+    const icon = toolbar.querySelector('#toolbar-toggle-btn i');
+    if (icon) icon.className = collapsed ? 'ph ph-caret-down' : 'ph ph-caret-up';
 }
 
 export function toggleViewMode(mode) {
@@ -2106,6 +2196,10 @@ export function toggleViewMode(mode) {
     // 편집(default) ↔ 보기(readOnly)는 본문 레이아웃이 동일한 흐름 모드 전환 → 보던 스크롤 위치를 그대로 유지
     const isFlowToFlow = !wasBookMode && !willBeBookMode;
     const anchor = (isBookToBook || isFlowToFlow) ? null : findVisibleAnchor();
+    // 책 편집 → 책 읽기: 지금 화면의 글자 자리(커서가 이 쪽에 있으면 커서)를 잡아 둔다.
+    // 두 모드는 쪽 나눔이 같아 같은 쪽을 그대로 보여 주면 되지만, 폰에서는 곧이어 자판이 내려가며
+    // 쪽이 다시 나뉜다. 그때 이 자리가 든 쪽으로 간다 (handleBookResize).
+    bookFollowRange = (state.currentViewMode === 'book-edit' && mode === 'book') ? captureBookFollowRange() : null;
     // 편집 모드에서 벗어날 때 보류 중인 자동 저장을 즉시 반영 (디바운스 중 모드 전환으로 인한 편집 유실 방지)
     const wasEditable = state.currentViewMode === 'default' || state.currentViewMode === 'book-edit';
     const willBeEditable = mode === 'default' || mode === 'book-edit';
@@ -2141,20 +2235,26 @@ export function toggleViewMode(mode) {
         linkifyContents(editBody);
         writeModal.classList.add('mode-book');
         updateBookLayout();
-        editorToolbar?.classList.add('collapsed');
+        setToolbarCollapsed(editorToolbar, true);
         if (!isBookToBook) {
             if (!scrollAnchorIntoView(anchor, 'book')) {
                 if (!wasBookMode && oldHeight > 0) currentBookPageIndex = Math.floor(oldScrollTop / oldHeight);
                 if (container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
             }
+        } else if (container) {
+            // 책 편집 → 책 읽기: 보던 쪽에 그대로 머문다 (두 모드는 쪽 나눔이 같다).
+            // 위에서 모드 클래스를 잠깐 뗀 사이 화면 틀을 맞추느라(syncBookViewportFrame) 책 모양이 아닌 채로
+            // 배치가 한 번 일어나 가로 스크롤이 줄어든다. 되돌려 두지 않으면 한 쪽쯤 앞으로 밀려 열렸다.
+            container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
         }
         updateBookNav();
     }
     else if (mode === 'book-edit') {
         editTitle.readOnly = false; editSubtitle.readOnly = false; editBody.contentEditable = "true";
         writeModal.classList.add('mode-book', 'mode-book-edit');
-        // 스크롤 편집처럼 도구 막대를 펼친다 (쪽 높이는 펼친 막대만큼 줄여서 잡는다)
-        editorToolbar?.classList.remove('collapsed');
+        // 스크롤 편집처럼 도구 막대를 펼친다. 막대 자리는 책 읽기에서도 비워 두었으므로
+        // 쪽 크기가 그대로라, 같은 쪽에 같은 글이 같은 자리에 보인다.
+        setToolbarCollapsed(editorToolbar, false);
         updateBookLayout();
         if (isBookToBook && container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
         updateBookNav();
@@ -2163,7 +2263,7 @@ export function toggleViewMode(mode) {
         editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false";
         linkifyContents(editBody);
         writeModal.classList.add('mode-read-only');
-        editorToolbar?.classList.add('collapsed');
+        setToolbarCollapsed(editorToolbar, true);
         requestAnimationFrame(() => {
             // 편집↔보기는 동일한 흐름 레이아웃이므로 보던 위치를 그대로 유지 (앵커 추정으로 인한 튕김 방지)
             if (isFlowToFlow) { if (container) container.scrollTop = oldScrollTop; }
@@ -2174,7 +2274,7 @@ export function toggleViewMode(mode) {
     }
     else {
         editTitle.readOnly = false; editSubtitle.readOnly = false; editBody.contentEditable = "true";
-        editorToolbar?.classList.remove('collapsed');
+        setToolbarCollapsed(editorToolbar, false);
         requestAnimationFrame(() => {
             if (isFlowToFlow) { if (container) container.scrollTop = oldScrollTop; }
             else if (!scrollAnchorIntoView(anchor, 'normal') && wasBookMode && container) {
