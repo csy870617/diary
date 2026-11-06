@@ -262,7 +262,7 @@ export function typoFixesIn(kiwi, text, dict, { skip = () => false, strictGap = 
 export function lmFixes(lines, dict, kiwi, {
     base = [], skip = () => false, window = 4, onLine = null,
     typoGain = 8, typoMargin = 1.4, pairGain = 5, vowelGain = 9, particleGain = 4, overrideMargin = 3, properGain = 8, properMargin = 2,
-    vetoGain = 2, veto = true, typos = true, typoStrictGap = 3,
+    vetoGain = 2, veto = true, typos = true, typoStrictGap = 3, pending = null,
 } = {}) {
     // 다른 검사가 이미 고친 자리 — 규칙(rule)으로 고친 것은 그대로 두고, 사전(dict)으로 고친 낱말은 언어 모델로 다시 견준다
     const covering = (id, a, b) => base.find(f => f.id === id && f.a < b && a < f.b);
@@ -291,8 +291,18 @@ export function lmFixes(lines, dict, kiwi, {
         };
         const scoreOf = (i, rep) => analyze(around(i, rep).text).score;
         // word: 사전에 없는 낱말을 고친 것이면 그 낱말 ('사전에 추가'로 다음부터 잡지 않게 할 수 있다)
+        // (pending이 있으면 AI 정밀 검사가 다시 견주도록 둘레 글을 붙여 둔다)
         const push = (w, to, why, type, gain, margin, word) => fixes.push({ id: line.id, a: w.ca, b: w.cb, from: w.core, to, type, why, src: 'lm', word,
-            gain: +gain.toFixed(2), margin: margin == null ? null : +margin.toFixed(2) });
+            gain: +gain.toFixed(2), margin: margin == null ? null : +margin.toFixed(2),
+            ...(pending ? { win: { orig: around(words.indexOf(w), w.core).text, text: around(words.indexOf(w), to).text } } : {}) });
+        // Kiwi로는 확실하지 않은 후보 — AI 정밀 검사(Qwen)가 견주어 정한다
+        const ask = (i, tos, why, type, word) => {
+            if (!pending) return;
+            const w = words[i];
+            const opts = [...new Set(tos)].filter(t => t && t !== w.core).slice(0, 3);
+            if (opts.length) pending.push({ id: line.id, a: w.ca, b: w.cb, from: w.core, orig: around(i, w.core).text,
+                options: opts.map(to => ({ to, text: around(i, to).text })), why, type, word });
+        };
         // 낱자를 고친 후보 중 문맥에 가장 자연스러운 것 → { c, gain, margin } (후보가 없으면 null)
         const bestEdit = (i, w, res, extra) => {
             const pool = new Set([...koreanCandidates(w.core).keys(), ...jamoEdits(w.core), ...(extra || [])]);
@@ -334,8 +344,13 @@ export function lmFixes(lines, dict, kiwi, {
                 //    짜임이 문법에 맞지 않거나, 띄어 쓸 곳이 보이거나, 고유 명사로 읽혔을 때 후보를 찾는다
                 const bad = illFormed(toks);
                 const cutsSeen = !proper && spacingCuts(w.core, toks, ctx.start).length > 0;
-                const e = bad || cutsSeen || proper ? bestEdit(i, w, res) : null;
+                const eAll = bad || cutsSeen || proper || pending ? bestEdit(i, w, res) : null;
+                const e = bad || cutsSeen || proper ? eAll : null;
                 const needGain = proper ? properGain : typoGain, needMargin = proper ? properMargin : typoMargin;
+                // (짜임이 바르게 분석되는 말은 속어·줄임말이 많아 흔한 말로 바꾸면 안 된다 — 빡치는 → 닥치는 ✗, 가다간 → 가다가 ✗)
+                if (bad && eAll && eAll.gain > 0 && !(e && e.gain >= needGain && e.margin >= needMargin) && !nameLike(w.core) && !LOAN_SYL.test(w.core)) {
+                    ask(i, eAll.ranked.filter(r => r.s > res.score).slice(0, 3).map(r => r.c), null, '맞춤법', w.core);
+                }
                 if (proper && !(e && e.gain >= needGain && e.margin >= needMargin)) return;
                 if (e && e.gain >= needGain && e.margin >= needMargin) {
                     const fixed = around(i, e.c);
@@ -371,14 +386,37 @@ export function lmFixes(lines, dict, kiwi, {
             }
             const options = confusionOptions(w.core, nextPredicate, objectBeforeIn(cores, i, k => sid[k] === sid[i]));
             let best = null;
+            const unsure = [];
             for (const o of options) {
                 if (!/^[가-힣]+$/.test(o.to) || !dict.spell(o.to)) continue;
                 const gain = scoreOf(i, o.to) - res.score;
                 const need = o.kind === 'vowel' ? vowelGain : o.kind === 'particle' ? particleGain : pairGain;
                 if (gain >= need && (!best || gain - need > best.gain - best.need)) best = { ...o, gain, need };
+                else if (gain > 0 && o.kind === 'pair') unsure.push({ ...o, gain });   // '-의 → -이/-가'·ㅐ/ㅔ는 AI도 자주 틀린다
             }
-            if (best) push(w, best.to, best.why || `문맥상 ${subjOf(best.to)} 맞습니다`, '문맥', best.gain, null);
+            if (best) { push(w, best.to, best.why || `문맥상 ${subjOf(best.to)} 맞습니다`, '문맥', best.gain, null); return; }
+            if (pending) {
+                const more = swapOptions(w.core).filter(to => knownKorean(dict, to) && scoreOf(i, to) - res.score > -2);
+                const tos = [...unsure.sort((x, y) => y.gain - x.gain).map(o => o.to), ...more];
+                const why = unsure.length && unsure[0].why ? unsure[0].why : null;
+                ask(i, tos, why, '문맥', null);
+            }
         });
+        // 붙여 쓸 두 낱말 후보 (불안 한 → 불안한, 솔직 하게 → 솔직하게, 오랜 만에 → 오랜만에) — AI 정밀 검사가 정한다
+        if (pending) {
+            for (let i = 0; i + 1 < words.length; i++) {
+                const w = words[i], x = words[i + 1];
+                if (w.lang !== 'ko' || x.lang !== 'ko' || sid[i] !== sid[i + 1] || w.b !== w.cb || x.a !== x.ca || skip(w.core) || skip(x.core)) continue;
+                if (covering(line.id, w.ca, x.cb) || fixes.some(f => f.id === line.id && f.a < x.cb && w.ca < f.b)) continue;
+                if (!JOIN_NEXT.test(x.core) || w.core.length < 2 || !knownKorean(dict, w.core + x.core)) continue;
+                let lo = i, hi = i + 1;
+                while (lo > 0 && sid[lo - 1] === sid[i] && i - lo < window) lo--;
+                while (hi + 1 < words.length && sid[hi + 1] === sid[i] && hi - i < window) hi++;
+                const head = text.slice(words[lo].a, w.ca), tail = text.slice(x.cb, words[hi].b);
+                pending.push({ id: line.id, a: w.ca, b: x.cb, from: text.slice(w.ca, x.cb), orig: head + text.slice(w.ca, x.cb) + tail,
+                    options: [{ to: w.core + x.core, text: head + w.core + x.core + tail }], why: '한 낱말이라 붙여 씁니다', type: '띄어쓰기', word: null });
+            }
+        }
         // 오타 교정 분석 — 아직 아무 고침도 없는 자리만 (거둬들인 사전 고침 자리는 다시 본다)
         if (typos) {
             const mine = fixes.filter(f => f.id === line.id);
@@ -386,12 +424,35 @@ export function lmFixes(lines, dict, kiwi, {
             const busy = [...base.filter(f => f.id === line.id && !withdrawn.has(f)), ...mine.filter(f => !f.withdraw)];
             for (const t of typoFixesIn(kiwi, text, dict, { skip, strictGap: typoStrictGap })) {
                 if (busy.some(f => f.a < t.b && t.a < f.b)) continue;
+                const wi = words.findIndex(w => w.ca <= t.a && t.b <= w.cb);
                 fixes.push({ id: line.id, a: t.a, b: t.b, from: t.from, to: t.to, type: spellKind(t.from, t.to),
-                    why: `${objOf(t.to)} 잘못 친 것으로 보입니다 (문맥으로 판단)`, src: 'lm', word: t.from, gain: t.gap, margin: null, typo: t.cost });
+                    why: `${objOf(t.to)} 잘못 친 것으로 보입니다 (문맥으로 판단)`, src: 'lm', word: t.from, gain: t.gap, margin: null, typo: t.cost,
+                    ...(pending && wi >= 0 && words[wi].ca === t.a && words[wi].cb === t.b ? { win: { orig: around(wi, t.from).text, text: around(wi, t.to).text } } : {}) });
             }
         }
     }
     return fixes;
+}
+
+// 붙여 쓸지 볼 뒷말 (-하다·-되다·-스럽다·-답다 따위와 조사로 시작하는 말, '만에'·'것도')
+const JOIN_NEXT = /^(하|해|했|한|할|함|합|되|돼|됐|된|될|됨|됩|스러|스럽|스런|롭|로운|로워|로웠|답|다운|다워|다웠|만에|만이|만인|것도|것을|것이|데|들|처럼|마다|조차|밖에)/;
+
+/** 사전에 있는 말을 다른 꼴과 헷갈렸을 수 있는 짝 (되/돼, 안/않, -든지/-던지, -로서/-로써) */
+export function swapOptions(word) {
+    const out = [];
+    // 되/돼 (기대되! → 기대돼!, 돼더라고 → 되더라고)
+    for (let k = 0; k < word.length; k++) {
+        if (word[k] === '되') out.push(word.slice(0, k) + '돼' + word.slice(k + 1));
+        if (word[k] === '돼') out.push(word.slice(0, k) + '되' + word.slice(k + 1));
+        if (word[k] === '됬') out.push(word.slice(0, k) + '됐' + word.slice(k + 1));
+    }
+    if (/^안/.test(word)) out.push('않' + word.slice(1));
+    if (/^않/.test(word)) out.push('안' + word.slice(1));
+    if (/든지/.test(word)) out.push(word.replace(/든지/, '던지'));
+    if (/던지/.test(word)) out.push(word.replace(/던지/, '든지'));
+    if (/로서/.test(word)) out.push(word.replace(/로서/, '로써'));
+    if (/로써/.test(word)) out.push(word.replace(/로써/, '로서'));
+    return out;
 }
 
 function subjOf(word) { return `'${word}'${hasJong(word[word.length - 1]) ? '이' : '가'}`; }
