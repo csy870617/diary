@@ -153,10 +153,98 @@ export async function lmDelete() {
  *       withdraw가 붙은 것은 사전으로 고친 것이 틀렸다는 뜻이라 목록에서 뺀다)
  * onProgress({ stage: 'open'|'check', got, total })
  */
-export async function checkDocumentLM(lines, base, { onProgress } = {}) {
+export async function checkDocumentLM(lines, base, { onProgress, collect = false } = {}) {
     if (lmBroken) throw new Error(lmBroken);
-    const plain = base.map(({ id, a, b, from, to, type, why, src, basis }) => ({ id, a, b, from, to, type, why, src, basis }));
-    const res = await lmCall({ type: 'check', lines, base: plain, words: getPersonalWords() }, onProgress);
+    const res = await lmCall({ type: 'check', lines, base: plainFixes(base), words: getPersonalWords(), collect }, onProgress);
+    // collect: AI 정밀 검사가 다시 견줄 후보도 받는다 (res.pending)
+    return collect ? { fixes: res.fixes || [], pending: res.pending || [] } : res.fixes || [];
+}
+const plainFixes = (list) => list.map(({ id, a, b, from, to, type, why, src, basis }) => ({ id, a, b, from, to, type, why, src, basis }));
+
+// ─── AI 정밀 검사 (Qwen 언어 모델 — spell-qwen-worker.js) ───
+// 모델이 커서(약 700MB) 정밀 검사 작업자를 닫은 뒤에 열고, 다 쓰면 1분 뒤 닫는다.
+const AI_IDLE_MS = 60 * 1000;
+let aiWorker = null;
+let aiSeq = 0;
+const aiCalls = new Map();
+let aiIdle = null;
+let aiBroken = '';
+
+function stopAiWorker() {
+    clearTimeout(aiIdle);
+    aiIdle = null;
+    if (aiWorker) { aiWorker.terminate(); aiWorker = null; }
+    aiCalls.forEach(c => c.reject(new Error('AI 정밀 검사를 멈췄습니다.')));
+    aiCalls.clear();
+}
+
+function getAiWorker() {
+    if (aiWorker) return aiWorker;
+    aiWorker = new Worker(new URL('./spell-qwen-worker.js' + new URL(import.meta.url).search, import.meta.url), { type: 'module' });
+    aiWorker.onmessage = (e) => {
+        const d = e.data || {};
+        const call = aiCalls.get(d.id);
+        if (!call) return;
+        if (d.type === 'progress') { if (call.onProgress) call.onProgress(d); return; }
+        aiCalls.delete(d.id);
+        if (d.type === 'error') { const err = new Error(d.message || 'AI 정밀 검사를 하지 못했습니다.'); err.abort = d.abort; call.reject(err); }
+        else call.resolve(d);
+    };
+    aiWorker.onerror = (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        aiBroken = '이 기기에서는 AI 정밀 검사를 열지 못했습니다 (메모리가 모자랄 수 있습니다).';
+        const err = new Error(aiBroken);
+        aiCalls.forEach(c => c.reject(err));
+        aiCalls.clear();
+        if (aiWorker) aiWorker.terminate();
+        aiWorker = null;
+    };
+    return aiWorker;
+}
+
+function aiCall(msg, onProgress) {
+    clearTimeout(aiIdle);
+    return new Promise((resolve, reject) => {
+        const id = ++aiSeq;
+        aiCalls.set(id, { resolve, reject, onProgress });
+        getAiWorker().postMessage({ ...msg, id });
+    }).finally(() => {
+        if (!aiCalls.size) aiIdle = setTimeout(stopAiWorker, AI_IDLE_MS);
+    });
+}
+
+/** AI 정밀 검사 모델 상태 → { ready, broken } */
+export async function aiStatus() {
+    if (!lmSupported()) return { ready: false, broken: '' };
+    try { return { ready: !!(await aiCall({ type: 'status' })).ready, broken: aiBroken }; } catch (e) { return { ready: false, broken: aiBroken }; }
+}
+
+/** AI 정밀 검사 모델 받기 — onProgress({ got, total }) */
+export function aiDownload(onProgress) {
+    aiBroken = '';
+    // (시험에서만 globalThis.__spellAiBase로 받을 곳을 바꾼다)
+    return aiCall({ type: 'download', base: globalThis.__spellAiBase }, onProgress);
+}
+
+export function aiCancel() {
+    if (aiWorker) aiWorker.postMessage({ type: 'cancel' });
+}
+
+export async function aiDelete() {
+    await aiCall({ type: 'delete' });
+    aiBroken = '';
+    stopAiWorker();
+}
+
+/**
+ * AI 정밀 검사 → [{ id, a, b, from, to, type, why, src: 'ai' } | { withdraw: true, replaces }]
+ * pending·lm: 정밀 검사(checkDocumentLM, collect)가 넘긴 후보와 고침, base: 기본 검사 결과
+ * onProgress({ stage: 'open'|'check', got, total })
+ */
+export async function checkDocumentAI(pending, lm, base, { onProgress } = {}) {
+    if (aiBroken) throw new Error(aiBroken);
+    stopLmWorker();   // 두 모델을 한꺼번에 메모리에 올리지 않는다
+    const res = await aiCall({ type: 'check', pending, lm: lm.filter(f => f.win && !f.withdraw), base: plainFixes(base) }, onProgress);
     return res.fixes || [];
 }
 
@@ -182,4 +270,5 @@ export function forgetSpellData() {
     try { localStorage.removeItem(WORDS_ITEM); } catch (e) { /* 저장소 접근 불가 */ }
     stopWorker();
     stopLmWorker();
+    stopAiWorker();
 }

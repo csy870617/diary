@@ -1,0 +1,26 @@
+AI 정밀 검사(Qwen)에 쓰는 남의 것
+
+1. onnxruntime-web 1.31.1 — ort.wasm.min.mjs, ort-wasm-simd-threaded.mjs, ort-wasm-simd-threaded.wasm(.gz)
+   MIT License, Copyright (c) Microsoft Corporation.
+
+   Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+   documentation files (the "Software"), to deal in the Software without restriction, including without limitation
+   the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+   permit persons to whom the Software is furnished to do so, subject to the following conditions:
+   The above copyright notice and this permission notice shall be included in all copies or substantial portions of
+   the Software.
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+   WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+   COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+   OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+2. @huggingface/tokenizers 0.2.0 — tokenizers.min.mjs
+   Apache License 2.0, Copyright Hugging Face. https://www.apache.org/licenses/LICENSE-2.0
+
+3. Qwen3.5-0.8B (Alibaba Cloud Qwen 팀) — Apache License 2.0. https://huggingface.co/Qwen/Qwen3.5-0.8B
+   ONNX 변환본: onnx-community/Qwen3.5-0.8B-Text-ONNX (판 25cdf33f386b487a25f3d743e86442517bdb77ff)
+   - model.onnx.gz: 그 변환본의 model_q4.onnx를 고친 것이다.
+     · 웹 WASM에 없는 GatherBlockQuantized(4비트 임베딩)를 Gather·BitwiseAnd·BitShift·Cast·Sub·Mul로 바꿨다 (계산 결과는 같다).
+     · 외부 데이터(model_q4.onnx_data)를 조각 q0…q19로 나눠 가리키게 했다 (조각의 바이트 범위는 chunks.json).
+   - tokenizer_config.json: 그 변환본의 것 그대로.
+   - 모델 무게(model_q4.onnx_data, 약 550MB)와 tokenizer.json은 사용자가 받기를 누를 때 Hugging Face에서 받는다.

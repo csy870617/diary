@@ -10,7 +10,8 @@
  *   → { type:'download', id }                     ← { type:'progress', id, stage:'download', got, total } … ← { type:'done', id }
  *   → { type:'cancel' }                           (받기를 멈춘다 — 받은 파일은 남겨 두고 다음에 이어 받는다)
  *   → { type:'delete', id }                       ← { type:'done', id }
- *   → { type:'check', id, lines, base, words }    ← { type:'progress', id, stage:'open'|'check', got, total } … ← { type:'result', id, fixes }
+ *   → { type:'check', id, lines, base, words, collect? }  ← { type:'progress', … } … ← { type:'result', id, fixes, pending }
+ *     (collect면 AI 정밀 검사가 다시 견줄 후보를 pending에 담는다)
  *   실패하면 ← { type:'error', id, message, abort? }
  */
 
@@ -151,11 +152,14 @@ async function check(msg, progress) {
     const kiwi = await openKiwi(progress);
     const mine = new Set(words);
     let last = 0;
-    return lm.lmFixes(msg.lines || [], dict, kiwi, {
+    const pending = msg.collect ? [] : null;   // AI 정밀 검사에 넘길 후보
+    const fixes = lm.lmFixes(msg.lines || [], dict, kiwi, {
         base: msg.base || [],
         skip: (w) => mine.has(w),
+        pending,
         onLine: (done, total) => { if (total > 6 && (done === 0 || Date.now() - last > 200)) { last = Date.now(); progress('check', done, total); } },
     });
+    return { fixes, pending };
 }
 
 self.onmessage = async (e) => {
@@ -174,8 +178,8 @@ self.onmessage = async (e) => {
             await removeModel();
             self.postMessage({ type: 'done', id });
         } else if (msg.type === 'check') {
-            const fixes = await check(msg, progress);
-            self.postMessage({ type: 'result', id, fixes });
+            const { fixes, pending } = await check(msg, progress);
+            self.postMessage({ type: 'result', id, fixes, pending });
         }
     } catch (err) {
         const abort = err && err.name === 'AbortError';
