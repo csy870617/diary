@@ -171,34 +171,55 @@ async function startSpellcheck() {
     }
 }
 
-// ─── 정밀 검사 (문맥 언어 모델) ───
+// ─── 정밀 검사 (Kiwi 문맥 언어 모델 + Qwen AI 언어 모델) ───
+// 사용자에게는 '정밀 검사' 하나로 보인다. 받기·삭제는 두 모델을 함께 다루고,
+// 검사는 Kiwi가 문맥을 살펴 고친 뒤 확신하지 못한 후보를 Qwen이 다시 견주는 두 단계로 한다.
 
 /** 기본 검사 결과 뒤에 정밀 검사로 더 찾은 곳을 덧붙인다 (모델이 없으면 받기를 권한다) */
 async function runPrecision(run) {
     if (!lmSupported()) return;
-    const st = await lmStatus();
+    const [st, ai] = await Promise.all([lmStatus(), aiStatus()]);
     if (run.seq !== runSeq) return;
-    if (!st.ready) { showLmOffer(); return; }
+    if (!st.ready && !ai.ready) { showLmOffer(); return; }
+    if (!st.ready || !ai.ready) { showLmOffer(true); return; }   // 하나만 받아 둔 경우 (예전 판) — 나머지를 받게 한다
     if (st.broken) { showLmBroken(st.broken); return; }
-    setLmRow('<i class="ph ph-spinner-gap tts-spin"></i> 정밀 검사로 문맥을 살피는 중…');
-    const ai = await aiStatus();
-    if (run.seq !== runSeq) return;
+    const spin = (t) => setLmRow(`<i class="ph ph-spinner-gap tts-spin"></i> ${t}`);
+    spin('정밀 검사로 문맥을 살피는 중…');
+    let added = 0, removed = 0;
     try {
         const res = await checkDocumentLM(run.lines, run.base, {
-            collect: ai.ready && !ai.broken,
+            collect: true,
             onProgress: (p) => {
                 if (run.seq !== runSeq) return;
-                if (p.stage === 'open') setLmRow('<i class="ph ph-spinner-gap tts-spin"></i> 정밀 검사 모델을 여는 중… (처음엔 조금 걸립니다)');
-                else if (p.stage === 'check' && p.total) setLmRow(`<i class="ph ph-spinner-gap tts-spin"></i> 정밀 검사 중… (${p.got}/${p.total})`);
+                if (p.stage === 'open') spin('정밀 검사 모델을 여는 중… (처음엔 조금 걸립니다)');
+                else if (p.stage === 'check' && p.total) spin(`정밀 검사 중… (${p.got}/${p.total})`);
             }
         });
         if (run.seq !== runSeq) return;
-        const extra = Array.isArray(res) ? res : res.fixes;
-        const { added, removed } = mergePrecision(run, extra);
+        const n1 = mergePrecision(run, res.fixes);
+        added += n1.added; removed += n1.removed;
+        const work = res.pending.length + res.fixes.filter(f => f.win && !f.withdraw).length;
+        if (work && !ai.broken) {
+            spin(`정밀 검사 중… ${added ? `(${added}곳 찾음) ` : ''}AI로 한 번 더 살피는 중`);
+            try {
+                const out = await checkDocumentAI(res.pending, res.fixes, run.base, {
+                    onProgress: (p) => {
+                        if (run.seq !== runSeq) return;
+                        if (p.stage === 'open') spin('AI 모델을 여는 중… (30초쯤 걸릴 수 있습니다)');
+                        else if (p.stage === 'check' && p.total) spin(`AI로 한 번 더 살피는 중… (${p.got + 1}/${p.total})`);
+                    }
+                });
+                if (run.seq !== runSeq) return;
+                const n2 = mergePrecision(run, out);
+                added += n2.added; removed += n2.removed;
+            } catch (err) {
+                // AI 단계를 못 해도(메모리 부족 등) 앞 단계 결과는 그대로 둔다
+                if (run.seq !== runSeq) return;
+                setLmRow(`정밀 검사 ✓ ${resultNote(added, removed)} · AI 단계는 이 기기에서 하지 못했습니다`, [['삭제', 'ghost', deletePrecision]]);
+                return;
+            }
+        }
         setLmRow(`정밀 검사 ✓ ${resultNote(added, removed)}`, [['삭제', 'ghost', deletePrecision]]);
-        if (ai.broken) setAiRow(ai.broken, [['삭제', 'ghost', deleteAi]]);
-        else if (ai.ready) runAi(run, res.pending, extra);
-        else showAiOffer();
     } catch (err) {
         if (run.seq !== runSeq) return;
         showLmBroken((err && err.message) || String(err));
@@ -207,60 +228,6 @@ async function runPrecision(run) {
 
 function resultNote(added, removed) {
     return [added ? `${added}곳 더 찾았습니다` : '더 찾은 곳이 없습니다', removed ? `${removed}곳은 맞는 말이라 뺐습니다` : ''].filter(Boolean).join(' · ');
-}
-
-// ─── AI 정밀 검사 (Qwen 언어 모델) ───
-
-/** 정밀 검사가 넘긴 후보를 AI 정밀 검사로 다시 견주어 덧붙이거나 뺀다 */
-async function runAi(run, pending, lm) {
-    const work = (pending || []).length + lm.filter(f => f.win && !f.withdraw).length;
-    if (!work) { setAiRow('AI 정밀 검사 ✓ 더 살필 곳이 없습니다', [['삭제', 'ghost', deleteAi]]); return; }
-    setAiRow('<i class="ph ph-spinner-gap tts-spin"></i> AI 정밀 검사를 준비하는 중…');
-    try {
-        const out = await checkDocumentAI(pending, lm, run.base, {
-            onProgress: (p) => {
-                if (run.seq !== runSeq) return;
-                if (p.stage === 'open') setAiRow('<i class="ph ph-spinner-gap tts-spin"></i> AI 모델을 여는 중… (30초쯤 걸릴 수 있습니다)');
-                else if (p.stage === 'check' && p.total) setAiRow(`<i class="ph ph-spinner-gap tts-spin"></i> AI 정밀 검사 중… (${p.got + 1}/${p.total})`);
-            }
-        });
-        if (run.seq !== runSeq) return;
-        const { added, removed } = mergePrecision(run, out);
-        setAiRow(`AI 정밀 검사 ✓ ${resultNote(added, removed)}`, [['삭제', 'ghost', deleteAi]]);
-    } catch (err) {
-        if (run.seq !== runSeq) return;
-        setAiRow((err && err.message) || String(err), [['다시 받기', 'ghost', downloadAi], ['삭제', 'ghost', deleteAi]]);
-    }
-}
-
-function setAiRow(html, buttons = [], pct = null) { setLmRow(html, buttons, pct, $('spell-ai')); }
-function showAiOffer() {
-    setAiRow('<b>AI 정밀 검사</b> · Qwen 언어 모델로 문맥을 한 번 더 봅니다 (약 570MB)', [['받기', 'primary', downloadAi]]);
-}
-async function downloadAi() {
-    if (!confirm('맞춤법 AI 정밀 검사 모델(Qwen3.5, 약 570MB)을 Hugging Face에서 내려받습니다.\n'
-        + '데이터 요금이 들 수 있으니 와이파이에서 받기를 권장합니다. 메모리가 적은 기기에서는 열리지 않을 수 있습니다.\n\n'
-        + '한 번 받으면 인터넷 없이도 쓸 수 있고, 글은 기기 밖으로 나가지 않습니다. 계속할까요?')) return;
-    try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) { /* 지울 수 있는 저장소여도 받을 수는 있다 */ }
-    setAiRow('받는 중… 0%', [['취소', 'ghost', () => aiCancel()]], 0);
-    try {
-        await aiDownload((p) => {
-            const pct = p.total ? Math.floor(p.got / p.total * 100) : 0;
-            setAiRow(`AI 모델 받는 중… ${pct}% (${Math.round(p.got / 1e6)}/${Math.round(p.total / 1e6)}MB)`, [['취소', 'ghost', () => aiCancel()]], pct);
-        });
-        showToast('AI 정밀 검사 모델을 받았습니다.');
-        if (lastRun && lastRun.seq === runSeq && !$('spell-panel')?.classList.contains('hidden')) runPrecision(lastRun);
-        else $('spell-ai')?.classList.add('hidden');
-    } catch (err) {
-        if (err && err.abort) { showToast('받기를 멈췄습니다. 다시 누르면 이어서 받습니다.'); showAiOffer(); return; }
-        setAiRow('AI 정밀 검사 모델을 받지 못했습니다. ' + ((err && err.message) || ''), [['다시 받기', 'ghost', downloadAi]]);
-    }
-}
-async function deleteAi() {
-    if (!confirm('맞춤법 AI 정밀 검사 모델을 기기에서 지울까요?\n(필요하면 언제든 다시 받을 수 있습니다)')) return;
-    try { await aiDelete(); } catch (e) { /* 지우지 못했으면 다음에 다시 */ }
-    showToast('AI 정밀 검사 모델을 지웠습니다.');
-    showAiOffer();
 }
 
 /** 정밀 검사 결과를 목록에 넣는다 → { added: 새로 찾았거나 고쳐 고른 곳의 수, removed: 맞는 말이라 뺀 곳의 수 } */
@@ -336,10 +303,12 @@ function setLmRow(html, buttons = [], pct = null, row = lmRow()) {
     row.classList.remove('hidden');
 }
 
-function hideLmRow() { lmRow()?.classList.add('hidden'); $('spell-ai')?.classList.add('hidden'); }
+function hideLmRow() { lmRow()?.classList.add('hidden'); }
 
-function showLmOffer() {
-    setLmRow('<b>정밀 검사</b> · 문맥을 보고 더 찾아냅니다 (약 80MB)', [['받기', 'primary', downloadPrecision]]);
+/** partial: 예전 판에서 한 모델만 받아 둔 경우 */
+function showLmOffer(partial = false) {
+    setLmRow(partial ? '<b>정밀 검사</b> · 새 판이 나왔습니다. 남은 모델을 받아 주세요 (약 570MB)'
+        : '<b>정밀 검사</b> · 문맥과 AI로 더 찾아냅니다 (약 650MB)', [['받기', 'primary', downloadPrecision]]);
 }
 
 function showLmBroken(message) {
@@ -347,13 +316,21 @@ function showLmBroken(message) {
 }
 
 async function downloadPrecision() {
-    if (!confirm('맞춤법 정밀 검사 모델(약 80MB)을 내려받습니다.\n데이터 요금이 들 수 있으니 와이파이에서 받기를 권장합니다.\n\n한 번 받으면 인터넷 없이도 쓸 수 있고, 글은 기기 밖으로 나가지 않습니다. 계속할까요?')) return;
-    setLmRow('받는 중… 0%', [['취소', 'ghost', () => lmCancel()]], 0);
+    if (!confirm('맞춤법 정밀 검사 모델(약 650MB)을 내려받습니다. 문맥 모델(Kiwi)은 이 앱에서, AI 모델(Qwen)은 Hugging Face에서 받습니다.\n'
+        + '데이터 요금이 들 수 있으니 와이파이에서 받기를 권장합니다. 메모리가 적은 기기에서는 AI 단계가 열리지 않을 수 있습니다.\n\n'
+        + '한 번 받으면 인터넷 없이도 쓸 수 있고, 글은 기기 밖으로 나가지 않습니다. 계속할까요?')) return;
+    try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) { /* 지울 수 있는 저장소여도 받을 수는 있다 */ }
+    const cancel = ['취소', 'ghost', () => { lmCancel(); aiCancel(); }];
+    let lmTotal = 0;
+    const show = (got, total) => {
+        const pct = total ? Math.floor(got / total * 100) : 0;
+        setLmRow(`받는 중… ${pct}% (${Math.round(got / 1e6)}/${Math.round(total / 1e6)}MB)`, [cancel], pct);
+    };
+    const AI_SIZE = 570e6;   // 두 번째 모델을 받기 전까지 쓰는 어림값
+    show(0, 0);
     try {
-        await lmDownload((p) => {
-            const pct = p.total ? Math.floor(p.got / p.total * 100) : 0;
-            setLmRow(`받는 중… ${pct}% (${Math.round(p.got / 1e6)}/${Math.round(p.total / 1e6)}MB)`, [['취소', 'ghost', () => lmCancel()]], pct);
-        });
+        await lmDownload((p) => { lmTotal = p.total; show(p.got, p.total + AI_SIZE); });
+        await aiDownload((p) => show(lmTotal + p.got, lmTotal + p.total));
         showToast('정밀 검사 모델을 받았습니다.');
         // 창이 열려 있으면 지금 결과에 바로 정밀 검사를 덧붙인다
         if (lastRun && lastRun.seq === runSeq && !$('spell-panel')?.classList.contains('hidden')) runPrecision(lastRun);
@@ -367,6 +344,7 @@ async function downloadPrecision() {
 async function deletePrecision() {
     if (!confirm('맞춤법 정밀 검사 모델을 기기에서 지울까요?\n(필요하면 언제든 다시 받을 수 있습니다)')) return;
     try { await lmDelete(); } catch (e) { /* 지우지 못했으면 다음에 다시 */ }
+    try { await aiDelete(); } catch (e) { /* 같음 */ }
     showToast('정밀 검사 모델을 지웠습니다.');
     showLmOffer();
 }
@@ -466,8 +444,8 @@ function itemRow(it) {
     if (it.src === 'lm' || it.src === 'ai') {
         const lm = document.createElement('span');
         lm.className = 'spell-kind kind-lm';
-        lm.textContent = it.src === 'ai' ? 'AI' : '정밀';
-        lm.title = it.src === 'ai' ? 'AI 정밀 검사(Qwen 언어 모델)가 찾았습니다' : '정밀 검사(문맥 언어 모델)가 찾았습니다';
+        lm.textContent = '정밀';
+        lm.title = it.src === 'ai' ? '정밀 검사(AI 언어 모델)가 찾았습니다' : '정밀 검사(문맥 언어 모델)가 찾았습니다';
         why.append(lm);
     }
     why.append(' ' + [it.where === 'title' ? '제목' : it.where === 'subtitle' ? '소제목' : '', it.why].filter(Boolean).join(' · '));
