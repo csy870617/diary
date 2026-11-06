@@ -306,9 +306,20 @@ body { background-color: var(--bg-color); color: var(--gray-900); font-family: v
 #write-modal.mode-book .editor-title, #write-modal.mode-book .editor-subtitle, #write-modal.mode-book .meta-info-row, #write-modal.mode-book .divider { break-inside: avoid; }
 #write-modal.mode-book .editor-body img { object-fit: contain; break-inside: avoid; display: block; margin: 10px 0; }
 #write-modal.mode-book .meta-info-row { margin-top: 12px; }
-/* 책 편집 모드: 편집 가능 커서 + 하단 편집 표시 바 */
+/* 책 편집 모드: 편집 가능 커서 */
 #write-modal.mode-book-edit .editor-body { cursor: text; caret-color: var(--primary-color, #4F46E5); }
 #write-modal.mode-book-edit .editor-title, #write-modal.mode-book-edit .editor-subtitle { cursor: text; }
+/* 책 모드(읽기·편집)의 도구 막대 자리: 두 모드 모두 펼친 막대 높이만큼 늘 잡아 둔다.
+   쪽 크기가 같아야 책 읽기와 책 편집의 같은 쪽에 같은 글이 같은 자리에 보인다.
+   (예전에는 책 편집에서만 막대가 자리를 차지해 쪽이 짧았고, 뒤쪽으로 갈수록 글이 밀렸다)
+   - 책 읽기: 막대를 숨기고 자리만 남긴다
+   - 책 편집: 막대를 접어도 도구만 숨기고 자리는 남긴다 (접고 펼 때 쪽이 다시 나뉘지 않게)
+   쪽 높이는 editor.js(bookToolbarBand)가 이 자리의 높이를 재서 뺀다. */
+#write-modal.mode-book .editor-toolbar { flex-shrink: 0; border-bottom: 1px solid var(--gray-200); }
+#write-modal.mode-book .editor-toolbar.collapsed { border-bottom-color: transparent; }
+#write-modal.mode-book .toolbar-content-scroll { max-height: 60px; padding: 10px 15px; transition: none; }
+#write-modal.mode-book .editor-toolbar.collapsed .toolbar-content-scroll { visibility: hidden; }
+#write-modal.mode-book:not(.mode-book-edit) .editor-toolbar { visibility: hidden; }
 .book-nav { display: none !important; }
 .page-indicator { position: fixed; bottom: 40px; right: 30px; left: auto; transform: none; font-family: var(--text-sans); font-size: 13px; color: var(--gray-400); z-index: 2050; background: transparent; padding: 4px 10px; pointer-events: auto !important; cursor: pointer; transition: bottom 0.2s ease; }
 .book-slider-container { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); width: 80%; max-width: 500px; background: var(--surface-color); backdrop-filter: blur(5px); padding: 12px 20px; border-radius: 30px; box-shadow: 0 4px 20px var(--shadow-light); z-index: 2100; display: flex; align-items: center; border: 1px solid var(--gray-100); opacity: 0.95; transition: bottom 0.2s ease; }
