@@ -43,6 +43,8 @@ let resizeTargetTd = null;
 let startX, startY, startW, startH;
 
 let savedRange = null; // 표 삽입 시 커서 위치 저장용
+let lastEditorRange = null; // 본문 안에 있던 마지막 커서 자리 (도구 버튼을 누르면 휴대폰에서 커서가 사라지기 때문)
+let imageInsertRange = null; // 이미지를 넣을 자리 (사진 고르기·자르기 창을 오가는 동안 기억해 둔다)
 let lastLocalEditTime = 0; // 마지막 로컬 편집 시간 (동기화 충돌 방지)
 
 let undoStack = [];
@@ -1442,6 +1444,7 @@ function setupBasicHandling() {
         onBeforePaste: () => saveBeforeChange('paste'),
         onAfterPaste: () => triggerAutoSave(),
         onPasteImage: (src) => {
+            rememberImageInsertPoint();   // 자르기 창을 거쳐도 붙여 넣은 자리에 들어가게
             if (typeof window.processImageDataUrl === 'function') {
                 window.processImageDataUrl(src);
             } else {
@@ -2037,6 +2040,17 @@ function setupBasicHandling() {
         if (!editorBody.isConnected) return;
         syncFormulaEditing();
     });
+    // 본문 안의 커서 자리를 늘 기억해 둔다.
+    // 휴대폰에서는 도구 막대의 버튼을 누르면 커서가 본문을 벗어나, 이미지가 엉뚱한 곳(글 맨 앞)에 들어갔다.
+    document.addEventListener('selectionchange', () => {
+        if (!editorBody.isConnected) return;
+        const sel = window.getSelection();
+        if (!sel.rangeCount) return;
+        const range = sel.getRangeAt(0);
+        if (editorBody.contains(range.startContainer) && editorBody.contains(range.endContainer)) {
+            lastEditorRange = range.cloneRange();
+        }
+    });
     // 편집기를 아예 벗어나면(다른 곳 클릭) 남아 있던 식을 확정한다
     editorBody.addEventListener('focusout', () => {
         setTimeout(() => {
@@ -2229,7 +2243,7 @@ export function getCleanBodyHtml(bodyEl) {
 
 export function openEditor(isEdit, entryData) {
     hideTransientPopups(); // 홈 화면에서 열려 있던 팝업/메뉴를 닫고 에디터로 진입
-    state.isEditMode = isEdit; const writeModal = document.getElementById('write-modal'); openModal(writeModal); writeModal.scrollTop = 0; currentBookPageIndex = 0; bookFollowRange = null; savedRange = null; setupBasicHandling();
+    state.isEditMode = isEdit; const writeModal = document.getElementById('write-modal'); openModal(writeModal); writeModal.scrollTop = 0; currentBookPageIndex = 0; bookFollowRange = null; savedRange = null; lastEditorRange = null; imageInsertRange = null; setupBasicHandling();
     // 이전 글의 TTS 구간이 남아 새 글을 엉뚱한 위치부터 읽는 것을 방지
     import('./tts.js').then(m => m.clearTTSRangeForNewEntry && m.clearTTSRangeForNewEntry()).catch(() => {});
     // 이전 글의 맞춤법 검사 결과(밑줄·목록)도 지운다
@@ -3610,7 +3624,52 @@ function getCellAt(table, rowIndex, colIndex) {
 
 
 export function insertSticker(emoji) { saveBeforeChange('insert'); document.execCommand('insertText', false, emoji); triggerAutoSave(); }
-export function insertImage(src) { saveBeforeChange('insert'); document.execCommand('insertImage', false, src); triggerAutoSave(); if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') { updateBookLayout(); updateBookNav(); } }
+/** 지금 커서 자리가 본문 안이면 그 자리를, 아니면 본문에 마지막으로 있던 자리를 돌려준다 */
+function currentEditorRange(editor) {
+    const sel = window.getSelection();
+    if (sel.rangeCount) {
+        const r = sel.getRangeAt(0);
+        if (editor.contains(r.startContainer) && editor.contains(r.endContainer)) return r.cloneRange();
+    }
+    if (lastEditorRange && editor.contains(lastEditorRange.startContainer) && editor.contains(lastEditorRange.endContainer)) {
+        return lastEditorRange.cloneRange();
+    }
+    return null;
+}
+
+/**
+ * 이미지를 넣을 자리를 기억한다.
+ * 이미지 버튼을 누를 때(또는 그림을 붙여 넣을 때) 부른다 —
+ * 사진 고르기 화면과 자르기 창을 오가는 사이에 커서가 사라져도 이 자리에 넣는다.
+ */
+export function rememberImageInsertPoint() {
+    const editor = document.getElementById('editor-body');
+    imageInsertRange = editor ? currentEditorRange(editor) : null;
+}
+
+export function insertImage(src) {
+    const editor = document.getElementById('editor-body');
+    if (editor) {
+        // 기억해 둔 자리 → 지금 본문 안 커서 → 본문 끝 순서로 넣을 자리를 정한다
+        let range = (imageInsertRange && editor.contains(imageInsertRange.startContainer) && editor.contains(imageInsertRange.endContainer))
+            ? imageInsertRange : currentEditorRange(editor);
+        if (!range) {
+            range = document.createRange();
+            range.selectNodeContents(editor);
+            range.collapse(false);
+        }
+        // focus()는 커서가 본문 밖이면 글 맨 앞으로 옮기므로, 먼저 포커스를 준 뒤 자리를 되돌린다
+        editor.focus({ preventScroll: true });
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+    }
+    imageInsertRange = null;
+    saveBeforeChange('insert');
+    document.execCommand('insertImage', false, src);
+    triggerAutoSave();
+    if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') { updateBookLayout(); updateBookNav(); }
+}
 export function insertPlainText(text) {
     if (!text) return;
     const editor = document.getElementById('editor-body');
