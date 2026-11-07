@@ -763,6 +763,30 @@ function clearBookViewportFrame() {
     modal.style.removeProperty('height');
 }
 
+// 기본 보기(글쓰기)에서도 같은 일이 생겼다: 글 끝부분을 누르면 자판이 올라오며 화면이 통째로 밀려 올라가
+// 맨 위의 도구 막대가 사라졌다. 책 모드처럼 화면 틀을 '지금 보이는 영역'에 맞춰 붙이면
+// 도구 막대는 늘 위에 남고, 본문 칸(editor-container)만 줄어들어 그 안에서 커서 자리로 스크롤된다.
+// (목록 화면의 스크롤 자리를 지키려고 페이지 스크롤은 건드리지 않는다 — position:fixed라 화면 틀과 상관없다)
+function syncDefaultViewportFrame() {
+    if (isBookNavMode()) return;   // 책 모드는 syncBookViewportFrame이 맡는다
+    const modal = document.getElementById('write-modal');
+    if (!modal) return;
+    if (modal.classList.contains('hidden')) {
+        if (modal.style.transform || modal.style.height) clearBookViewportFrame();
+        return;
+    }
+    // 커서를 보이려고 브라우저가 화면 틀 자체(overflow:hidden)를 스크롤해 도구 막대를 밀어낸 경우 되돌린다
+    if (modal.scrollTop !== 0) modal.scrollTop = 0;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const offset = Math.max(0, Math.round(vv.offsetTop));
+    const height = Math.round(vv.height);
+    // 자판이 없고 밀리지도 않았으면 원래 크기(100dvh)로 둔다
+    if (offset === 0 && height >= window.innerHeight - 1) { clearBookViewportFrame(); return; }
+    modal.style.transform = offset ? `translateY(${offset}px)` : '';
+    modal.style.setProperty('height', `${height}px`, 'important');
+}
+
 function toggleBookEventListeners(enable) {
     const container = document.getElementById('editor-container');
     if (!container) return;
@@ -791,6 +815,7 @@ function toggleBookEventListeners(enable) {
         syncBookViewportFrame();
     } else {
         clearBookViewportFrame();
+        syncDefaultViewportFrame();   // 자판이 떠 있는 채로 기본 보기로 돌아온 경우
     }
 }
 
@@ -2112,9 +2137,15 @@ function setupBasicHandling() {
     if (window.visualViewport) {
         const onViewportChange = () => {
             if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') handleBookResize();
-            else if (state.currentViewMode === 'default') scrollCaretIntoDefaultView();
+            else {
+                // 화면 틀을 먼저 보이는 영역에 맞춘 뒤, 줄어든 본문 칸 안에서 커서가 보이게 한다
+                syncDefaultViewportFrame();
+                if (state.currentViewMode === 'default') scrollCaretIntoDefaultView();
+            }
         };
         window.visualViewport.addEventListener('resize', onViewportChange);
+        // 자판이 올라오며 보이는 영역이 아래로 밀리면(scroll) 화면 틀도 따라 붙인다 (커서 스크롤은 하지 않는다)
+        window.visualViewport.addEventListener('scroll', syncDefaultViewportFrame);
     }
 
     // 타이핑/방향키 이동 시에만 커서가 보이도록 스크롤 (focus·click 시에는 하지 않아 화면 튕김 방지)
@@ -2243,7 +2274,7 @@ export function getCleanBodyHtml(bodyEl) {
 
 export function openEditor(isEdit, entryData) {
     hideTransientPopups(); // 홈 화면에서 열려 있던 팝업/메뉴를 닫고 에디터로 진입
-    state.isEditMode = isEdit; const writeModal = document.getElementById('write-modal'); openModal(writeModal); writeModal.scrollTop = 0; currentBookPageIndex = 0; bookFollowRange = null; savedRange = null; lastEditorRange = null; imageInsertRange = null; setupBasicHandling();
+    state.isEditMode = isEdit; const writeModal = document.getElementById('write-modal'); openModal(writeModal); clearBookViewportFrame(); writeModal.scrollTop = 0; currentBookPageIndex = 0; bookFollowRange = null; savedRange = null; lastEditorRange = null; imageInsertRange = null; setupBasicHandling();
     // 이전 글의 TTS 구간이 남아 새 글을 엉뚱한 위치부터 읽는 것을 방지
     import('./tts.js').then(m => m.clearTTSRangeForNewEntry && m.clearTTSRangeForNewEntry()).catch(() => {});
     // 이전 글의 맞춤법 검사 결과(밑줄·목록)도 지운다
