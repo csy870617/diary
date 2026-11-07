@@ -582,16 +582,56 @@ function getCollapsedRangeRect(range) {
     return null;
 }
 
+// 신앙일지는 FAITHS 안의 틀(iframe)에 들어가 열리기도 한다.
+// 이때 자판이 올라오면 밀리는 것은 바깥 FAITHS 화면이고, 이 창의 visualViewport는 그대로라
+// 이 창만 보아서는 화면이 밀린 줄 몰랐다 (그래서 도구 막대가 위로 밀려 사라졌다).
+// 같은 출처(csy870617.github.io)라 바깥 창의 visualViewport를 직접 읽을 수 있다.
+function parentVisualViewport() {
+    try {
+        if (window.parent !== window && window.frameElement && window.parent.visualViewport) return window.parent.visualViewport;
+    } catch (e) { /* 다른 출처의 틀이면 읽을 수 없다 */ }
+    return null;
+}
+
+/** 보이는 영역이 바뀌면 알려 주는 대상들 — 이 창, 그리고 틀 안이면 바깥 창 */
+function visibleAreaTargets() {
+    const list = [];
+    if (window.visualViewport) list.push(window.visualViewport);
+    const p = parentVisualViewport();
+    if (p) list.push(p);
+    return list;
+}
+
+/**
+ * 지금 화면에 실제로 보이는 영역 (이 창의 좌표, { top, height })
+ * 이 창의 visualViewport와, 틀 안이면 바깥 창에서 보이는 영역 가운데 겹치는 부분이다.
+ */
+function getVisibleArea() {
+    const vv = window.visualViewport;
+    let top = vv ? vv.offsetTop : 0;
+    let bottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+    const pvv = parentVisualViewport();
+    if (pvv) {
+        try {
+            const r = window.frameElement.getBoundingClientRect();   // 바깥 창에서 이 틀의 자리
+            top = Math.max(top, pvv.offsetTop - r.top);
+            bottom = Math.min(bottom, pvv.offsetTop + pvv.height - r.top);
+        } catch (e) { /* 못 읽으면 이 창 기준으로 */ }
+    }
+    top = Math.max(0, top);
+    bottom = Math.min(window.innerHeight, bottom);
+    return { top, height: Math.max(0, bottom - top) };
+}
+
 function scrollCaretIntoDefaultView() {
-    if (!window.visualViewport) return;
     const editBody = document.getElementById('editor-body');
     if (!editBody) return;
     const rect = getCaretRect(editBody);
     if (!rect) return;
-    // 가시 영역(visualViewport 기준)에서 커서가 가려지면 최소한만 스크롤
-    const vv = window.visualViewport;
-    const visibleTop = vv.offsetTop;
-    const visibleBottom = vv.offsetTop + vv.height;
+    // 실제로 보이는 영역에서 커서가 가려지면 최소한만 스크롤
+    const area = getVisibleArea();
+    const visibleTop = area.top;
+    const visibleBottom = area.top + area.height;
     const margin = 24;
     let dy = 0;
     if (rect.bottom > visibleBottom - margin) dy = rect.bottom - (visibleBottom - margin);
@@ -748,12 +788,11 @@ function syncBookViewportFrame() {
     if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);
     if (modal.scrollTop !== 0) modal.scrollTop = 0;
 
-    const vv = window.visualViewport;
-    if (!vv) return;
-    // 시각 뷰포트가 내려간 만큼 모달도 따라 내려, 보이는 영역과 정확히 겹치게 한다.
-    const offset = Math.max(0, Math.round(vv.offsetTop));
+    // 보이는 영역이 내려간 만큼 모달도 따라 내려, 보이는 영역과 정확히 겹치게 한다.
+    const area = getVisibleArea();
+    const offset = Math.round(area.top);
     modal.style.transform = offset ? `translateY(${offset}px)` : '';
-    modal.style.setProperty('height', `${Math.round(vv.height)}px`, 'important');
+    modal.style.setProperty('height', `${Math.round(area.height)}px`, 'important');
 }
 
 function clearBookViewportFrame() {
@@ -777,10 +816,9 @@ function syncDefaultViewportFrame() {
     }
     // 커서를 보이려고 브라우저가 화면 틀 자체(overflow:hidden)를 스크롤해 도구 막대를 밀어낸 경우 되돌린다
     if (modal.scrollTop !== 0) modal.scrollTop = 0;
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const offset = Math.max(0, Math.round(vv.offsetTop));
-    const height = Math.round(vv.height);
+    const area = getVisibleArea();
+    const offset = Math.round(area.top);
+    const height = Math.round(area.height);
     // 자판이 없고 밀리지도 않았으면 원래 크기(100dvh)로 둔다
     if (offset === 0 && height >= window.innerHeight - 1) { clearBookViewportFrame(); return; }
     modal.style.transform = offset ? `translateY(${offset}px)` : '';
@@ -796,10 +834,10 @@ function toggleBookEventListeners(enable) {
     container.removeEventListener('touchend', handleBookTouchEnd);
     container.removeEventListener('scroll', handleBookScrollSnap);
     window.removeEventListener('scroll', syncBookViewportFrame);
-    if (window.visualViewport) {
-        window.visualViewport.removeEventListener('scroll', syncBookViewportFrame);
-        window.visualViewport.removeEventListener('resize', syncBookViewportFrame);
-    }
+    visibleAreaTargets().forEach(t => {
+        t.removeEventListener('scroll', syncBookViewportFrame);
+        t.removeEventListener('resize', syncBookViewportFrame);
+    });
     if (enable) {
         container.addEventListener('wheel', handleBookWheel, { passive: false });
         container.addEventListener('touchstart', handleBookTouchStart, { passive: true });
@@ -808,10 +846,10 @@ function toggleBookEventListeners(enable) {
         container.addEventListener('scroll', handleBookScrollSnap, { passive: true });
         // 책 모드에서는 페이지 스크롤이 정상 동작이 아니므로, 밀릴 때마다 즉시 되돌린다.
         window.addEventListener('scroll', syncBookViewportFrame, { passive: true });
-        if (window.visualViewport) {
-            window.visualViewport.addEventListener('scroll', syncBookViewportFrame);
-            window.visualViewport.addEventListener('resize', syncBookViewportFrame);
-        }
+        visibleAreaTargets().forEach(t => {
+            t.addEventListener('scroll', syncBookViewportFrame);
+            t.addEventListener('resize', syncBookViewportFrame);
+        });
         syncBookViewportFrame();
     } else {
         clearBookViewportFrame();
@@ -887,7 +925,7 @@ function scrollAnchorIntoView(anchor, mode) {
 }
 
 function getBookViewportHeight() {
-    return (window.visualViewport && window.visualViewport.height) ? window.visualViewport.height : window.innerHeight;
+    return getVisibleArea().height || window.innerHeight;
 }
 
 /**
@@ -2134,7 +2172,7 @@ function setupBasicHandling() {
 
     // 가상 키보드 등으로 visualViewport가 변할 때 책 모드 레이아웃을 다시 맞춰 하단이 가려지지 않도록 한다.
     // (scroll 이벤트에는 반응하지 않음 — 사용자가 스크롤할 때 커서로 화면이 튕기는 것을 방지)
-    if (window.visualViewport) {
+    {
         const onViewportChange = () => {
             if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') handleBookResize();
             else {
@@ -2143,9 +2181,17 @@ function setupBasicHandling() {
                 if (state.currentViewMode === 'default') scrollCaretIntoDefaultView();
             }
         };
-        window.visualViewport.addEventListener('resize', onViewportChange);
-        // 자판이 올라오며 보이는 영역이 아래로 밀리면(scroll) 화면 틀도 따라 붙인다 (커서 스크롤은 하지 않는다)
-        window.visualViewport.addEventListener('scroll', syncDefaultViewportFrame);
+        // FAITHS 틀 안이면 바깥 창의 알림도 받는다 (자판 때문에 밀리는 것은 바깥 화면이다)
+        visibleAreaTargets().forEach(t => {
+            t.addEventListener('resize', onViewportChange);
+            // 자판이 올라오며 보이는 영역이 아래로 밀리면(scroll) 화면 틀도 따라 붙인다 (커서 스크롤은 하지 않는다)
+            t.addEventListener('scroll', syncDefaultViewportFrame);
+        });
+        // 브라우저가 커서를 보이려고 화면 틀 자체(overflow:hidden)를 스크롤해 도구 막대를 밀어내면 곧바로 되돌린다
+        const writeModalEl = document.getElementById('write-modal');
+        writeModalEl?.addEventListener('scroll', () => {
+            if (!isBookNavMode() && writeModalEl.scrollTop !== 0) writeModalEl.scrollTop = 0;
+        }, { passive: true });
     }
 
     // 타이핑/방향키 이동 시에만 커서가 보이도록 스크롤 (focus·click 시에는 하지 않아 화면 튕김 방지)
