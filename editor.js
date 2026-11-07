@@ -2492,6 +2492,8 @@ export function toggleViewMode(mode) {
         }
     }
     state.currentViewMode = mode;
+    // 음성 읽기(tts.js)가 듣는다 — 편집 모드로 바뀌면 음성을 멈추고 음성 바를 닫는다
+    window.dispatchEvent(new CustomEvent('view-mode-change', { detail: mode }));
     hideTableTools(); // 모드가 바뀌면 표 도구 바는 닫는다 (읽기 모드에서 뜨지 않도록)
     const btnReadOnly = document.getElementById('btn-readonly'), btnBookMode = document.getElementById('btn-bookmode');
     if(btnReadOnly) btnReadOnly.classList.toggle('active', mode === 'readOnly');
