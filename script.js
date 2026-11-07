@@ -1,7 +1,7 @@
 import { state, loadCategoriesFromLocal, saveCategoriesToLocal, isReadOnlyView, loadCategorySortsFromLocal, setCategorySort } from './state.js';
 import { loadDataFromLocal, saveEntry, moveToTrash, permanentDelete, restoreEntry, emptyTrash, checkOldTrash, duplicateEntry } from './data.js';
 import { renderEntries, renderTabs, renderFolders, closeAllModals, openModal, openTrashModal, openMoveModal, renameEntryAction, renameCategoryAction, deleteCategoryAction, addNewCategory, renameFolderAction, deleteFolderAction, openTopicMoveModal, openFolderMoveModal, addTopicInFolderAction, addSubfolderAction, closeFolderPopup, toggleSelectMode, exitSelectMode, selectAllEntries, applyCategorySort, bulkDownloadPdf, downloadEntryPdf } from './ui.js';
-import { isImageFullscreenOpen, closeImageFullscreen, equalizeColumns, equalizeRows, insertTableFunction, clearTableFunction, flushPendingEdit, openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize, getCleanBodyHtml, addRowAbove, addRowBelow, addColumnLeft, addColumnRight, deleteTable, hideTableTools, updateTableTools, setTableWidth, toggleTableEditSection, repositionTableTools } from './editor.js';
+import { rememberImageInsertPoint, isImageFullscreenOpen, closeImageFullscreen, equalizeColumns, equalizeRows, insertTableFunction, clearTableFunction, flushPendingEdit, openEditor, toggleViewMode, formatDoc, changeGlobalFontSize, changeGlobalFontFamily, insertSticker, applyFontStyle, turnPage, jumpToPage, insertImage, insertPlainText, triggerAutoSave, insertTable, createHyperlink, addRow, deleteRow, addColumn, deleteColumn, openTableInsertModal, openTableEditModal, mergeCells, saveCurrentSelection, increaseFontSize, decreaseFontSize, detectSelectionFontSize, getCleanBodyHtml, addRowAbove, addRowBelow, addColumnLeft, addColumnRight, deleteTable, hideTableTools, updateTableTools, setTableWidth, toggleTableEditSection, repositionTableTools } from './editor.js';
 import { setupAuthListeners } from './auth.js';
 import { initGoogleDrive, handleAuthClick, syncNow, syncSoon, pullFromDrive, ensureTokenOnResume, startKeepAlive, setSyncStatus } from './drive.js';
 import { toggleTTSPanel, toggleTTSSettings, playTTS, pauseTTS, stopTTS, updateSpeedDisplay, updateGapDisplay, initTTS, seekTTSByPercent, saveTTSVoice, previewVoice } from './tts.js';
@@ -748,9 +748,7 @@ function setupUIListeners() {
         if (palette) { palette.style.top = '110px'; palette.classList.toggle('hidden'); }
     });
     
-    const imageInput = document.getElementById('image-upload-input');
-    document.getElementById('toolbar-image-btn')?.addEventListener('click', () => { document.getElementById('editor-body')?.focus(); imageInput?.click(); });
-    imageInput?.addEventListener('change', (e) => { if (e.target.files[0]) processImage(e.target.files[0]); e.target.value = ''; });
+    setupImageInsertButton();
 
     setupCropModalHandlers();
 
@@ -906,7 +904,59 @@ function compressAndInsertImage(dataUrl, maxWidth = 800, quality = 0.7) {
         .catch(err => { console.error(err); alert('이미지를 불러올 수 없습니다. 손상된 파일일 수 있습니다.'); });
 }
 
+// 안드로이드는 사진 고르기 창에 갤러리가 안 보이는 일이 많아(카메라·파일만 뜬다),
+// 이미지 버튼을 누르면 갤러리·카메라·파일 가운데 고르게 한다.
+// 아이폰은 브라우저가 이미 '사진 보관함·사진 찍기·파일 선택'을 띄워 주므로 그대로 둔다.
+const IS_ANDROID_DEVICE = /Android/i.test(navigator.userAgent || '');
+
+function setupImageInsertButton() {
+    const btn = document.getElementById('toolbar-image-btn');
+    const menu = document.getElementById('image-source-menu');
+    const inputs = {
+        gallery: document.getElementById('image-upload-input'),   // accept="image/*" — 갤러리(사진 고르기)
+        camera: document.getElementById('image-camera-input'),    // capture — 바로 사진 찍기
+        file: document.getElementById('image-file-input'),        // 종류 제한 없음 — 파일 탐색기
+    };
+    const closeMenu = () => menu?.classList.add('hidden');
+    const pick = (source) => {
+        closeMenu();
+        inputs[source]?.click();
+    };
+
+    // 버튼을 누르는 순간에는 아직 커서가 본문에 있다 — 이때 넣을 자리를 기억한다
+    btn?.addEventListener('pointerdown', () => rememberImageInsertPoint());
+    btn?.addEventListener('mousedown', (e) => e.preventDefault());   // 데스크톱: 버튼이 커서를 빼앗지 않게
+    btn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // pointerdown이 없는 환경(키보드 등)을 위해 한 번 더 기억한다 (본문 밖이면 마지막 자리를 쓴다)
+        rememberImageInsertPoint();
+        if (!IS_ANDROID_DEVICE || !menu) { pick('gallery'); return; }
+        if (!menu.classList.contains('hidden')) { closeMenu(); return; }
+        // 버튼 바로 아래에 띄운다 (화면 밖으로 나가지 않게)
+        menu.classList.remove('hidden');
+        const r = btn.getBoundingClientRect();
+        const mw = menu.offsetWidth;
+        const left = Math.min(Math.max(8, r.left + r.width / 2 - mw / 2), window.innerWidth - mw - 8);
+        menu.style.left = left + 'px';
+        menu.style.top = (r.bottom + 6) + 'px';
+    });
+    menu?.addEventListener('mousedown', (e) => e.preventDefault());
+    menu?.querySelectorAll('.image-source-option').forEach(opt => {
+        opt.addEventListener('click', (e) => { e.stopPropagation(); pick(opt.dataset.source); });
+    });
+    // 메뉴 바깥을 누르면 닫는다
+    document.addEventListener('click', (e) => {
+        if (menu && !menu.classList.contains('hidden') && !menu.contains(e.target) && !e.target.closest('#toolbar-image-btn')) closeMenu();
+    });
+
+    Object.values(inputs).forEach(input => {
+        input?.addEventListener('change', (e) => { if (e.target.files[0]) processImage(e.target.files[0]); e.target.value = ''; });
+    });
+}
+
 function processImage(file) {
+    // '파일'에서는 아무 파일이나 고를 수 있으니 그림인지 먼저 본다 (종류를 모르는 파일은 일단 열어 본다)
+    if (file.type && !file.type.startsWith('image/')) { alert('이미지 파일만 넣을 수 있습니다.'); return; }
     const reader = new FileReader();
     reader.onload = (e) => {
         openCropModal(e.target.result, (resultDataUrl, wasCropped) => {

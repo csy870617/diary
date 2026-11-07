@@ -7,8 +7,8 @@
     <title>신앙일지 | Faith Log</title>
     <!-- 앱 버전: 배포할 때마다 이 값, 아래 import map, version.json을 함께 올린다.
          (화면을 다시 열 때 version.json과 비교해 새 버전이면 자동으로 새로고침한다) -->
-    <meta name="app-version" content="2026.11.6.4">
-    <link rel="stylesheet" href="style.css?v=2026.11.6.4">
+    <meta name="app-version" content="2026.11.7.1">
+    <link rel="stylesheet" href="style.css?v=2026.11.7.1">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Serif+KR:wght@300;400;600&family=Pretendard:wght@300;400;600&display=swap" rel="stylesheet">
     <script>
         // 페이지 로드 전 다크모드 적용 (깜빡임 방지)
@@ -158,6 +158,8 @@
                     <button class="tool-btn" id="toolbar-hilite-btn"><i class="ph ph-highlighter" style="color:#FDE047;"></i></button>
                     <button class="tool-btn" id="toolbar-image-btn"><i class="ph ph-image"></i></button>
                     <input type="file" id="image-upload-input" accept="image/*" style="display: none;">
+                    <input type="file" id="image-camera-input" accept="image/*" capture="environment" style="display: none;">
+                    <input type="file" id="image-file-input" style="display: none;">
                     <button class="tool-btn" id="toolbar-textfile-btn" title="텍스트 파일 삽입"><i class="ph ph-file-text"></i></button>
                     <input type="file" id="textfile-upload-input" accept=".txt,text/plain" style="display: none;">
                     <button class="tool-btn" id="sticker-btn"><i class="ph ph-smiley"></i></button>
@@ -195,6 +197,12 @@
         </div>
         <div id="page-indicator" class="page-indicator hidden"></div>
         <button id="btn-scroll-top" class="btn-scroll-top hidden" title="맨 위로"><i class="ph ph-arrow-up"></i></button>
+        <!-- 휴대폰(안드로이드)에서 이미지 버튼을 누르면 어디서 가져올지 고른다 -->
+        <div id="image-source-menu" class="image-source-menu hidden">
+            <button type="button" class="image-source-option" data-source="gallery"><i class="ph ph-images"></i><span>갤러리</span></button>
+            <button type="button" class="image-source-option" data-source="camera"><i class="ph ph-camera"></i><span>카메라</span></button>
+            <button type="button" class="image-source-option" data-source="file"><i class="ph ph-folder-open"></i><span>파일</span></button>
+        </div>
         <div id="sticker-palette" class="sticker-palette hidden"><div id="sticker-grid" class="sticker-grid"></div></div>
         <div id="tts-panel" class="tts-panel hidden">
             <div id="tts-settings" class="tts-settings hidden">
@@ -462,30 +470,30 @@
     <script type="importmap">
     {
         "imports": {
-            "./state.js": "./state.js?v=2026.11.6.4",
-            "./data.js": "./data.js?v=2026.11.6.4",
-            "./ui.js": "./ui.js?v=2026.11.6.4",
-            "./editor.js": "./editor.js?v=2026.11.6.4",
-            "./auth.js": "./auth.js?v=2026.11.6.4",
-            "./drive.js": "./drive.js?v=2026.11.6.4",
-            "./tts.js": "./tts.js?v=2026.11.6.4",
-            "./neural-tts.js": "./neural-tts.js?v=2026.11.6.4",
-            "./speech-text.js": "./speech-text.js?v=2026.11.6.4",
-            "./spell-text.js": "./spell-text.js?v=2026.11.6.4",
-            "./spell-words.js": "./spell-words.js?v=2026.11.6.4",
-            "./spell-engine.js": "./spell-engine.js?v=2026.11.6.4",
-            "./spell-hunspell.js": "./spell-hunspell.js?v=2026.11.6.4",
-            "./spell-lm.js": "./spell-lm.js?v=2026.11.6.4",
-            "./spell-qwen.js": "./spell-qwen.js?v=2026.11.6.4",
-            "./spellcheck.js": "./spellcheck.js?v=2026.11.6.4",
-            "./faiths-sso.js": "./faiths-sso.js?v=2026.11.6.4",
-            "./storage.js": "./storage.js?v=2026.11.6.4",
-            "./utils.js": "./utils.js?v=2026.11.6.4",
-            "./formula.js": "./formula.js?v=2026.11.6.4",
-            "./config.js": "./config.js?v=2026.11.6.4"
+            "./state.js": "./state.js?v=2026.11.7.1",
+            "./data.js": "./data.js?v=2026.11.7.1",
+            "./ui.js": "./ui.js?v=2026.11.7.1",
+            "./editor.js": "./editor.js?v=2026.11.7.1",
+            "./auth.js": "./auth.js?v=2026.11.7.1",
+            "./drive.js": "./drive.js?v=2026.11.7.1",
+            "./tts.js": "./tts.js?v=2026.11.7.1",
+            "./neural-tts.js": "./neural-tts.js?v=2026.11.7.1",
+            "./speech-text.js": "./speech-text.js?v=2026.11.7.1",
+            "./spell-text.js": "./spell-text.js?v=2026.11.7.1",
+            "./spell-words.js": "./spell-words.js?v=2026.11.7.1",
+            "./spell-engine.js": "./spell-engine.js?v=2026.11.7.1",
+            "./spell-hunspell.js": "./spell-hunspell.js?v=2026.11.7.1",
+            "./spell-lm.js": "./spell-lm.js?v=2026.11.7.1",
+            "./spell-qwen.js": "./spell-qwen.js?v=2026.11.7.1",
+            "./spellcheck.js": "./spellcheck.js?v=2026.11.7.1",
+            "./faiths-sso.js": "./faiths-sso.js?v=2026.11.7.1",
+            "./storage.js": "./storage.js?v=2026.11.7.1",
+            "./utils.js": "./utils.js?v=2026.11.7.1",
+            "./formula.js": "./formula.js?v=2026.11.7.1",
+            "./config.js": "./config.js?v=2026.11.7.1"
         }
     }
     </script>
-    <script type="module" src="script.js?v=2026.11.6.4"></script>
+    <script type="module" src="script.js?v=2026.11.7.1"></script>
 </body>
 </html>
