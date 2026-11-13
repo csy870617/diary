@@ -20,8 +20,20 @@ let touchStartX = 0;
 let touchStartY = 0;
 let bookSwiping = false; // 책 편집 모드에서 가로 스와이프 판정 중
 let lastBookColWidth = 0; // 마지막 책 레이아웃 시 컨테이너 폭 (키보드로 높이만 변한 경우 재배치 생략용)
-let lastBookViewportH = 0; // 마지막 책 레이아웃 시 가시 뷰포트 높이 (가상 키보드 표시/숨김 감지용)
-let bookKbdResizeTimer = null; // 키보드로 높이가 크게 변할 때 재배치를 한 번만 반영하기 위한 디바운스 타이머
+let bookLayoutH = 0;        // 지금 쪽 나눔에 쓴 '보이는 높이' (자판이 떠 있어도 자판 없는 높이로 나눈다)
+// 자판 살피기 — 자판은 글 칸에 포커스가 있을 때만 올라오므로, 그때 보이는 높이가 크게 줄면 자판으로 본다
+let fullVisibleH = 0;       // 자판이 없을 때 보이는 높이 (화면 폭이 바뀌면 새로 잰다)
+let fullVisibleW = 0;       // fullVisibleH를 잰 화면 폭
+let kbdUp = false;          // 자판이 떠 있는가 (내려가는 동안에도 다 내려갈 때까지는 떠 있는 것으로 본다)
+let kbdLearnTimer = null;   // 자판 높이를 기억해 두는 타이머
+let kbdSafetyTimer = null;  // 포커스 없이 '자판이 떠 있다'로 남지 않게 되짚는 타이머
+// 책 편집에서 자판이 올라오면 쪽을 다시 나누지 않고, 커서 줄이 자판에 가리지 않게 본문만 위로 올린다
+let bookLift = 0;           // 본문을 위로 올린 만큼(px)
+let bookLiftPredict = null; // 자판이 다 올라오기 전에 미리 올려 둔 경우 { bottom, until }
+let bookLiftSettle = false; // 미리 올려 둔 뒤 자판이 실제로 올라오면, 꼭 필요한 만큼으로 다시 맞춘다
+let bookPanning = false;    // 자판이 떠 있을 때 본문을 위아래로 끌어 가려진 줄을 보는 중
+let bookPanStartLift = 0;
+let bookTouchStartMs = 0;
 let bookPinPage = -1;       // 탭한 시점에 보이던 페이지 (캐럿 좌표 대신 이 페이지를 고정)
 let bookPinActive = false;  // 탭/페이지이동 후 현재 페이지를 고정(브라우저 자동 스크롤 무시). 타이핑 시작 시 해제
 let lastBookTouchTime = 0;  // 마지막 책 모드 터치 시각 (터치로 발생하는 에뮬레이트 mousedown 무시용)
@@ -411,6 +423,9 @@ function handleBookTouchStart(e) {
     touchStartX = e.changedTouches[0].screenX;
     touchStartY = e.changedTouches[0].screenY;
     bookSwiping = false;
+    bookPanning = false;
+    bookPanStartLift = bookLift;
+    bookTouchStartMs = Date.now();
     // 탭 직전(아직 스크롤 안 됨)에 보이던 페이지를 기록해 둔다 (캐럿 좌표에 의존하지 않음)
     const container = document.getElementById('editor-container');
     if (container) {
@@ -424,6 +439,17 @@ function handleBookTouchMove(e) {
     // 책 편집 모드: 가로 이동이 뚜렷하면 스와이프로 간주(편집/텍스트 선택 방해 방지)
     const dx = e.changedTouches[0].screenX - touchStartX;
     const dy = e.changedTouches[0].screenY - touchStartY;
+    // 자판이 떠 있을 때 위아래로 끌면 본문을 올리고 내려, 자판에 가려진 줄을 볼 수 있게 한다.
+    // (길게 누른 뒤 끄는 것은 글 고르기이므로 손대지 않는다)
+    if (!bookSwiping && !bookPanning && kbdUp && Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx)
+        && Date.now() - bookTouchStartMs < 400 && bookLiftRange() > 0) {
+        bookPanning = true;
+    }
+    if (bookPanning) {
+        e.preventDefault();
+        applyBookLift(Math.max(0, Math.min(bookLiftRange(), bookPanStartLift - dy)), false);
+        return;
+    }
     if (!bookSwiping && Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) {
         bookSwiping = true;
         // 모바일 contenteditable에서 가로 드래그로 시작된 텍스트 선택을 적극 해제
@@ -438,6 +464,11 @@ function handleBookTouchMove(e) {
 }
 function handleBookTouchEnd(e) {
     if (!isBookNavMode() || isTurningPage) return;
+    if (bookPanning) {   // 위아래로 끌어 본문을 옮긴 것 — 커서는 그대로 둔다
+        bookPanning = false;
+        lastBookTouchTime = Date.now();
+        return;
+    }
     const diffX = touchStartX - e.changedTouches[0].screenX;
     const diffY = touchStartY - e.changedTouches[0].screenY;
     // 책 편집 모드에서는 가로 우세 스와이프만 페이지 이동 (탭/세로 이동은 편집으로 둠)
@@ -463,56 +494,47 @@ function handleBookTouchEnd(e) {
         if (container) { container.scrollLeft = bookPinPage * Math.floor(container.clientWidth); container.scrollTop = 0; }
         updateBookNav();
     }
+    if (state.currentViewMode === 'book-edit') {
+        // 누른 줄이 곧 올라올 자판에 가릴 자리면, 자판과 함께 미리 올려 둔다
+        predictBookLiftForTap(e);
+        // 커서가 옮겨 간 뒤(브라우저가 누른 자리에 커서를 놓은 뒤) 가리지 않는지 한 번 더 본다
+        setTimeout(() => { if (state.currentViewMode === 'book-edit' && !bookPanning) updateBookLift(); }, 80);
+    }
 }
 function handleBookResize() {
     if (state.currentViewMode !== 'book' && state.currentViewMode !== 'book-edit') return;
     const container = document.getElementById('editor-container');
+    // 화면 틀을 먼저 '지금 보이는 영역'에 맞춘다 (이걸 해야 이후 측정값이 정확하다)
+    syncBookViewportFrame();
+    if (!container) return;
     // 폭이 바뀌면(회전/화면 변화) 반드시 재배치해야 컬럼 폭과 스크롤 보폭이 어긋나지 않는다.
-    // 폭은 그대로이고 높이만 변한 경우는 아래에서 변화 크기에 따라 나눠 처리한다(자잘한 변동=유지, 키보드=재배치).
-    const widthChanged = !container || container.clientWidth !== lastBookColWidth;
-    if (state.currentViewMode === 'book-edit' && !widthChanged) {
-        // 폭은 그대로이고 높이만 변한 경우.
-        const heightDelta = Math.abs(getBookViewportHeight() - lastBookViewportH);
-        // 주소창 노출/숨김 같은 자잘한 높이 변동은 재배치하면 오히려 튀므로 현재 페이지만 유지한다.
-        if (heightDelta < 100) {
-            syncBookViewportFrame(); // 주소창 변화로 시각 뷰포트가 밀린 경우에도 화면은 제자리에 붙여둔다
-            if (container) { container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth); container.scrollTop = 0; }
-            updateBookNav();
-            return;
-        }
-        // 가상 키보드 표시/숨김 등 큰 높이 변화: 페이지 높이를 현재 가시 영역에 맞춰 다시 배치하고
-        // 커서가 있는 페이지로 스냅한다. → 편집 중인 줄(맨 윗줄·맨 아랫줄 포함)이 키보드에 가리지 않는다.
-        // 키보드 애니메이션 중 여러 번 발생하는 리사이즈는 디바운스로 한 번만 반영해 화면 떨림을 막는다.
-        if (bookKbdResizeTimer) clearTimeout(bookKbdResizeTimer);
-        bookKbdResizeTimer = setTimeout(() => {
-            bookKbdResizeTimer = null;
-            if (state.currentViewMode !== 'book-edit') return;
-            // 1) 먼저 화면 틀을 '지금 보이는 영역'에 맞춘다 (이걸 해야 이후 측정값이 정확하다)
-            syncBookViewportFrame();
-            // 2) 줄어든 높이에 맞춰 페이지를 다시 배치
-            updateBookLayout();
-            // 3) 커서가 들어간 페이지로 이동 — 재배치로 커서가 다른 페이지로 밀려도 따라간다
-            const c = document.getElementById('editor-container');
-            if (!scrollCursorIntoBookView() && c) c.scrollLeft = currentBookPageIndex * Math.floor(c.clientWidth);
-            updateBookNav();
-        }, 120);
+    const widthChanged = container.clientWidth !== lastBookColWidth;
+    // 자판이 떠 있으면 getBookLayoutHeight()는 자판 없는 높이를 돌려준다 → 자판 때문에는 쪽을 다시 나누지 않는다.
+    // 예전에는 자판이 올라올 때마다 짧아진 높이로 쪽을 다시 나눠(7쪽 → 16쪽) 누른 줄이 엉뚱한 쪽·자리로 옮겨 갔고,
+    // 자판이 내려가면 또 다시 나눠 글이 두 번씩 출렁였다.
+    const dh = Math.abs(getBookLayoutHeight() - bookLayoutH);
+    // 책 편집 중 주소창 같은 자잘한 높이 변화도 쪽을 그대로 둔다 (다시 나누면 오히려 튄다)
+    const keepPages = !widthChanged && (dh < 2 || (state.currentViewMode === 'book-edit' && dh < 100));
+    if (keepPages) {
+        container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
+        container.scrollTop = 0;
+        updateBookLift();
+        updateBookNav();
         return;
     }
-    // 화면 틀을 먼저 '지금 보이는 영역'에 맞춘다. 자판이 내려갈 때 이 함수가 틀 맞추기보다 먼저 불리면
-    // 틀이 아직 자판 높이에 묶여 있어 쪽이 짧게 나뉜 채로 쪽 번호를 잡았다.
-    syncBookViewportFrame();
+    // 쪽을 다시 나눈다(화면을 돌렸거나, 자판 말고 다른 까닭으로 높이가 바뀌었다) — 보던 글자가 든 쪽을 다시 연다.
+    // 예전에는 쪽 번호만 지켜서 다시 나눈 뒤 엉뚱한 글이 보였다.
+    const anchor = bookFollowRange || captureBookFollowRange();
     updateBookLayout();
-    if (state.currentViewMode === 'book-edit') {
-        if (!scrollCursorIntoBookView()) {
-            if (container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
-        }
-    } else {
-        // 책 편집에서 막 돌아왔다면(폰에서 자판이 내려가며 쪽이 다시 나뉜 경우) 보던 글자가 든 쪽으로 간다.
-        // 예전에는 쪽 번호만 지켜서, 자판 때문에 짧게 나뉜 쪽 번호로 엉뚱한 쪽이 열렸다.
-        const followPage = bookPageOfRange(bookFollowRange);
-        if (followPage >= 0) currentBookPageIndex = followPage;
-        if (container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
+    const page = bookPageOfRange(anchor);
+    if (page >= 0) currentBookPageIndex = page;
+    const stride = Math.floor(container.clientWidth);
+    if (stride > 0) {
+        currentBookPageIndex = Math.min(currentBookPageIndex, getBookPageCount(container, stride) - 1);
+        container.scrollLeft = currentBookPageIndex * stride;
     }
+    container.scrollTop = 0;
+    updateBookLift({ fromZero: true });
     updateBookNav();
 }
 
@@ -659,23 +681,6 @@ function getBookPageCount(container, stride) {
     return Math.max(1, Math.ceil(container.scrollWidth / stride - 0.05));
 }
 
-function scrollCursorIntoBookView() {
-    const container = document.getElementById('editor-container');
-    if (!container) return false;
-    const editBody = document.getElementById('editor-body');
-    const rect = getCaretRect(editBody);
-    if (!rect) return false;
-    const cr = container.getBoundingClientRect();
-    const stride = Math.floor(container.clientWidth);
-    if (stride <= 0) return false;
-    const offsetX = rect.left - cr.left + container.scrollLeft;
-    const totalPages = getBookPageCount(container, stride);
-    const pageIndex = Math.max(0, Math.min(totalPages - 1, Math.floor(offsetX / stride)));
-    currentBookPageIndex = pageIndex;
-    container.scrollLeft = pageIndex * stride;
-    return true;
-}
-
 /** 글자 자리(Range)가 놓인 책 쪽 번호 (본문 밖이거나 못 재면 -1) */
 function bookPageOfRange(range) {
     const container = document.getElementById('editor-container');
@@ -789,10 +794,12 @@ function syncBookViewportFrame() {
     if (modal.scrollTop !== 0) modal.scrollTop = 0;
 
     // 보이는 영역이 내려간 만큼 모달도 따라 내려, 보이는 영역과 정확히 겹치게 한다.
-    const area = getVisibleArea();
+    const area = noteVisibleArea();
     const offset = Math.round(area.top);
     modal.style.transform = offset ? `translateY(${offset}px)` : '';
     modal.style.setProperty('height', `${Math.round(area.height)}px`, 'important');
+    // 보이는 영역이 바뀌었으니 커서 줄이 자판에 가리지 않게 다시 맞춘다
+    updateBookLift();
 }
 
 function clearBookViewportFrame() {
@@ -800,6 +807,297 @@ function clearBookViewportFrame() {
     if (!modal) return;
     modal.style.transform = '';
     modal.style.removeProperty('height');
+}
+
+// ─── 자판 살피기 ───
+// 자판은 글 칸에 포커스가 있을 때만 올라온다. 그때 보이는 높이가 크게 줄면 자판으로 본다.
+// 자판이 없을 때의 높이(fullVisibleH)를 기억해 두고, 쪽은 늘 그 높이로 나눈다 (getBookLayoutHeight).
+const KBD_MIN_PX = 120;   // 보이는 높이가 이보다 많이 줄어야 자판으로 본다 (주소창은 60px 남짓)
+// 자판 없는 높이와 이만큼 안으로 돌아와야 자판이 다 내려간 것 — 내려가는 도중(아이폰은 몇 번에 나눠 알린다)에
+// '내려갔다'고 보면 덜 내려간 높이로 쪽을 다시 나눴다가 다 내려가면 또 나눠 글이 두 번 출렁인다.
+// 끝내 다 돌아오지 않으면(주소창이 새로 보이는 등) 포커스가 풀린 뒤 kbdSafetyTimer가 한 번 정리한다.
+const KBD_GONE_PX = 8;
+
+/** 화면 자판을 쓰는 기기인가 (손가락이 주된 입력인 휴대폰·태블릿). 컴퓨터에서 창 높이를 줄인 것을 자판으로 보지 않는다 */
+function mayHaveSoftKeyboard() {
+    try { return window.matchMedia('(pointer: coarse)').matches; } catch (_) { return false; }
+}
+
+/** 자판이 올라오는 칸에 포커스가 있는가 */
+function editableFocused() {
+    const a = document.activeElement;
+    if (!a || a === document.body) return false;
+    if (a.isContentEditable) return true;
+    if (a.tagName === 'TEXTAREA') return !a.readOnly && !a.disabled;
+    if (a.tagName === 'INPUT') return !a.readOnly && !a.disabled && !/^(button|checkbox|radio|range|color|file|submit|reset|image|hidden)$/i.test(a.type || '');
+    return false;
+}
+
+/** 보이는 영역을 재고, 자판이 떠 있는지(kbdUp)와 자판 없는 높이(fullVisibleH)를 고친다 */
+function noteVisibleArea() {
+    const area = getVisibleArea();
+    const h = area.height;
+    const w = window.innerWidth;
+    if (!h) return area;
+    if (w !== fullVisibleW || !fullVisibleH) {
+        // 처음 재거나 화면을 돌렸다 — 지금 높이를 자판 없는 높이로 삼는다
+        fullVisibleW = w; fullVisibleH = h; kbdUp = false;
+        return area;
+    }
+    if (h > fullVisibleH) fullVisibleH = h;
+    const gap = fullVisibleH - h;
+    if (!kbdUp) {
+        if (editableFocused() && mayHaveSoftKeyboard() && gap > Math.max(KBD_MIN_PX, fullVisibleH * 0.15)) {
+            kbdUp = true;
+            // 자판과 함께 미리 올려 둔 것은 이제 실제 자판에 맞춰 꼭 필요한 만큼으로 다시 맞춘다
+            if (bookLiftPredict) { bookLiftPredict = null; bookLiftSettle = true; }
+        } else if (!editableFocused()) {
+            // 포커스 없이 줄었다(주소창·화면 나누기 등): 자판이 아니니 새 높이를 받아들인다.
+            // 포커스가 있을 때는 줄여 잡지 않는다 — 자판이 천천히 올라오는 동안(아이폰) 조금씩 줄어든 높이를
+            // 자판 없는 높이로 잘못 받아들이면 자판을 끝내 알아보지 못한다.
+            fullVisibleH = h;
+        }
+    } else if (gap < KBD_GONE_PX) {
+        kbdUp = false;
+    }
+    if (kbdUp) {
+        // 자판이 다 올라와 멈추면 높이를 기억해 둔다 (다음에 누를 때 자판과 함께 미리 올리려고)
+        clearTimeout(kbdLearnTimer);
+        kbdLearnTimer = setTimeout(() => { if (kbdUp) rememberKbdHeight(fullVisibleH - getVisibleArea().height); }, 400);
+        // 포커스가 풀렸는데도 '자판이 떠 있다'로 남지 않게 한 번 되짚는다
+        clearTimeout(kbdSafetyTimer);
+        kbdSafetyTimer = setTimeout(() => {
+            if (!kbdUp || editableFocused()) return;
+            kbdUp = false;
+            fullVisibleH = getVisibleArea().height || fullVisibleH;
+            if (isBookNavMode()) handleBookResize();
+        }, 1500);
+    }
+    return area;
+}
+
+// 화면 폭마다 마지막으로 본 자판 높이 (한글·영문 자판에 따라 조금 다르다)
+const KBD_STORE_KEY = 'faith_kbd_heights';
+let kbdHeights = null;
+function loadKbdHeights() {
+    if (kbdHeights) return kbdHeights;
+    try { kbdHeights = JSON.parse(localStorage.getItem(KBD_STORE_KEY) || '{}') || {}; } catch (_) { kbdHeights = {}; }
+    return kbdHeights;
+}
+function knownKbdHeight() {
+    const v = Number(loadKbdHeights()[String(window.innerWidth)]);
+    return v > 0 ? v : 0;
+}
+function rememberKbdHeight(h) {
+    h = Math.round(h);
+    if (!(h > 80) || h > fullVisibleH * 0.85) return;
+    const map = loadKbdHeights();
+    const key = String(window.innerWidth);
+    if (map[key] === h) return;
+    map[key] = h;
+    try { localStorage.setItem(KBD_STORE_KEY, JSON.stringify(map)); } catch (_) { /* 저장 못 해도 이번에는 쓴다 */ }
+}
+
+/** 쪽을 나눌 때 쓸 보이는 높이 — 자판이 떠 있으면 자판이 없을 때의 높이 (자판 때문에는 쪽을 다시 나누지 않는다) */
+function getBookLayoutHeight() {
+    const area = noteVisibleArea();
+    if (kbdUp && fullVisibleH) return fullVisibleH;
+    return area.height || window.innerHeight;
+}
+
+// ─── 책 편집: 자판 위로 본문 올리기 ───
+// 자판이 올라오면 쪽은 그대로 두고, 커서 줄이 자판에 가릴 때만 본문 칸을 그만큼 위로 올린다.
+// 누른 줄이 자판보다 위에 있으면 아무것도 움직이지 않고, 아래에 있으면 자판 바로 위로 미끄러져 올라간다.
+// 자판이 내려가면 다시 내려온다. 쪽 번호·쪽마다 보이는 글은 처음부터 끝까지 그대로다.
+const BOOK_LIFT_GAP_TOP = 12;   // 커서 줄과 도구 막대 사이에 남길 틈
+
+/** 본문 칸이 보이는 창(화면 좌표): 도구 막대 아래부터 보이는 영역 아래(자판 위)까지. range는 올릴 수 있는 최대 높이 */
+function bookLiftWindow(container) {
+    const toolbar = document.getElementById('editor-toolbar');
+    // 본문 칸의 '올리기 전' 윗변 = 도구 막대 아랫변 (올리는 동안에도 흔들리지 않는 기준)
+    const top = toolbar ? toolbar.getBoundingClientRect().bottom : container.getBoundingClientRect().top + bookLift;
+    const area = getVisibleArea();
+    let bottom = area.top + area.height;
+    if (bookLiftPredict) {
+        if (!kbdUp && Date.now() < bookLiftPredict.until) bottom = Math.min(bottom, bookLiftPredict.bottom);
+        else bookLiftPredict = null;
+    }
+    const boxBottom = top + container.offsetHeight;
+    return { top, bottom: Math.min(bottom, boxBottom), range: Math.max(0, Math.round(boxBottom - bottom)) };
+}
+
+/** 지금 본문을 얼마나 올릴 수 있는가 (자판이 없으면 0) */
+function bookLiftRange() {
+    const container = document.getElementById('editor-container');
+    return container && state.currentViewMode === 'book-edit' ? bookLiftWindow(container).range : 0;
+}
+
+/** 커서(또는 포커스된 제목·소제목 칸)의 본문 칸 안 자리 { top, bottom } — 올림과 상관없는 값. 다른 쪽에 있으면 null */
+function bookCaretBox(container) {
+    const a = document.activeElement;
+    if (!a || !container.contains(a)) return null;
+    let rect = null;
+    if (a.id === 'editor-body') rect = getCaretRect(a);
+    else if (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') rect = a.getBoundingClientRect();
+    if (!rect) return null;
+    const cr = container.getBoundingClientRect();
+    if (rect.right < cr.left || rect.left > cr.right) return null;   // 다른 쪽(화면 밖)에 있는 커서
+    return { top: rect.top - cr.top, bottom: rect.bottom - cr.top };
+}
+
+/**
+ * 커서 줄이 보이도록 본문 올림을 맞춘다 (책 편집에서만, 그 밖에는 0).
+ * 꼭 필요한 만큼만 움직인다 — 커서가 이미 보이면 그대로 둔다.
+ *   fromZero: 올림을 0에서부터 다시 잰다 (쪽을 넘겼거나, 미리 올린 것을 실제 자판에 맞출 때)
+ *   box: 커서 자리 대신 쓸 자리 (누른 순간에는 아직 커서가 옮겨 가지 않았다)
+ */
+function updateBookLift({ fromZero = false, animate = true, box = null, slow = false } = {}) {
+    const container = document.getElementById('editor-container');
+    if (!container || !isBookNavMode()) return;
+    const editing = state.currentViewMode === 'book-edit';
+    // 자판이 떠 있는 동안에는 쪽 번호를 숨긴다 (자판 바로 위의 글을 가린다)
+    document.getElementById('write-modal')?.classList.toggle('book-kbd', editing && kbdUp);
+    if (!editing) { applyBookLift(0, animate); return; }
+    if (bookLiftSettle) { bookLiftSettle = false; fromZero = true; }
+    const win = bookLiftWindow(container);
+    const startLift = fromZero ? 0 : bookLift;
+    let lift = startLift;
+    const caret = box || bookCaretBox(container);
+    if (caret) {
+        const lineH = Math.max(16, caret.bottom - caret.top);
+        const caretTop = win.top + caret.top - lift;
+        const caretBottom = win.top + caret.bottom - lift;
+        // 커서 줄 아래로 한 줄 남짓 남긴다 — 다음 줄로 넘어가도 자판에 가리지 않아 브라우저가 화면을 밀지 않는다
+        // (커서 높이는 글자 높이라 줄 간격보다 작다: 줄 간격 ≈ 글자 높이 × 1.6)
+        const room = win.bottom - win.top - lineH;
+        const gapBottom = Math.max(0, Math.min(lineH * 1.6 + 8, room / 2));
+        const gapTop = Math.max(0, Math.min(BOOK_LIFT_GAP_TOP, room / 2));
+        if (caretBottom > win.bottom - gapBottom) lift += caretBottom - (win.bottom - gapBottom);
+        else if (caretTop < win.top + gapTop) lift -= (win.top + gapTop) - caretTop;
+        // 움직일 때만: 맨 위 줄이 반쯤 잘려 보이지 않게 줄과 줄 사이에 맞춘다 (가만히 있을 때 맞추면 글을 쓰는 동안 들썩인다)
+        if (Math.abs(lift - startLift) > 0.5) lift = snapBookLiftToLine(lift, caret);
+    }
+    applyBookLift(Math.max(0, Math.min(win.range, Math.round(lift))), animate, slow);
+}
+
+/**
+ * 올림을 줄 경계에 맞춘다 — 잘리는 윗변이 줄과 줄 사이에 오도록, 지금 올림보다 한 줄 안쪽으로 조금 더 올린다.
+ * 커서 줄 위로 같은 줄 간격이 이어진다고 본다 (보통 글은 그렇다. 사진·큰 글자가 끼면 조금 어긋날 수 있다).
+ */
+function snapBookLiftToLine(lift, caret) {
+    if (lift <= 0) return lift;
+    const sel = window.getSelection();
+    const a = document.activeElement;
+    let el = a && a.id === 'editor-body' && sel && sel.rangeCount ? sel.getRangeAt(0).startContainer : a;
+    if (el && el.nodeType === Node.TEXT_NODE) el = el.parentElement;
+    if (!el || el.nodeType !== Node.ELEMENT_NODE) return lift;
+    const L = parseFloat(getComputedStyle(el).lineHeight);   // 'normal'이면 NaN → 맞추지 않는다
+    const glyphH = caret.bottom - caret.top;
+    if (!(L > glyphH) || L > 200) return lift;
+    const lineTop = caret.top - (L - glyphH) / 2;           // 커서 줄의 줄 상자 윗변 (커서 높이는 글자 높이라 위아래로 반씩 남는다)
+    if (lineTop <= lift) return lift;
+    return lineTop - Math.floor((lineTop - lift) / L + 1e-6) * L;   // lift 이상, lift + 한 줄 미만
+}
+
+/** 본문 칸을 px만큼 위로 올린다. 칸 자체는 그대로라 쪽 나눔·글자 자리는 바뀌지 않는다 */
+function applyBookLift(px, animate = true, slow = false) {
+    const container = document.getElementById('editor-container');
+    if (!container) return;
+    if (!isBookNavMode()) { clearBookLift(); return; }
+    px = Math.max(0, Math.round(px));
+    const same = px === bookLift && container.style.transform !== '';
+    bookLift = px;
+    if (same) return;
+    container.classList.toggle('book-lift-anim', !!animate);
+    container.classList.toggle('book-lift-slow', !!animate && !!slow);
+    // 위로 옮기고(translate) 옮긴 만큼 윗부분을 잘라(clip-path), 올라간 글이 도구 막대 밑으로 비치지 않게 한다
+    container.style.transform = `translateY(${-px}px)`;
+    container.style.clipPath = `inset(${px}px 0px 0px 0px)`;
+    if (currentSelectedElement) requestAnimationFrame(updateSelectionBox);
+}
+
+function clearBookLift() {
+    bookLift = 0; bookLiftPredict = null; bookLiftSettle = false; bookPanning = false;
+    const container = document.getElementById('editor-container');
+    if (container) {
+        container.classList.remove('book-lift-anim', 'book-lift-slow');
+        container.style.transform = '';
+        container.style.clipPath = '';
+    }
+    document.getElementById('write-modal')?.classList.remove('book-kbd');
+}
+
+/** 화면의 한 점에 놓일 커서 자리 */
+function caretRangeAt(x, y) {
+    if (document.caretRangeFromPoint) {
+        const r = document.caretRangeFromPoint(x, y);
+        if (r) return r;
+    }
+    if (document.caretPositionFromPoint) {
+        const p = document.caretPositionFromPoint(x, y);
+        if (p) { const r = document.createRange(); r.setStart(p.offsetNode, p.offset); r.collapse(true); return r; }
+    }
+    return null;
+}
+
+/**
+ * 책 편집에서 글을 눌렀을 때: 자판이 아직 없고 이 화면의 자판 높이를 안다면, 누른 줄이 자판에 가릴지 미리 보고
+ * 자판이 올라오는 것과 함께 본문을 올린다. 자판이 다 올라왔을 때 커서가 이미 보이면 브라우저가 화면을 밀지 않아
+ * (예전에는 도구 막대까지 밀려 올라갔다가 되돌아왔다) 누른 줄이 자판과 함께 부드럽게 올라간다.
+ */
+function predictBookLiftForTap(e) {
+    if (kbdUp) return;                    // 자판이 이미 떠 있다 — 커서가 옮겨 간 뒤 맞춘다
+    const kh = knownKbdHeight();
+    if (!kh) return;                      // 이 화면에서 자판 높이를 아직 모른다 (처음 한 번은 자판이 올라온 뒤 맞춘다)
+    const t = e.changedTouches && e.changedTouches[0];
+    const target = e.target && e.target.nodeType === Node.TEXT_NODE ? e.target.parentElement : e.target;
+    if (!t || !target || !target.closest) return;
+    if (target.closest('img, button, select, .table-tools')) return;               // 자판이 올라오지 않는 곳
+    if (!target.closest('#editor-body, #edit-title, #edit-subtitle')) return;
+    const container = document.getElementById('editor-container');
+    if (!container) return;
+    const field = target.closest('#edit-title, #edit-subtitle');
+    let rect = null;
+    if (field) rect = field.getBoundingClientRect();
+    else {
+        const r = caretRangeAt(t.clientX, t.clientY);
+        if (r) rect = getCollapsedRangeRect(r);
+    }
+    if (!rect) return;
+    const cr = container.getBoundingClientRect();
+    const area = getVisibleArea();
+    bookLiftPredict = { bottom: area.top + area.height - kh, until: Date.now() + 1200 };
+    updateBookLift({ fromZero: true, box: { top: rect.top - cr.top, bottom: rect.bottom - cr.top }, slow: true });
+    // 자판이 끝내 올라오지 않으면(바깥 자판을 쓰는 등) 되돌린다
+    setTimeout(() => {
+        if (kbdUp || state.currentViewMode !== 'book-edit') return;
+        bookLiftPredict = null;
+        updateBookLift();
+    }, 1300);
+}
+
+/** 책 편집에서 글을 쓰거나 커서를 옮긴 뒤: 커서가 다른 쪽으로 넘어갔으면 그 쪽을 열고, 자판에 가리지 않게 맞춘다 */
+function followCaretInBook() {
+    if (state.currentViewMode !== 'book-edit') return;
+    const container = document.getElementById('editor-container');
+    const body = document.getElementById('editor-body');
+    if (!container) return;
+    const sel = window.getSelection();
+    if (body && document.activeElement === body && sel && sel.rangeCount && body.contains(sel.getRangeAt(0).startContainer)) {
+        const caret = sel.getRangeAt(0).cloneRange();
+        caret.collapse(false);
+        const page = bookPageOfRange(caret);
+        if (page >= 0 && page !== currentBookPageIndex) {
+            // 글이 다음 쪽으로 넘어갔다(또는 지워서 앞쪽으로 돌아왔다) — 커서가 든 쪽을 열고 그 쪽 위에서부터 맞춘다
+            currentBookPageIndex = page;
+            container.scrollLeft = page * Math.floor(container.clientWidth);
+            container.scrollTop = 0;
+            updateBookNav();
+            updateBookLift({ fromZero: true });
+            return;
+        }
+    }
+    updateBookLift();
 }
 
 // 기본 보기(글쓰기)에서도 같은 일이 생겼다: 글 끝부분을 누르면 자판이 올라오며 화면이 통째로 밀려 올라가
@@ -853,6 +1151,7 @@ function toggleBookEventListeners(enable) {
         syncBookViewportFrame();
     } else {
         clearBookViewportFrame();
+        clearBookLift();
         syncDefaultViewportFrame();   // 자판이 떠 있는 채로 기본 보기로 돌아온 경우
     }
 }
@@ -871,6 +1170,7 @@ export function turnPage(direction) {
     container.scrollTop = 0;
     bookPinActive = true; // 넘긴 페이지를 고정 유지 (브라우저 자동 스크롤 방지)
     updateBookNav();
+    if (state.currentViewMode === 'book-edit') updateBookLift({ fromZero: true });   // 새 쪽은 위에서부터
 }
 
 export function jumpToPage(index) {
@@ -884,6 +1184,7 @@ export function jumpToPage(index) {
     currentBookPageIndex = nextIndex;
     container.scrollLeft = currentBookPageIndex * stride;
     updateBookNav();
+    if (state.currentViewMode === 'book-edit') updateBookLift({ fromZero: true });
 }
 
 function findVisibleAnchor() {
@@ -924,9 +1225,6 @@ function scrollAnchorIntoView(anchor, mode) {
     return true;
 }
 
-function getBookViewportHeight() {
-    return getVisibleArea().height || window.innerHeight;
-}
 
 /**
  * 책 모드에서 도구 막대 자리의 높이 — 쪽 높이에서 뺀다.
@@ -946,7 +1244,7 @@ function getBookPageContentSize(container) {
     const horizontalPad = isMobile ? 56 : 96; // editor-body padding-left + padding-right
     const verticalPad = isMobile ? 40 : 48; // editor-container 상/하 패딩 합 (페이지 세로 여백)
     const pageWidth = Math.max(50, colWidth - horizontalPad);
-    const pageHeight = Math.max(50, getBookViewportHeight() - 120 - bookToolbarBand() - verticalPad - 20);
+    const pageHeight = Math.max(50, getBookLayoutHeight() - 120 - bookToolbarBand() - verticalPad - 20);
     return { pageWidth, pageHeight };
 }
 
@@ -1031,13 +1329,13 @@ function updateBookLayout() {
     const container = document.getElementById('editor-container');
     if (!container) return;
     lastBookColWidth = container.clientWidth; // 재배치 기준 컨테이너 폭 기록 (키보드로 높이만 변한 경우 구분)
-    lastBookViewportH = getBookViewportHeight(); // 재배치 기준 가시 높이 기록 (키보드 표시/숨김 판별용)
+    bookLayoutH = getBookLayoutHeight();      // 이 높이로 쪽을 나눈다 (자판이 떠 있으면 자판 없는 높이)
     container.style.columnWidth = `${Math.floor(container.clientWidth)}px`;
     container.style.columnGap = '0px';
     // style.css의 책 모드 규칙이 height를 !important로 고정하므로, 인라인도 important로 지정해야
     // 실제로 적용된다. (그냥 style.height = ... 로 두면 캐스케이드에서 밀려 무시되어
     // 키보드가 떴을 때 페이지 높이가 줄지 않는다 — iOS 사파리에서 하단 줄이 가려지던 원인)
-    container.style.setProperty('height', `${getBookViewportHeight() - 120 - bookToolbarBand()}px`, 'important');
+    container.style.setProperty('height', `${bookLayoutH - 120 - bookToolbarBand()}px`, 'important');
     container.style.overflow = 'hidden';
     const body = document.getElementById('editor-body');
     if (body) {
@@ -2174,6 +2472,7 @@ function setupBasicHandling() {
     // (scroll 이벤트에는 반응하지 않음 — 사용자가 스크롤할 때 커서로 화면이 튕기는 것을 방지)
     {
         const onViewportChange = () => {
+            noteVisibleArea();   // 자판이 떴는지, 자판 없는 높이가 얼마인지 늘 살펴 둔다 (책 모드로 바꿀 때 쓴다)
             if (state.currentViewMode === 'book' || state.currentViewMode === 'book-edit') handleBookResize();
             else {
                 // 화면 틀을 먼저 보이는 영역에 맞춘 뒤, 줄어든 본문 칸 안에서 커서가 보이게 한다
@@ -2189,9 +2488,17 @@ function setupBasicHandling() {
         });
         // 브라우저가 커서를 보이려고 화면 틀 자체(overflow:hidden)를 스크롤해 도구 막대를 밀어내면 곧바로 되돌린다
         const writeModalEl = document.getElementById('write-modal');
+        // (책 모드는 style.css에서 아예 스크롤되지 않게 막았다 — 막지 못하는 옛 브라우저는 여기서 되돌리고 본문 올리기로 대신한다)
         writeModalEl?.addEventListener('scroll', () => {
-            if (!isBookNavMode() && writeModalEl.scrollTop !== 0) writeModalEl.scrollTop = 0;
+            if (writeModalEl.scrollTop === 0) return;
+            writeModalEl.scrollTop = 0;
+            if (state.currentViewMode === 'book-edit') updateBookLift();
         }, { passive: true });
+        // 본문을 올리고 내리는 움직임이 끝나면 사진 고르기 테두리를 제자리에 다시 맞춘다
+        document.getElementById('editor-container')?.addEventListener('transitionend', (e) => {
+            if (e.target === e.currentTarget && currentSelectedElement) updateSelectionBox();
+        });
+        noteVisibleArea();   // 처음 잰 높이 (글을 열 때는 아직 자판이 없다)
     }
 
     // 타이핑/방향키 이동 시에만 커서가 보이도록 스크롤 (focus·click 시에는 하지 않아 화면 튕김 방지)
@@ -2200,7 +2507,7 @@ function setupBasicHandling() {
         const ensureCaretVisible = () => {
             // 실제 편집(타이핑/방향키)이 시작되면 탭-페이지 고정을 풀어, 글이 다음 페이지로 넘어갈 때
             // 브라우저 스크롤 + 페이지 스냅으로 커서를 따라가게 한다 (캐럿 좌표에 의존하지 않음)
-            if (state.currentViewMode === 'book-edit') { bookPinActive = false; }
+            if (state.currentViewMode === 'book-edit') { bookPinActive = false; requestAnimationFrame(followCaretInBook); }
             else if (state.currentViewMode === 'default') requestAnimationFrame(scrollCaretIntoDefaultView);
         };
         editorBodyEl.addEventListener('input', ensureCaretVisible);
@@ -2320,7 +2627,7 @@ export function getCleanBodyHtml(bodyEl) {
 
 export function openEditor(isEdit, entryData) {
     hideTransientPopups(); // 홈 화면에서 열려 있던 팝업/메뉴를 닫고 에디터로 진입
-    state.isEditMode = isEdit; const writeModal = document.getElementById('write-modal'); openModal(writeModal); clearBookViewportFrame(); writeModal.scrollTop = 0; currentBookPageIndex = 0; bookFollowRange = null; savedRange = null; lastEditorRange = null; imageInsertRange = null; setupBasicHandling();
+    state.isEditMode = isEdit; const writeModal = document.getElementById('write-modal'); openModal(writeModal); clearBookViewportFrame(); clearBookLift(); writeModal.scrollTop = 0; currentBookPageIndex = 0; bookFollowRange = null; savedRange = null; lastEditorRange = null; imageInsertRange = null; setupBasicHandling();
     // 이전 글의 TTS 구간이 남아 새 글을 엉뚱한 위치부터 읽는 것을 방지
     import('./tts.js').then(m => m.clearTTSRangeForNewEntry && m.clearTTSRangeForNewEntry()).catch(() => {});
     // 이전 글의 맞춤법 검사 결과(밑줄·목록)도 지운다
@@ -2498,7 +2805,7 @@ export function toggleViewMode(mode) {
     const btnReadOnly = document.getElementById('btn-readonly'), btnBookMode = document.getElementById('btn-bookmode');
     if(btnReadOnly) btnReadOnly.classList.toggle('active', mode === 'readOnly');
     if(btnBookMode) btnBookMode.classList.toggle('active', mode === 'book' || mode === 'book-edit');
-    if(!isBookToBook && container) { container.style.removeProperty('height'); container.style.overflow = ''; container.style.columnWidth = ''; container.style.columnGap = ''; container.scrollLeft = 0; }
+    if(!isBookToBook && container) { clearBookLift(); container.style.removeProperty('height'); container.style.overflow = ''; container.style.columnWidth = ''; container.style.columnGap = ''; container.scrollLeft = 0; }
     if (wasBookMode && !isBookToBook) { const body = document.getElementById('editor-body'); if (body) body.querySelectorAll('img').forEach(img => { if (img.dataset.bookOrigWidth === undefined) return; /* 책 배치를 거치지 않은 사진은 크기를 그대로 둔다 (예전에는 '' 로 지워졌다) */ img.style.maxHeight = ''; img.style.maxWidth = ''; img.style.width = img.dataset.bookOrigWidth || ''; img.style.height = img.dataset.bookOrigHeight || ''; delete img.dataset.bookOrigWidth; delete img.dataset.bookOrigHeight; delete img.dataset.bookTargetW; delete img.dataset.bookTargetH; }); }
     writeModal.classList.remove('mode-read-only', 'mode-book', 'mode-book-edit');
     if (!wasBookMode && (mode === 'book' || mode === 'book-edit')) {
@@ -2536,6 +2843,7 @@ export function toggleViewMode(mode) {
         updateBookLayout();
         if (isBookToBook && container) container.scrollLeft = currentBookPageIndex * Math.floor(container.clientWidth);
         updateBookNav();
+        updateBookLift({ fromZero: true, animate: false });   // 책 모양이 다 잡힌 뒤에 맞춘다
     }
     else if (mode === 'readOnly') {
         editTitle.readOnly = true; editSubtitle.readOnly = true; editBody.contentEditable = "false";
