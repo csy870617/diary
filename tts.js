@@ -258,10 +258,11 @@ function ttsPanelOpen() {
 }
 
 /* 글을 누르는 손짓
-   - 두 번 누르기(두 번 클릭): 읽기 ↔ 편집을 바꾼다 (책 읽기 ↔ 책 편집도). 음성을 읽는 중이어도 편집으로 넘어간다.
-     편집으로 넘어가면 두 번 누른 자리에 커서를 놓는다.
    - 한 번 누르기: 읽기 모드에서 음성 바가 열려 있으면 누른 곳부터 읽는다.
-     (음성 읽기는 읽기 모드에서만 한다 — 편집 모드에서는 한 번 누르기가 커서 놓기다) */
+     (음성 읽기는 읽기 모드에서만 한다 — 편집 모드에서는 한 번 누르기가 커서 놓기다)
+   - 두 번 누르기(두 번 클릭): 편집 모드에서 읽기 모드로 나간다 (책 편집 → 책 읽기도).
+     읽기 모드에서 두 번 눌러 편집으로 들어가는 것은 없앴다 — 읽거나 듣다가 잘못 눌러 편집으로 넘어가곤 했다.
+     편집으로는 위의 버튼으로 들어간다. */
 const DOUBLE_TAP_MS = 400;   // 앞 손가락을 뗀 뒤 이 안에 다시 눌러야 두 번 누르기
 const DOUBLE_TAP_PX = 30;    // 두 번 누른 자리가 이만큼 안에 있어야 한다
 const TAP_MOVE_PX = 10;      // 누른 채 이보다 많이 움직이면 누르기가 아니라 밀기
@@ -300,48 +301,26 @@ function seekToPoint(x, y) {
     playFromOffset(pos);
 }
 
-/** 두 번 누르기: 읽기 ↔ 편집 */
-function toggleEditByDoubleTap(x, y) {
+/** 두 번 누르기: 편집 → 읽기 (읽기 모드에서는 아무 일도 하지 않는다) */
+function leaveEditByDoubleTap() {
+    if (!isEditMode()) return;
     seekGuardUntil = Date.now() + 500;   // 두 번 누르기로 골라진 낱말은 곧바로 풀어 준다
-    const mode = state.currentViewMode;
-    if (isEditMode()) {
-        // 편집 → 읽기: 자판을 내리고 커서를 지운다
-        const active = document.activeElement;
-        if (active && active.closest?.('#write-modal')) active.blur();
-        window.getSelection()?.removeAllRanges();
-        toggleViewMode(mode === 'book-edit' ? 'book' : 'readOnly');
-        return;
-    }
-    // 읽기 → 편집: 누른 자리를 먼저 잡아 둔다 (편집 모드는 도구 막대가 생겨 글 자리가 조금 내려간다)
-    const pt = caretFromPoint(x, y);
-    const body = document.getElementById('editor-body');
-    toggleViewMode(mode === 'book' ? 'book-edit' : 'default');   // 음성은 모드가 바뀔 때 멈춘다 (아래 view-mode-change)
-    if (!body) return;
-    const container = document.getElementById('editor-container');
-    const keepLeft = container ? container.scrollLeft : 0;
-    body.focus({ preventScroll: true });
-    if (pt && body.contains(pt.node)) {
-        try {
-            const r = document.createRange();
-            r.setStart(pt.node, pt.offset);
-            r.collapse(true);
-            const sel = window.getSelection();
-            sel.removeAllRanges();
-            sel.addRange(r);
-        } catch (_) { /* 자리를 못 놓으면 브라우저가 둔 곳에 둔다 */ }
-    }
-    // 책 편집: 커서를 놓느라 쪽이 넘어가지 않게 보던 쪽을 지킨다
-    if (mode === 'book' && container) container.scrollLeft = keepLeft;
+    // 자판을 내리고 커서를 지운다
+    const active = document.activeElement;
+    if (active && active.closest?.('#write-modal')) active.blur();
+    window.getSelection()?.removeAllRanges();
+    toggleViewMode(state.currentViewMode === 'book-edit' ? 'book' : 'readOnly');
 }
 
-/** 마우스: 두 번째로 누르는 순간 모드를 바꾼다 (그 자리의 단어를 고르지 않는다) */
+/** 마우스: 편집 모드에서 두 번째로 누르는 순간 읽기 모드로 나간다 (그 자리의 단어를 고르지 않는다) */
 function onEditorMouseDownForTTS(e) {
     if (e.button !== 0 || e.detail !== 2) return;
+    if (!isEditMode()) return;                                    // 읽기 모드의 두 번 클릭은 그대로 둔다
     if (Date.now() - lastTouchMs < 1000) return;                  // 손가락 뒤에 따라오는 흉내 마우스는 아래에서 이미 처리했다
     if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return; // 늘려 고르기 등 키를 함께 누른 경우는 그대로
     if (!isGestureTarget(e.target)) return;
     e.preventDefault();
-    toggleEditByDoubleTap(e.clientX, e.clientY);
+    leaveEditByDoubleTap();
 }
 
 /** 마우스: 한 번 클릭한 곳부터 읽는다 (글자를 끌어 고른 경우는 빼고) */
@@ -361,7 +340,8 @@ function onEditorTouchStartForTTS(e) {
     if (e.touches.length !== 1) { tapStart = null; lastTap = null; return; }
     const t = e.touches[0];
     const now = Date.now();
-    const second = !!lastTap && now - lastTap.t < DOUBLE_TAP_MS
+    // 두 번 누르기는 편집 모드에서만 센다 (읽기 모드에서는 누를 때마다 그곳부터 읽는다)
+    const second = isEditMode() && !!lastTap && now - lastTap.t < DOUBLE_TAP_MS
         && Math.hypot(t.clientX - lastTap.x, t.clientY - lastTap.y) < DOUBLE_TAP_PX
         && isGestureTarget(e.target);
     // 두 번째 누르기에는 브라우저가 단어를 고르거나 확대하지 않게 한다
@@ -382,19 +362,18 @@ function onEditorTouchEndForTTS(e) {
     if (s.second) {
         lastTap = null;
         if (e.cancelable) e.preventDefault();
-        toggleEditByDoubleTap(t.clientX, t.clientY);
+        leaveEditByDoubleTap();
         return;
     }
     lastTap = { x: t.clientX, y: t.clientY, t: Date.now() };
-    // 한 번 누르기: 읽기 모드에서 음성 바가 열려 있으면 그곳부터 읽는다.
-    // 두 번째 누르기를 기다리지 않고 곧바로 읽는다 — 이어서 한 번 더 누르면 편집으로 넘어가며 멈춘다.
+    // 한 번 누르기: 읽기 모드에서 음성 바가 열려 있으면 그곳부터 읽는다 (두 번째 누르기를 기다리지 않는다)
     if (canSeekFrom(s.target)) seekToPoint(t.clientX, t.clientY);
 }
 
 /** 그래도 그 자리의 단어가 골라지면(아이폰의 단어 고르기, 표 칸의 두 번 클릭 고르기) 곧바로 풀어 준다 */
 function onSelectionChangeForTTS() {
     if (Date.now() > seekGuardUntil) return;
-    if (isEditMode()) return;   // 편집으로 막 넘어가 놓은 커서는 그대로 둔다
+    if (isEditMode()) return;   // 편집 모드에서 고른 글은 그대로 둔다
     const sel = window.getSelection();
     const body = document.getElementById('editor-body');
     if (sel && !sel.isCollapsed && body && body.contains(sel.anchorNode)) sel.collapseToStart();
@@ -476,7 +455,7 @@ export function toggleTTSPanel() {
             const seen = Number(localStorage.getItem('faith_tts_tap_read_hint') || '0');
             if (seen < 3) {
                 localStorage.setItem('faith_tts_tap_read_hint', String(seen + 1));
-                setTimeout(() => showToast('글을 누르면 그곳부터 읽습니다. 두 번 누르면 편집 모드로 바뀝니다.', 2600), 300);
+                setTimeout(() => showToast('글을 누르면 그곳부터 읽습니다.'), 300);
             }
         } catch (_) {}
         loadVoices();
