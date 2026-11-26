@@ -334,7 +334,7 @@ const SPELL_RULES = [
     [/되서(요)?$/, '돼서$1', "'되어서'가 줄어든 말은 '돼서'입니다"],
     [/되야(?=해|한|할|합|하)/, '돼야 ', "'되어야'가 줄어든 말은 '돼야'이고, '-어야 하다'는 띄어 씁니다"],
     [/되야(?=$|지|겠|만|죠|요)/, '돼야', "'되어야'가 줄어든 말은 '돼야'입니다"],
-    [/돼(?=고|는|니|면|며|도록|기|게|던|다가|든지|었|다$)/, '되', "'되-' 뒤에 '-어'가 오지 않으면 '되'로 씁니다"],
+    [/돼(?=고|는|니|면|며|도록|기|게|던|다가|든지|었|다$|냐|나|네|겠|려|시|셨|세|실|신)/, '되', "'되-' 뒤에 '-어'가 오지 않으면 '되'로 씁니다"],
     [/^아니예요/, '아니에요', "'아니다' 뒤에는 '-에요'가 붙어 '아니에요'입니다"],
     [/^아니였/, '아니었', "'아니다' 뒤에는 '-었-'이 붙어 '아니었다'입니다"],
     [/^바램/, '바람', "'바라다'의 명사형은 '바람'입니다"],
@@ -363,6 +363,9 @@ const SPELL_RULES = [
     [/^어짜피/, '어차피', "'어차피(於此彼)'가 맞는 말입니다"],
     [/^서슴치/, '서슴지', "기본형이 '서슴다'라서 '서슴지'로 씁니다"],
     [/^제작년(?!도)/, '재작년', "'재작년(再昨年)'이 맞는 말입니다"],
+    // '제단'(제물을 바치는 단)은 명사로만 쓴다 — '-하다'가 붙은 것은 '재단(裁斷)하다'(자르다·옳고 그름을 가리다)
+    // ('제단하나'처럼 '하나'(수)를 붙여 쓴 것은 그대로)
+    [/^제단(?=하(?!나)|해|했|한|할|함|합)/, '재단', "자르거나 옳고 그름을 가리는 것은 '재단(裁斷)하다'입니다 ('제단'은 제물을 바치는 단)"],
     [/^해매(?=[다고는며어었이지게])/, '헤매', "'헤매다'가 표준어입니다"],
     [/^내노라/, '내로라', "'내로라하다'가 표준어입니다"],
     [/^(개구|멋|겁|욕심|고집|수다|거짓말|심술|허풍|깍|변덕|주정|트집|말썽|게으름)장이/, '$1쟁이', "'-장이'는 기술자에게만 쓰고, 그 밖에는 '-쟁이'로 씁니다"],
@@ -872,6 +875,20 @@ function spaceWord(word, next) {
  * 낱말 하나에 규칙을 적용한다 → { to, whys } (고칠 것이 없으면 null)
  * prev·next: 앞뒤 낱말 (맥락이 필요한 규칙에 쓴다)
  */
+// '-뜨리다'(깨뜨리다·떨어뜨리다·넘어뜨리다)를 '-드리다'로 잘못 쓴 것 (깨드려버립니다 → 깨뜨려 버립니다).
+// '-드리다'는 남을 위해 해 드리는 것이라 이 말들 뒤에는 오지 않는다. ('엎드리다'는 한 낱말이라 넣지 않았다)
+// 고치는 김에 뒤에 붙여 쓴 보조 용언(버리다·주다·놓다 …)은 원칙대로 띄운다 (붙여 써도 틀리지는 않는다).
+// '깨'는 '할머니께 호두를 깨 드렸다'처럼 해 드리는 뜻일 수 있어, 받는 사람(-께·-에게·-한테)이 없을 때만 고친다 (contextFix)
+const TTU = /^(깨|떨어|넘어|무너|쓰러|부러|망가|자빠|흩|빠)드(리|려|렸|린|릴|립|림)(.*)$/;
+const TTU_AUX = /^(버리|버려|버렸|버린|버릴|버립|놓|놔|놨|놓았|둬|뒀|두|둔|둘|줘|줬|주|준|줄|줍)/;
+function ttuFix(core, withKkae = false) {
+    const m = TTU.exec(core);
+    if (!m || (m[1] === '깨' && !withKkae)) return null;
+    const aux = TTU_AUX.test(m[3]);
+    return { to: m[1] + '뜨' + m[2] + (aux ? ' ' + m[3] : m[3]),
+        why: "힘주어 하는 '-뜨리다'(깨뜨리다·떨어뜨리다)로 씁니다 ('-드리다'는 남을 위해 해 드리는 것)" + (aux ? ' · 보조 용언은 띄어 쓰는 것이 원칙입니다' : '') };
+}
+
 export function fixKoreanWord(core, prev, next) {
     let cur = core;
     const whys = [];
@@ -889,6 +906,7 @@ export function fixKoreanWord(core, prev, next) {
     }
     if (!/\s/.test(cur)) apply(spaceStart(cur));
     if (!/\s/.test(cur)) {
+        apply(ttuFix(cur));
         apply(objectParticle(cur));
         apply(adverbFix(cur));
         apply(chiToJi(cur, next));
@@ -1117,6 +1135,12 @@ export function contextFix(core, ctx) {
     const out = (to, why) => (to && to !== core ? { to, why, kind: '문맥' } : null);
     const before = [prev, prev2, prev3];
 
+    // 깨뜨리다: '마음을 깨드려버립니다' → 깨뜨려 (받는 사람이 있으면 '깨 드리다'(해 드리다)일 수 있어 그대로 둔다)
+    if (/^깨드/.test(core) && ![...before, ...others].some(x => /(께|에게|한테|께서)$/.test(x))) {
+        const t = ttuFix(core, true);
+        if (t) return { to: t.to, why: t.why, kind: '맞춤법' };
+    }
+
     // 들르다: '마트에 들렸다' → 들렀다 ('소리가 들렸다'처럼 듣는 뜻이면 그대로)
     if (/^들(렸|려)/.test(core) && !others.some(x => SOUND_SUBJECT.test(x))) {
         const place = [prev, prev2].some(x => /(에|에도|에는|에만)$/.test(x) && PLACES.has(x.replace(/(에|에도|에는|에만)$/, '')));
@@ -1317,6 +1341,52 @@ const ONE_WORD_AFTER = {
     '한': ['동안', '때'],
     '어느': ['새', '덧', '결', '틈'],
 };
+// '-아/-어 지다'의 '지다' 꼴 (희미해 지지 → 희미해지지, 좋아 졌다 → 좋아졌다, 커 진다 → 커진다)
+const JI_FORMS = /^(지다|지고|지는|지니|지면|지며|지지|지게|지도록|지기|지겠[가-힣]*|지잖[가-힣]*|지죠|지네[가-힣]*|지던|지더[가-힣]*|지려[가-힣]*|져|져서|져도|져야|져요|져라|졌[가-힣]*|진다[가-힣]*|진|질|질까[가-힣]*|질지|집니다|집니까)$/;
+// 한 글자로 된 '-어' 꼴 (커지다·써지다·퍼지다·떠지다·꺼지다·터지다)
+const AO_ONE = new Set(['커', '써', '퍼', '떠', '꺼', '터']);
+// 겨루는 말 뒤의 '지다'는 '이기다'의 맞선말이라 띄운 그대로 둔다 (끝까지 싸워 졌지만)
+const AO_CONTEST = /^(싸워|겨뤄|다퉈|맞서|맞붙어|대결해|경쟁해|버텨)$/;
+
+// 성경 66권 — 이름은 붙여 쓰고(고린도 후서 → 고린도후서), 한 낱자 틀린 것(고리도후서)도 고친다
+export const BIBLE_BOOKS = `창세기 출애굽기 레위기 민수기 신명기 여호수아 사사기 룻기 사무엘상 사무엘하 열왕기상 열왕기하 역대상 역대하
+에스라 느헤미야 에스더 욥기 시편 잠언 전도서 아가 이사야 예레미야 예레미야애가 에스겔 다니엘 호세아 요엘 아모스 오바댜
+요나 미가 나훔 하박국 스바냐 학개 스가랴 말라기 마태복음 마가복음 누가복음 요한복음 사도행전 로마서 고린도전서 고린도후서
+갈라디아서 에베소서 빌립보서 골로새서 데살로니가전서 데살로니가후서 디모데전서 디모데후서 디도서 빌레몬서 히브리서 야고보서
+베드로전서 베드로후서 요한일서 요한이서 요한삼서 유다서 요한계시록`.split(/\s+/);
+// 책 이름의 뒷부분 (긴 것부터). 두 글자 이상인 것만 앞부분이 한 낱자 틀려도 고친다 — '서·기'는 흔한 말이라 앞부분이 꼭 맞아야 한다
+const BOOK_SUFFIXES = ['계시록', '복음', '행전', '전서', '후서', '일서', '이서', '삼서', '애가', '서', '기', '상', '하'];
+const BOOK_PARTICLE = /(을|를|은|는|이|가|의|에|에서|에는|에서는|도|만|과|와|으로|로|까지|부터|처럼|이나|나|말씀|에도)$/;
+
+/** 같은 글자 수의 두 말에서 다른 낱자(초성·중성·종성)가 몇 개인가 (한글이 아닌 글자가 다르면 Infinity) */
+function jamoDiff(x, y) {
+    if (x.length !== y.length) return Infinity;
+    let n = 0;
+    for (let k = 0; k < x.length; k++) {
+        if (x[k] === y[k]) continue;
+        if (!isSyllable(x[k]) || !isSyllable(y[k])) return Infinity;
+        const a = partsOf(x[k]), b = partsOf(y[k]);
+        for (let p = 0; p < 3; p++) if (a[p] !== b[p]) n++;
+    }
+    return n;
+}
+
+/** 낱말 끝의 조사를 뗀다 → [앞말, 조사] (책 이름 뒤에 흔히 붙는 것만) */
+function splitBookParticle(word) {
+    const m = BOOK_PARTICLE.exec(word);
+    return m && word.length > m[1].length ? [word.slice(0, -m[1].length), m[1]] : [word, ''];
+}
+
+/** 한 낱말로 쓴 책 이름의 한 낱자 오타 (고리도후서 → 고린도후서, 에배소서를 → 에베소서를). 네 글자 이상 이름만 */
+function bibleFix(q) {
+    for (const [stem, tail] of [[q, ''], splitBookParticle(q)]) {
+        if (stem.length < 4) continue;
+        const near = BIBLE_BOOKS.filter(b => b.length === stem.length && jamoDiff(stem, b) === 1);
+        if (near.length === 1) return { to: near[0] + tail, why: `성경 책 이름은 '${near[0]}'입니다`, basis: 'bible' };
+    }
+    return null;
+}
+
 export function pairRules(words) {
     const out = [];
     // 성경 구절(옛말 꼴이 있는 줄)은 본문의 띄어쓰기를 그대로 둔다 ('그 날로 족하니라', '그 중의 제일은')
@@ -1341,11 +1411,42 @@ export function pairRules(words) {
         if (p.lang !== 'ko' || w.lang !== 'ko') continue;
         const one = !scripture && ONE_WORD_AFTER[p.core] && ONE_WORD_AFTER[p.core].find(x => w.core.startsWith(x) && (w.core === x || PARTICLE_TAIL.test(w.core.slice(x.length))));
         if (one) { push(p.core + w.core, `${topic(p.core + one)} 한 낱말이라 붙여 씁니다`); continue; }
+        // 성경 책 이름을 띄어 쓴 것 (고린도 후서 → 고린도후서). 앞부분이 한 낱자 틀린 것도 (고리도 후서 → 고린도후서)
+        // ('누가 복음을 전했나'의 '누가'는 '누구가'일 수 있어, 뒤에 장·절이나 '말씀'이 올 때만 붙인다)
+        {
+            const [suffix, particle] = splitBookParticle(w.core);
+            const nextCore = words[j + 1] ? words[j + 1].core : '';
+            const book = BOOK_SUFFIXES.includes(suffix) && BIBLE_BOOKS.find(b => b.length >= 4 && b.endsWith(suffix) && b.length > suffix.length + 1 && (() => {
+                const head = b.slice(0, -suffix.length);
+                const cited = /^[0-9]/.test(nextCore) || /^말씀/.test(nextCore) || particle === '말씀';
+                // 한 글자 뒷부분(서·기·상·하)은 흔한 말이라(요한이 서 있었다) 장·절·'말씀'이나 '-을·-의·-에'가 붙을 때만
+                if (suffix.length === 1 && !cited && !/^(을|를|의|에|에서)$/.test(particle)) return false;
+                if (p.core === head) return b !== '누가복음' || cited;
+                return suffix.length >= 2 && jamoDiff(p.core, head) === 1;
+            })());
+            if (book) {
+                const exact = p.core === book.slice(0, -suffix.length);
+                push(book + particle, exact ? `성경 책 이름 '${book}'은 붙여 씁니다` : `성경 책 이름은 '${book}'입니다 (붙여 씁니다)`);
+                continue;
+            }
+        }
+        // '-아/-어 지다'는 앞말에 붙여 쓴다 (희미해 지지 → 희미해지지, 좋아 졌다 → 좋아졌다)
+        // 앞말이 '-아/-어'로 끝나는 풀이말이어야 한다 — '올해 지는 해'의 '올해'처럼 명사인 것(올해의)은 그대로 (사전으로 확인)
+        if (!scripture && JI_FORMS.test(w.core) && isSyllable(p.core[p.core.length - 1])) {
+            const [, v, jj] = partsOf(p.core[p.core.length - 1]);
+            if (!jj && 'ㅏㅓㅕㅐㅘㅝㅙ'.includes(v) && (p.core.length >= 2 || AO_ONE.has(p.core)) && !AO_CONTEST.test(p.core)) {
+                out.push({ i: j - 1, j, to: p.core + w.core, why: "'-아/-어 지다'는 앞말에 붙여 씁니다 (희미해지다·좋아지다)",
+                    valid: [p.core + w.core], invalid: [p.core + '의'] });
+                continue;
+            }
+        }
         if (p.core === '한번' && w.core === '더') { push('한 번 더', "횟수를 셀 때는 '한 번'으로 띄어 씁니다"); continue; }
         // 뒷가지 '-드리다·-받다·-당하다'는 앞말에 붙여 쓴다 (감사드립니다·사랑받다·무시당하다)
         const suffix = /^(드리|드려|드렸|드린|드릴|드립|드림)/.test(w.core) ? DRI_NOUNS : /^(받|받아|받았)/.test(w.core) ? BAT_NOUNS : /^(당하|당해|당했|당한|당할|당합)/.test(w.core) ? DANG_NOUNS : null;
         const tail = (fixed) => (fixed && !/\s/.test(fixed.to) ? fixed : null);
-        if (suffix && suffix.has(p.core)) {
+        // ('한 말씀 드리겠습니다·감사의 말씀 드립니다'처럼 앞에서 꾸미는 말이 있으면 명사라 띄운 그대로 둔다)
+        const modified = words[j - 2] && /^(한|두|세|몇|그|이|저|그런|이런|저런|어떤|무슨|여러|모든|별|온갖)$|의$/.test(words[j - 2].core);
+        if (suffix && suffix.has(p.core) && !modified) {
             const more = tail(fixKoreanWord(w.core, '', ''));
             push(p.core + (more ? more.to : w.core), `'-${w.core[0] === '드' ? '드리다' : w.core[0] === '받' ? '받다' : '당하다'}'는 앞말에 붙여 씁니다` + (more ? ' · ' + more.whys.join(' · ') : ''));
             continue;
@@ -1822,6 +1923,9 @@ const ENDING_SUBST = [
     ['냐니까', ['냐고']], ['자니까', ['자고']],
     ['다면서', ['다고', '다며']], ['다며', ['다고']], ['라면서', ['라고', '라며']], ['라며', ['라고']],
     ['더라고요', ['더라고']], ['던데요', ['던데']], ['는데요', ['는데']], ['은데요', ['은데']], ['데요', ['데']],
+    // 묻는 말 '-던가요·-는가요·-은가요' (쉽지 않던가요·그렇던가요) — 사전이 '-던가'만 알아,
+    // 예전에는 '않던 가요'(노래)처럼 둘로 나누라고 잘못 고쳤다
+    ['던가요', ['던가']], ['는가요', ['는가']], ['은가요', ['은가']], ['던걸요', ['던걸', '던']],
     ['거든요', ['거든']], ['잖아요', ['잖아']], ['네요', ['네']], ['군요', ['군']], ['지요', ['지']], ['고요', ['고']],
     ['는지요', ['는지']], ['까요', ['까']], ['대요', ['대']], ['래요', ['래']],
 ];
@@ -2365,7 +2469,7 @@ export function lookupKorean(dict, words, onEach) {
         const q = w.normalize('NFC');
         if (!/^[가-힣]+$/.test(q) || knownKorean(dict, q)) out[w] = null;
         else if (FRAGMENT.test(q)) out[w] = false;   // 어미로 시작하는 조각 — 앞말과 붙일지는 checkLines가 본다
-        else out[w] = particleFix(dict, q) || palatalFix(dict, q) || splitFix(dict, q) || spellingFix(dict, q) || doubledFix(dict, q) || segmentFix(dict, q) || false;
+        else out[w] = bibleFix(q) || particleFix(dict, q) || palatalFix(dict, q) || splitFix(dict, q) || spellingFix(dict, q) || doubledFix(dict, q) || segmentFix(dict, q) || false;
         if (onEach) onEach();
     }
     return out;

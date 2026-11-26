@@ -13,7 +13,7 @@
 // 캐시에 남은 옛 판이 섞인다 (새로 넣은 함수가 없어 정밀 검사가 아예 열리지 않을 수 있다).
 // 이 파일에 붙은 판(?v=)을 그대로 붙여 부른다.
 const {
-    wordsOf, koreanCandidates, knownKorean, partsOf, compose, hasJong, objectBeforeIn, spellKind,
+    wordsOf, koreanCandidates, knownKorean, isNoun, partsOf, compose, hasJong, objectBeforeIn, spellKind,
     CHO, JUNG, JONG, VOWEL_SETS, ARCHAIC, CONFUSABLES, ONE_NOUNS
 } = await import(new URL('./spell-text.js' + new URL(import.meta.url).search, import.meta.url).href);
 
@@ -416,6 +416,17 @@ export function lmFixes(lines, dict, kiwi, {
                 pending.push({ id: line.id, a: w.ca, b: x.cb, from: text.slice(w.ca, x.cb), orig: head + text.slice(w.ca, x.cb) + tail,
                     options: [{ to: w.core + x.core, text: head + w.core + x.core + tail }], why: '한 낱말이라 붙여 씁니다', type: '띄어쓰기', word: null });
             }
+            // 사전에 있는 말이지만 문맥으로만 틀린 것 — AI 정밀 검사만 정한다 (Kiwi 점수로는 바른 글과 틀린 글이 갈리지 않았다)
+            for (const c of contextCandidates(words, sid, (k) => {
+                const cx = around(k, words[k].core);
+                return tokensIn(analyze(cx.text).tokens, cx.start, cx.end);
+            })) {
+                const w = words[c.i];
+                if (skip(w.core) || covering(line.id, w.ca, w.cb) || fixes.some(f => f.id === line.id && f.a < w.cb && w.ca < f.b)) continue;
+                if (pending.some(p => p.id === line.id && p.a < w.cb && w.ca < p.b)) continue;
+                pending.push({ id: line.id, a: w.ca, b: w.cb, from: w.core, orig: around(c.i, w.core).text,
+                    options: [{ to: c.to, text: around(c.i, c.to).text }], why: c.why, type: '문맥', word: null, margin: c.margin });
+            }
         }
         // 오타 교정 분석 — 아직 아무 고침도 없는 자리만 (거둬들인 사전 고침 자리는 다시 본다)
         if (typos) {
@@ -432,6 +443,65 @@ export function lmFixes(lines, dict, kiwi, {
         }
     }
     return fixes;
+}
+
+// ─── AI 정밀 검사에 넘기는 문맥 후보 ───
+// 모두 사전에 있는 말이라 낱말만 보고는 모르고, Kiwi 점수도 바른 글('주일에도 쉬지 않고')과 틀린 글을 가르지 못했다.
+// Qwen 점수로 일부러 틀린 글과 바른 글을 견주어 무리마다 기준값(margin, 로그 확률 차이)을 정했다.
+
+// 꾸며 주는 말 (그 장면·한 구절·모든 것) — 이 말 뒤의 명사가 조사 없이 풀이말 앞에 오면 '-을/-를'이 빠진 것일 수 있다
+const DETERMINER = /^(한|두|세|네|그|이|저|모든|어떤|이런|그런|저런|각|여러|몇|첫|온|새|옛|다른|그날의|오늘의)$/;
+// 사람의 '것'이 되는 말 (바울의 편지·목사님의 설교·예수님의 사랑)
+const POSSESSED = /^(편지|서신|말씀|설교|기도|사랑|은혜|고백|시|노래|찬양|생애|삶|신앙|믿음|가르침|복음|이야기|책|글|일기|간증|음성|뜻|계획|손길|섭리|약속|십자가|부활|고난|사역|성품|인생|기도문|편지들|서신서)(은|는)$/;
+const FAMILY = /^(엄마|아빠|어머니|아버지|할머니|할아버지|언니|오빠|누나|형|동생|남편|아내|아들|딸)$/;
+
+/**
+ * 문맥으로만 틀린 것 후보 → [{ i, to, why, margin }]
+ * tokensOf(k): k번째 낱말의 Kiwi 형태소들
+ */
+export function contextCandidates(words, sid, tokensOf) {
+    const out = [];
+    const lastOf = (i) => { let k = i; while (words[k + 1] && sid[k + 1] === sid[i]) k++; return k; };
+    const sentenceEnd = (i) => words[lastOf(i)].core;
+    // 문장을 맺는 풀이말이 형용사·'이다'인가 (가득하다·진솔하다·빌립보서였다). 보조 용언(않다·싶다)은 건너 앞말을 본다
+    const describes = (i) => {
+        let k = lastOf(i);
+        while (k > i + 1 && /^VX/.test((tokensOf(k)[0] || {}).tag || '')) k--;
+        const toks = tokensOf(k);
+        return toks.some(t => /^(VA|XSA|VCP|VCN)/.test(t.tag)) && !toks.some(t => /^(VV|XSV)/.test(t.tag));
+    };
+    words.forEach((w, i) => {
+        if (w.lang !== 'ko') return;
+        const next = words[i + 1] && sid[i + 1] === sid[i] && words[i + 1].lang === 'ko' ? words[i + 1] : null;
+        const prev = i > 0 && sid[i - 1] === sid[i] && words[i - 1].lang === 'ko' ? words[i - 1] : null;
+        // 1) '쉽지 않다'를 '쉬지 않다'로 친 것 (그 길이 쉬지 않던가요 → 쉽지). '쉬지 않고 일했다'처럼 바른 글은 AI가 크게 거른다
+        if (/^쉬지$/.test(w.core) && next && /^(않|못)/.test(next.core)) {
+            out.push({ i, to: '쉽지', why: "'어렵지 않다'는 뜻이면 '쉽지 않다'입니다", margin: 2.5 });
+            return;
+        }
+        // 2) 꾸며 주는 말 + 명사 + 풀이말인데 '-을/-를'이 빠진 것 (한 장면 기록합니다 → 한 장면을 기록합니다)
+        //    말하듯 쓴 글(이 책 읽어 봤니?)은 조사를 흔히 빼므로, 문장이 '-습니다·-ㅂ니다'로 끝나는 글만 본다
+        if (prev && next && DETERMINER.test(prev.core) && w.core.length >= 2 && /(니다|니까)$/.test(sentenceEnd(i))) {
+            const mine = tokensOf(i), theirs = tokensOf(i + 1);
+            const bareNoun = mine.length === 1 && /^NN[GP]/.test(mine[0].tag);
+            const verb = theirs.length > 0 && (/^VV/.test(theirs[0].tag) || (theirs.length > 1 && /^NNG/.test(theirs[0].tag) && /^XSV/.test(theirs[1].tag)));
+            if (bareNoun && verb) {
+                const to = w.core + (hasJong(w.core[w.core.length - 1]) ? '을' : '를');
+                out.push({ i, to, why: "뒤에 오는 풀이말의 목적어이므로 '-을/-를'을 붙입니다", margin: 4 });
+                return;
+            }
+        }
+        // 3) 사람 + '-이/-가' + 그 사람의 것(편지·말씀·설교 …) + '-은/-는' → '-의' (바울이 편지는 → 바울의 편지는)
+        //    '그가 말은 잘한다'·'철수가 키는 크다'처럼 바른 글도 있어, 사람 이름(Kiwi의 고유 명사)·'-님'·가족만, 그 사람의 것인 말 앞에서만 본다
+        //    또 문장이 형용사·'이다'로 끝날 때만 — '할머니가 찬양은 잘 부르신다'처럼 그 사람이 하는 일(동사)이면 '-가'가 맞다
+        const m = /^(.+?)(이|가)$/.exec(w.core);
+        if (m && next && POSSESSED.test(next.core) && hasJong(m[1][m[1].length - 1]) === (m[2] === '이') && describes(i)) {
+            const toks = tokensOf(i);
+            const person = (toks.length >= 2 && /^NNP/.test(toks[0].tag) && toks[0].str === m[1]) || /님$/.test(m[1]) || FAMILY.test(m[1]);
+            if (person) out.push({ i, to: m[1] + '의', why: "뒷말을 꾸며 '누구의 무엇'을 나타내므로 '-의'를 씁니다", margin: 2 });
+        }
+    });
+    return out;
 }
 
 // 붙여 쓸지 볼 뒷말 (-하다·-되다·-스럽다·-답다 따위와 조사로 시작하는 말, '만에'·'것도')

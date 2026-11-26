@@ -47,7 +47,8 @@ export function qwenDecide(pending, lm, base, scores, { addMargin = 3, spellMarg
         const s = scores['p' + k];
         if (!s) return;
         // 사전에 없는 말의 철자 후보는 흔한 말 쪽으로 기울기 쉬워 더 큰 차이를 바란다
-        const need = p.type === '맞춤법' ? spellMargin : addMargin;
+        // (문맥 후보는 무리마다 시험으로 정한 기준값을 함께 넘긴다 — spell-lm.js contextCandidates)
+        const need = p.margin != null ? p.margin : p.type === '맞춤법' ? spellMargin : addMargin;
         let best = -1;
         p.options.forEach((o, i) => { if (s[i + 1] - s[0] >= need && (best < 0 || s[i + 1] > s[best + 1])) best = i; });
         if (best < 0) return;
